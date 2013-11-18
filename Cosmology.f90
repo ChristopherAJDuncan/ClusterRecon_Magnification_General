@@ -70,7 +70,7 @@ contains
     if(present(cos)) then
        Internal_Cos = Cos
     else
-       print *, 'Using LCDM to get Distances'
+       if(Verbose) print *, 'Using LCDM to get Distances'
        Internal_Cos = LCDM()
     end if
 

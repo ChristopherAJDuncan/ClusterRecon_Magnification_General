@@ -5,6 +5,124 @@ module Mass_Estimation
 
 contains
 
+  subroutine Mass_Estimate_Circular_Aperture_Catalogue(Cat, Profile, Aperture_Positions, Aperture_Radiuses, global_average_size)
+    use Catalogues; use Statistics, only: mean_discrete, get_variance; use Cosmology, only:angular_diameter_distance_fromRedshift
+    !--Aperture Positions must be in (/RA, Dec/), and Aperture Radiuses in DEGREES--!
+    !--Each Galaxy must have a redshift assigned, and physical size associated with it--!
+    type(Catalogue),intent(in)::Cat
+    integer::Profile !-0:Flat, 1:SIS, 2:NFW-!
+    real(double), intent(in)::Aperture_Positions(:,:), Aperture_Radiuses(:)
+    real(double),intent(in),optional::Global_Average_Size
+
+    !--Internal Declarations--!
+    real(double),allocatable::iAperture_Radiuses(:)
+    real(double)::field_mean_size
+    integer:: Ap, Gal
+    real(double),allocatable::Galaxy_Convergence(:)
+    real(double)::Convergence_Error, Mean_Convergence
+
+    real(double)::Projected_Mass(size(Aperture_Positions,1)), Error_Projected_Mass(size(Aperture_Positions,1))
+
+    real(double),allocatable::Weight(:,:), Sigma_Crit(:), Area(:), Renormalisation(:,:)
+    real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Default_Source_Redshift = 1.e0_double, Source_Redshift
+
+    !---TESTING DECLARATIONS--!
+    integer::nNoRedshift
+
+    allocate(iAperture_Radiuses(size(Aperture_Positions,1)))
+    if(size(Aperture_Radiuses) == 1) then
+       iAperture_Radiuses = Aperture_Radiuses(1)
+    elseif(size(Aperture_Radiuses) /= size(iAperture_Radiuses)) then
+       STOP 'Mass_Estimate_Circular_Aperture_Catalogue - FATAL ERROR - Error assigning Aperture_Radiuses internal'
+    else
+       iAperture_Radiuses = Aperture_Radiuses
+    end if
+
+    if(any( (/0,1,2/) == Profile)==.false.) STOP 'Mass_Estimate_Circular_Aperture_Catalogue - FATAL ERROR - Supported profiles are 0:Flat, 1:SIS, 2:NFW.'
+    
+    if(present(global_average_size)) then
+       field_mean_size = global_average_size
+    else
+       print *, 'Calculating the mass in circular aperture using mean physical size of the full catalogue'
+       field_mean_size = mean_discrete(Cat%Physical_Sizes)
+    end if
+    
+    !--Get Convergence for each galaxy--!
+    allocate(Galaxy_Convergence(size(Cat%Physical_Sizes))); Galaxy_Convergence = 0.e0_double
+    do Gal = 1, size(Cat%Physical_Sizes)
+       Galaxy_Convergence(Gal) = (Cat%Physical_Sizes(Gal)/field_mean_size) - 1.e0_double
+    end do
+
+    Mean_Convergence = mean_discrete(Galaxy_Convergence)
+    Convergence_Error = get_variance(Galaxy_Convergence, Galaxy_Convergence, Mean_Convergence, Mean_Convergence)
+
+    print *, 'Mean/Varaince [Convergence]:', Mean_Convergence, dsqrt(Convergence_Error)
+
+    !--Calculate Sigma_Critical for each galaxy, and area in each aperture--!
+    nNoRedshift = 0
+    allocate(Sigma_Crit(size(Cat%Redshift)))
+    D_l = angular_diameter_distance_fromRedshift(Lens_Redshift) !-In units of Mpc/h                                                                                                                                                         
+    do Gal = 1, size(Cat%Redshift) 
+       Source_Redshift = Cat%Redshift(Gal)
+       if(Cat%Redshift(Gal) < 0.e0_double) then
+          nNoRedshift = nNoRedshift + 1
+          Source_Redshift = Default_Source_Redshift
+       end if
+          
+       D_s = angular_diameter_distance_fromRedshift(Source_Redshift)
+
+       D_ls = D_s-D_l
+       Sigma_Crit(Gal) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!      
+    end do
+    allocate(Area(size(Aperture_Positions,1))); Area = 0.e0_double
+    Area = 3.142e0_double*( (D_l*1.746e-2_double*iAperture_Radiuses)**2.e0_double )
+    
+    print *, 'Mass_Estimate_Circular_Aperture_Catalogue - ', nNoRedshift, ' galaxies were assigned the default redshift information of ', Default_Source_Redshift, ' as no redshift information was input'
+
+    allocate(Weight(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Weight = 0.e0_double
+    allocate(Renormalisation(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Renormalisation = 0.e0_double
+    Projected_Mass = 0.e0_double
+    do Ap = 1, size(Aperture_Positions,1)
+       do Gal = 1, size(Cat%Physical_Sizes)
+          if( distance_between_points( (/Cat%RA(Gal), Cat%Dec(Gal)/), Aperture_Positions(Ap,:) ) > iAperture_Radiuses(Ap) ) cycle
+          select case(Profile)
+          case(0)
+             !--Flat Mass Profile--! !---CHECK THIS MATHS--!
+             Projected_Mass(Ap) = Projected_Mass(Ap) + (Galaxy_Convergence(Gal)/Sigma_Crit(Gal))
+             Renormalisation(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal)*Sigma_Crit(Gal))
+             Weight(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal))
+          case default
+             STOP 'Mass_Estimate_Circular_Aperture_Catalogue - FATAL ERROR - Supported profiles are 0:Flat'
+          end select
+       end do
+
+       print *, 'Done Aperture:', Ap, ', of', size(Aperture_Positions,1)
+    end do
+    
+    !--Renormalise--!
+    select case(Profile)
+    case(0)
+       do Ap = 1, size(Projected_Mass)
+          if(sum(Renormalisation(Ap,:)) /= 0.e0_double) then
+             Projected_Mass(Ap) =  Projected_Mass(Ap)/sum(Renormalisation(Ap,:))
+             Error_Projected_Mass(Ap) = Area(Ap)*dsqrt(Convergence_Error)/sum(Renormalisation(Ap,:))
+          else
+             STOP 'Mass_Estimate_Circular_Aperture_Catalogue - Renormalisation (and Error) for Aperture', Ap,' Renormalisation is zero'
+          end if
+       end do
+    end select
+
+    !--Convert from projected Surface Mass Density to Mass--!
+    print *, 'Multiplying by Area:'
+    Projected_Mass = Area*Projected_Mass
+
+    do Ap = 1, size(Projected_Mass)
+       print *, 'Mass for cluster:', Ap, ' is:', Projected_Mass(Ap), '+-', Error_Projected_Mass(Ap)
+    end do
+
+  end subroutine Mass_Estimate_Circular_Aperture_Catalogue
+    
+
   subroutine Mass_Estimate_CircularAperture(Convergence_Map, Error_Convergence, x, y, Aperture_Positions, Aperture_Radiuses, Masses, Error_Masses, Source_Redshift, Convergence_Map_Occupation)
     use cosmology
     !-Returns the mass estimate with a circular Aperture--!

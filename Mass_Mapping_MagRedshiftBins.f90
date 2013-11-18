@@ -136,6 +136,9 @@ program Mass_Mapping_MagBins
         
         
         !-----Mass Estimation---!                                                                            
+        call Mass_Estimate_Circular_Aperture_Catalogue(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), 0, Cluster_Pos, (/1.e0_double/60.e0_double/))
+        PRINT *, 'Reading:'
+        READ(*,*)
         call Mass_Estimate_CircularAperture(Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), Convergence_Map_Occupation = nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:))
         
         print *, '---------------------------------------------------------------------------------------------------------------------'
