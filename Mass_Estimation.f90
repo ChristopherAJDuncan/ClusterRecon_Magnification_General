@@ -28,6 +28,7 @@ contains
 
     !---TESTING DECLARATIONS--!
     integer::nNoRedshift
+    integer, dimension(size(Aperture_Positions,1)):: nGal_inAperture
 
     allocate(iAperture_Radiuses(size(Aperture_Positions,1)))
     if(size(Aperture_Radiuses) == 1) then
@@ -79,12 +80,14 @@ contains
     
     print *, 'Mass_Estimate_Circular_Aperture_Catalogue - ', nNoRedshift, ' galaxies were assigned the default redshift information of ', Default_Source_Redshift, ' as no redshift information was input'
 
+    nGal_inAperture = 0
     allocate(Weight(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Weight = 0.e0_double
     allocate(Renormalisation(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Renormalisation = 0.e0_double
     Projected_Mass = 0.e0_double
     do Ap = 1, size(Aperture_Positions,1)
        do Gal = 1, size(Cat%Physical_Sizes)
           if( distance_between_points( (/Cat%RA(Gal), Cat%Dec(Gal)/), Aperture_Positions(Ap,:) ) > iAperture_Radiuses(Ap) ) cycle
+          nGal_inAperture(Ap) = nGal_inAperture(Ap) + 1
           select case(Profile)
           case(0)
              !--Flat Mass Profile--! !---CHECK THIS MATHS--!
@@ -97,6 +100,7 @@ contains
        end do
 
        print *, 'Done Aperture:', Ap, ', of', size(Aperture_Positions,1)
+       print *, 'Aperture:', Ap, ' had ', nGal_inAperture(Ap), ' galaxies within the Aperture'
     end do
     
     !--Renormalise--!
@@ -107,14 +111,16 @@ contains
              Projected_Mass(Ap) =  Projected_Mass(Ap)/sum(Renormalisation(Ap,:))
              Error_Projected_Mass(Ap) = Area(Ap)*dsqrt(Convergence_Error)/sum(Renormalisation(Ap,:))
           else
-             STOP 'Mass_Estimate_Circular_Aperture_Catalogue - Renormalisation (and Error) for Aperture', Ap,' Renormalisation is zero'
+             print *, 'Aperture:', Ap, ' nGal in Aperture:', nGal_inAperture(Ap)
+             print*, 'Mass_Estimate_Circular_Aperture_Catalogue - Renormalisation (and Error) for Aperture: Renormalisation is zero. Enter to continue, Ctrl C to stop'
+             read(*,*)
           end if
        end do
     end select
 
     !--Convert from projected Surface Mass Density to Mass--!
     print *, 'Multiplying by Area:'
-    Projected_Mass = Area*Projected_Mass
+!    Projected_Mass = Area*Projected_Mass
 
     do Ap = 1, size(Projected_Mass)
        print *, 'Mass for cluster:', Ap, ' is:', Projected_Mass(Ap), '+-', Error_Projected_Mass(Ap)
@@ -317,7 +323,7 @@ contains
                    Sum_Weight = Sum_Weight + 1.e0_double/((Error_Convergence(x_rad_index,y_rad_index)*Error_Convergence(x_rad_index,y_rad_index)))
                 end if
                 !--ERROR??--!
-                if(i == 1 .and. x_rad_index == maxval((/x_index-x_index_range,1/)) .and. y_rad_index == maxval((/y_index-y_index_range,1/)) ) print *, 'I am not calculating errors on inverse varaince weighting'
+                if(i == 1 .and. x_rad_index == maxval((/x_index-x_index_range,1/)) .and. y_rad_index == maxval((/y_index-y_index_range,1/)) ) print *, 'I am not calculating errors on inverse variance weighting'
              else
                 !Masses(i) = Masses(i) + A_pix*(1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit*Convergence_Map(x_rad_index,y_rad_index)
                 !if(Convergence_Map_Occupation(x_rad_index,y_rad_index) > 0) 

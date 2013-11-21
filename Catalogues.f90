@@ -99,12 +99,17 @@ module Catalogues
       !-Construct Expected Occupation-!                                                                                                                                                                                    
       do i = 1, size(Limits,1)
          Expected_Occupation(i) = count(Cat%Mag <= Limits(i,2)) - count(Cat%Mag <= Limits(1,1)) - sum(Expected_Occupation(:i))
+         Expected_Occupation(size(Expected_Occupation)) = Expected_Occupation(size(Expected_Occupation)) + count(Cat%Mag==Limits(size(Limits,1),2))
          call Catalogue_Construct(BCat%Cat(i), Expected_Occupation(i))
       end do
       
       do c = 1, size(Cat%Sizes)
          do i =1, size(Limits,1)
             if( (Cat%Mag(c) > Limits(i,1)) .and. (Cat%Mag(c) <= Limits(i,2)) ) then
+               Occupation(i) = Occupation(i) + 1
+               call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
+            end if
+            if(i == size(Limits,1) .and. Cat%Mag(c) == Limits(i,2)) then
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
             end if
@@ -150,6 +155,9 @@ module Catalogues
       !-Construct Expected Occupation-!                                                                                                                                                                                                                                       
       do i = 1, size(Limits,1)
          Expected_Occupation(i) = count(Cat%Redshift <= Limits(i,2)) - count(Cat%Redshift <= Limits(1,1))  - sum(Expected_Occupation(:i))
+         !--Edit--!
+         Expected_Occupation(size(Expected_Occupation)) = Expected_Occupation(size(Expected_Occupation)) + count(Cat%Redshift==Limits(size(Limits,1),2))
+         !--------!
          call Catalogue_Construct(BCat%Cat(i), Expected_Occupation(i))
       end do
       
@@ -159,8 +167,13 @@ module Catalogues
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
             end if
+            if(i == size(Limits,1) .and. Cat%Redshift(c) == Limits(i,2)) then
+               Occupation(i) = Occupation(i) + 1
+               call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
+            end if
          end do
       end do
+      !--Assign all the galaxies at the upper boundary to the highest redshift bin--!
 
       do i = 1, size(Limits,1)
          if(Occupation(i) /= Expected_Occupation(i)) print *, 'Expected Error (FATAL): bin_catalogue_by_redshift: Occupation of a bin is not equal to the expected occupation', Occupation(i), Expected_Occupation(i)
@@ -601,6 +614,7 @@ module Catalogues
       !--Read into 2D format--!
       call ReadIn(Cat_2D, filename  = trim(adjustl(Cat_Filename)), tabbed = .false., header_label = '#')
       !--This outputs as Cat2D(cols, rows), so 2nd dimension lists all galaxies in catalogue--!
+      print *, 'Catalogue read in from:', trim(adjustl(Cat_Filename))
 
       print *, 'Constructing Catalogue with:', size(Cat_2d,2), ' entries'
 
@@ -840,11 +854,11 @@ module Catalogues
       
       integer::iStatus
 
-      if(Index > size(Cat%mag)) then; print *, 'Catalogue_Assign_byGalaxy - Index Entered not valid - Too Large', Index, size(Cat%Mag); iStatus = -1; return;
+      if(Index > size(Cat%RA)) then; print *, 'Catalogue_Assign_byGalaxy_byCatalogue - Index Entered not valid - Too Large', Index, size(Cat%RA); iStatus = -1; return;
       elseif(Index <= 0) then; print *, 'Catalogue_Assign_byGalaxy - Index Entered not valid - Too Small'; iStatus = -1; return;
       end if
 
-      if(Index_Ref > size(Cat_Ref%mag)) then; print *, 'Catalogue_Assign_byGalaxy - Index_Ref Entered not valid - Too Large'; iStatus = -1; return;
+      if(Index_Ref > size(Cat_Ref%RA)) then; print *, 'Catalogue_Assign_byGalaxy - Index_Ref Entered not valid - Too Large'; iStatus = -1; return;
       elseif(Index_Ref <= 0) then; print *, 'Catalogue_Assign_byGalaxy - Index_Ref Entered not valid - Too Small'; iStatus = -1; return;
       end if
 

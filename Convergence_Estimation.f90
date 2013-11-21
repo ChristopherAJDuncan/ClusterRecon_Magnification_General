@@ -66,6 +66,8 @@ contains
     !-Smoothing Scale in Arcminutes-!
     real(double)::Smoothing_Scale = 0.75e0_double
 
+    integer::callcount = 0
+
     INTERFACE
          subroutine Average_Size_in_RA_Dec_Grid(cat, RAGrid, DecGrid, AverageSize, OccupationGrid, KappaEst, Smoothed_OccupationGrid, Size_Type, beta_correction)
          USE CATALOGUES, ONLY:CATALOGUE; USE PARAM_TYPES
@@ -81,6 +83,8 @@ contains
           real(double), intent(inout),optional::beta_correction !-If present, beta correction is applied. If beta>1000, it is recalculated from the catalogue with a straight line fit to all points.  
        end subroutine Average_Size_in_RA_Dec_Grid
     END INTERFACE
+
+    callcount = callcount + 1
 
     if(allocated(RAGrid)==.false. .or. allocated(DecGrid)==.false.) STOP 'FATAL ERROR - Average_Size_in_RA_Dec_Grid - Input RA or Dec grid are not allocated, stopping'
 
@@ -111,7 +115,7 @@ contains
        !call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_size = AverageSize)
     end if
 
-    print *, 'I AM NOT SMOOTHING'
+    if(callcount == 1) print *, 'I AM NOT SMOOTHING'
 
     if(present(Smoothed_OccupationGrid)) then
        allocate(Smoothed_OccupationGrid(size(OccupationGrid,1), size(OccupationGrid, 2))); Smoothed_OccupationGrid = 1.e0_double*OccupationGrid
@@ -702,6 +706,13 @@ contains
 
     print *, 'Calculating Beta from fit across whole catalogue'
 
+    print *, 'Cat Mag:', allocated(Cat%Mag), size(Cat%Mag), all(Cat%Mag==0.e0_double)
+    if(allocated(Cat%Mag)== .false. .or. size(Cat%Mag) == 0 .or. all(Cat%Mag==0.e0_double)) then
+       print *, 'calculate_beta_fromCatalogue - No magnitude information, returning zero'
+       beta = 0.e0_double
+       return
+    end if
+
     !-Create Magnitude Bins, roughly as the same number of galxies in each bin. Ideally, nBin shoud iterate towards a value which balances low noise with enough data points-!
     call Calculate_Bin_Limits_by_equalNumber(Cat%Mag, nMag, Mag_Bin)
     Red_Bin(1,:) = (/ minval(Cat%Redshift), maxval(Cat%Redshift) /)
@@ -727,6 +738,12 @@ contains
     real(double),allocatable::SMR(:,:), SMR_Error(:,:)
 
     print *, 'Calculating beta from Catalogue, via binned Magnitude and Redshift Method'
+
+    if(allocated(Cat%Mag)== .false. .or. size(Cat%Mag) == 0 .or. all(Cat%Mag==0.e0_double)) then
+       print *, 'calculate_beta_fromCatalogue - No magnitude information, returning zero'
+       beta = 0.e0_double
+       return
+    end if
 
     allocate(SMR(size(Mag_Bins,1), size(Red_Bins,1))); SMR = 0.e0_double
     allocate(SMR_Error(size(Mag_Bins,1), size(Red_Bins,1))); SMR_Error = 0.e0_double

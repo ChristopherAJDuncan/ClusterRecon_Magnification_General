@@ -3,8 +3,8 @@ program Mass_Mapping_MagBins
   use Catalogues; use Param_Types; use Convergence_Estimation; use Statistics, only: get_variance, mean_discrete; use MAss_Estimation; use Size_Histograms, only:Size_Histogram_Plotter, Size_Histogram_Catalogue, Size_Histogram_Circular_Aperture
   implicit none
 
-  character(120)::Catalogue_Filename = 'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
-  integer,dimension(13)::Catalogue_Cols = (/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!       
+  character(120)::Catalogue_Filename = 'Simulations/Output/Mock_Catalogue.cat'!'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
+  integer,dimension(13)::Catalogue_Cols = (/-1, 1, 2,-1,-1,-1,-1,-1,-1,3,-1,-1,4/)!(/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!       
 
   character(120)::Output_Directory = 'Mass_Mapping_MagRedshiftBins_Output/'
   character(120)::Output_Filename_AvSize = 'Average_Size_in_RA_Dec_Grid.dat'
