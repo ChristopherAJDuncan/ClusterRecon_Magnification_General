@@ -1,10 +1,14 @@
 !---Code for the estiamtion of the convergence from Binning by ***ABSOLUTE** magnitude---!
 program Mass_Mapping_MagBins
-  use Catalogues; use Param_Types; use Convergence_Estimation; use Statistics, only: get_variance, mean_discrete; use MAss_Estimation; use Size_Histograms, only:Size_Histogram_Plotter, Size_Histogram_Catalogue, Size_Histogram_Circular_Aperture
+  use Catalogues; use Param_Types; use Convergence_Estimation; use Statistics, only: variance_discrete, mean_discrete; use MAss_Estimation; use Size_Histograms, only:Size_Histogram_Plotter, Size_Histogram_Catalogue, Size_Histogram_Circular_Aperture
   implicit none
 
-  character(120)::Catalogue_Filename = 'Simulations/Output/Mock_Catalogue.cat'!'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
-  integer,dimension(13)::Catalogue_Cols = (/-1, 1, 2,-1,-1,-1,-1,-1,-1,3,-1,-1,4/)!(/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!       
+  character(120)::Catalogue_Directory = 'Simulations/Output/'
+  character(120)::Catalogue_Filename = 'Mock_Catalogue.cat'!'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
+  character(120):: Redshift_Catalogue_Directory, Redshift_Catalogue_Filename
+  integer,dimension(13)::Catalogue_Cols, Redshift_Catalogue_Cols != (/-1, 1, 2,-1,-1,-1,-1,-1,-1,3,-1,-1,4/)!(/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!       
+
+  logical:: Use_Redshift_Sample = .false.
 
   character(120)::Output_Directory = 'Mass_Mapping_MagRedshiftBins_Output/'
   character(120)::Output_Filename_AvSize = 'Average_Size_in_RA_Dec_Grid.dat'
@@ -22,14 +26,16 @@ program Mass_Mapping_MagBins
   character(120)::Size_Histogram_Filename
   logical::here
 
-  type(Catalogue)::Cat
+  real(double)::Default_z = 1.4e0_double !-1.4 given in Heymasn et al 2008, Sec 3.2-!
 
-  integer::nRA = 128, nDec = 128 !-Default 256-!
+  type(Catalogue)::Cat, Redshift_Cat
+
+  integer::nRA = 256, nDec = 256 !-Default 256-!
 
   !--Redshift Binning Decalrations--!                                                                                                                                                                                      
   real(double)::lmag, hmag
   type(Binned_Catalogue),allocatable:: BBCat(:)
-  integer, parameter::nMagBin = 1, nRedBin = 1 !5, 4
+  integer, parameter::nMagBin = 5, nRedBin = 1 !5, 4
   real(double),allocatable:: MagBinLimits(:,:), RedshiftLimits(:,:)
   character::BinString
   !----------------------------------!                                                                                                                                                                                                        
@@ -45,9 +51,15 @@ program Mass_Mapping_MagBins
 
   !--Cluster Information--!                                                                                                                                                                                                                   
   real(double),allocatable::Cluster_Pos(:,:) !-Defines Center of Apertures for Mass Estimation-!                                                                                                                                              
-  real(double),allocatable::Cluster_Masses(:), Cluster_Masses_Error(:) !-Cluster-!       
+  real(double),allocatable::Cluster_Masses_Pixel(:,:,:), Cluster_Masses_Error_Pixel(:,:,:) !-Cluster-!       
+  real(double),allocatable::Cluster_Masses_Shift(:,:,:), Cluster_Masses_Error_Shift(:,:,:), Recombined_Cl_Masses_Shift(:), Recombined_Cl_Masses_Error_Shift(:)
+  real(double),allocatable::Cluster_Masses_GalaxyML(:,:,:), Cluster_Masses_Error_GalaxyML(:,:,:), Recombined_Cl_Masses_GalaxyML(:), Recombined_Cl_Masses_Error_GalaxyML(:)
 
-  integer::Bin_Loop_Z, Bin_Loop_M, i
+  character(10):: Mass_String, Error_Mass_String !--Formatted Output--!
+
+  logical::do_Pixel_Based_Method = .false.
+
+  integer::Bin_Loop_Z, Bin_Loop_M, i, j
   integer::Occupation_limit = 100.0
 
   allocate(Cluster_Pos(4,2)); Cluster_Pos = 0.e0_double
@@ -62,33 +74,49 @@ program Mass_Mapping_MagBins
      STOP
   END if
   
-  inquire(file = Catalogue_Filename, exist = here)
-  if(here == .false.) then
-     print *, 'Catalogue:', trim(adjustl(Catalogue_Filename)), ' does not exist, stopping..'
-     STOP
-  end if
  
-  !--Read in the Catalogue with reshifts--!                                                                                                                                                                  
-  call catalogue_readin(Cat, Catalogue_Filename, 'FR', Catalogue_Cols)
-  call PSF_Correction(Cat, 1)
+  !--Read in the Catalogue with reshifts--!                                                                                                     
+  !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks!
+  call common_Catalogue_directories(4, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+  print *, 'Using COls:', Catalogue_Cols
+  call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+
+  !--Read in Redshift Catalogue--!
+  if(use_Redshift_Sample) then
+     call common_Catalogue_directories(2, Redshift_Catalogue_Directory, Redshift_Catalogue_Filename,Redshift_Catalogue_Cols)
+     call catalogue_readin(Redshift_Cat, trim(adjustl(Redshift_Catalogue_Directory))//trim(adjustl(Redshift_Catalogue_Filename)), ' ', Redshift_Catalogue_Cols)
+     
+     !--Combine Catalogues--!
+     call get_redshift_Information_combine_Catalogues(Cat, Redshift_Cat, Default_z)
+  end if
+
+!  call Clip_Sizes(Cat, (/0.e0_double, 20.e0_double/) )
+  print *, 'Convertin physica sizes'
+  call convert_Size_from_Pixel_to_Physical(Cat)
+  print *, 'Done'
+!  call PSF_Correction(Cat, 1)
   call Cut_By_PhotoMetricRedshift(Cat, 0.21e0_double) !--Cut out foreground--!     
 
   if(get_Size_Histograms) then
      call Size_Histogram_Catalogue(Cat%Physical_Sizes, trim(adjustl(Output_Directory))//'Size_Histogram_FullCatalogue.dat')
      call Size_Histogram_Plotter(trim(adjustl(Output_Directory))//'Size_Histogram_FullCatalogue.dat')
   end if
-
   
   print *, 'There are:', count(Cat%Redshift < 0.e0_Double), ' unassigned redshifts in the main catalogue'
 
   call Calculate_Bin_Limits_by_equalNumber(Cat%Redshift, nRedBin, RedshiftLimits)
   call Calculate_Bin_Limits_by_equalNumber(Cat%Mag, nMagBin, MagBinLimits)
   Verbose = .true.
+  do i = 1, nMagBin
+     print *, 'Mag Bins:', i, ' :', MagBinLimits(i,:)
+  end do
   call bin_catalogue_by_Redshift_and_Magnitude(Cat, RedshiftLimits, MagBinLimits, BBCat)
+
+
   Verbose = .false.
 
   !--Set up beta measurement--!
-  beta  =1.e4_double
+  beta  =0.e0_double!4_double
 
   !--Set up _Bin arrays, which contain all the information--!
   allocate(AverageSize_Bin(nRedBin,nMagBin, nRA+1, nDec+1)); AverageSize_Bin = 0.e0_double
@@ -100,6 +128,13 @@ program Mass_Mapping_MagBins
   allocate(Error_Kappa_Bin(nRedBin,nMagBin, nRA+1, nDec+1)); Error_Kappa_Bin = 1.e30_double
 
   call construct_RA_Dec_Gridding(Cat, nRA, nDec, RAGrid, DecGrid)
+
+  allocate(Cluster_Masses_GalaxyML(nRedBIn,nMagBin,size(Cluster_Pos,1))); Cluster_Masses_GalaxyML = -1.e0_double
+  allocate(Cluster_Masses_Error_GalaxyML(nRedBIn,nMagBin,size(Cluster_Pos,1))); Cluster_Masses_Error_GalaxyML = -1.e0_double
+
+  allocate(Cluster_Masses_Shift(nRedBIn,nMagBin,size(Cluster_Pos,1))); Cluster_Masses_Shift = -1.e0_double
+  allocate(Cluster_Masses_Error_Shift(nRedBIn,nMagBin,size(Cluster_Pos,1))); Cluster_Masses_Error_Shift = -1.e0_double
+
   do Bin_Loop_Z = 1, nRedBin
      do Bin_Loop_M = 1, nMagBin
 
@@ -114,105 +149,163 @@ program Mass_Mapping_MagBins
 
         !--Do not evaluate if there are too few galaxies in the sample--!
         if(BBCat(Bin_Loop_Z)%Occupation(Bin_Loop_M) <= Occupation_Limit) cycle
-        
-        mean_size_global = global_mean_size(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), trim(adjustl(Bin_by_Size_Type)))
-        print *, '      Global Mean Size:', mean_size_global
-        print *, '      Variance in Sizes:', size_variance(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M),  trim(adjustl(Bin_by_Size_Type)), mean_size_global)
-        
-        call Average_Size_in_RA_Dec_Grid(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), RAGrid, DecGrid, AvSize, OccupationGrid = nGrid, KappaEst = Kappa, Smoothed_OccupationGrid = Smoothed_nGrid, Size_Type = trim(adjustl(Bin_by_Size_Type)), beta_correction = beta(Bin_Loop_M, Bin_Loop_Z))
-        
-        call Average_Size_in_RA_Dec_Grid_Errors(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), mean_size_global, RAGrid ,DecGrid, Error_AvSize, Error_Kappa, by_Size_Type = trim(adjustl(Bin_by_Size_Type)))
+
+        call Mass_Estimate_Circular_Aperture_byGalaxy(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), 0, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses_GalaxyML(Bin_Loop_Z,Bin_Loop_M,:), Cluster_Masses_Error_GalaxyML(Bin_Loop_Z,Bin_Loop_M,:))
+!        call Mass_Estimate_Circular_Aperture_byShift(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), Cluster_Pos, (/1.e0_double/60.e0_double/))
+        call Mass_Estimate_Circular_Aperture_byShift(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), Cluster_Pos, (/1.e0_double/60.e0_double/),Cluster_Masses_Shift(Bin_Loop_Z,Bin_Loop_M,:), Cluster_Masses_Error_Shift(Bin_Loop_Z,Bin_Loop_M,:))
+
+         print *, '---------------------------------------------------------------------------------------------------------------------'
+         print *, 'Cluster Masses (using Galaxy ML) are (in M_Sun/h):'
+        do j = 1, size(Cluster_Masses_Shift,3)
+           write(Mass_String, '(e8.2)') Cluster_Masses_GalaxyML(Bin_Loop_Z,Bin_Loop_M,j); write(Error_Mass_String, '(e8.2)') Cluster_Masses_Error_GalaxyML(Bin_Loop_Z,Bin_Loop_M,j)
+           print *, 'Cluster:', j, ' has mass: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+        end do
+
+         print *, 'Cluster Masses (using Shift) are (in M_Sun/h):'
+         do j = 1, size(Cluster_Masses_Shift,3)
+            write(Mass_String, '(e8.2)') Cluster_Masses_Shift(Bin_Loop_Z,Bin_Loop_M,j); write(Error_Mass_String, '(e8.2)') Cluster_Masses_Error_Shift(Bin_Loop_Z,Bin_Loop_M,j)
+           print *, 'Cluster:', j, ' has mass: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+        end do
+         print *, '---------------------------------------------------------------------------------------------------------------------'
+         
+         write(BinString, '(I1)') Bin_Loop_Z
+         Bin_Output_Directory = trim(adjustl(Output_Directory))//'RedshiftBin'//trim(adjustl(BinString))//'/'
+         call system('mkdir '//trim(adjustl(Bin_Output_Directory)))
+         write(BinString, '(I1)') Bin_Loop_M
+         Bin_Output_Directory = trim(adjustl(Bin_Output_Directory))//trim(adjustl(BinString))//'/'
+         call system('mkdir '//trim(adjustl(Bin_Output_Directory)))
+            
 
 
-        !--Store for each bin--!
-        AverageSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) =  AvSize
-        Error_AvSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Error_AvSize
-        Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Kappa
-        Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Error_Kappa
-        nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:) = nGrid
-        Smoothed_nGrid_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Smoothed_nGrid
-        
-        deallocate(AvSize, Error_AvSize, Kappa, Error_Kappa, nGrid, Smoothed_nGrid)
-        
-        
-        !-----Mass Estimation---!                                                                            
-        call Mass_Estimate_Circular_Aperture_Catalogue(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), 0, Cluster_Pos, (/1.e0_double/60.e0_double/))
-        PRINT *, 'Reading:'
-        READ(*,*)
-        call Mass_Estimate_CircularAperture(Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), Convergence_Map_Occupation = nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:))
-        
-        print *, '---------------------------------------------------------------------------------------------------------------------'
-        print *, 'Cluster Masses are (in 10^18 M_Sun/h):'
-        print *, 'A901a:', Cluster_Masses(1), ' +- ', Cluster_Masses_Error(1)
-        print *, 'A901b:', Cluster_Masses(2),' +- ',Cluster_Masses_Error(2)
-        print *, 'A902:', Cluster_Masses(3),' +- ',Cluster_Masses_Error(3)
-        print *, 'SW Group:', Cluster_Masses(4),' +- ',Cluster_Masses_Error(4)
-        print *, '---------------------------------------------------------------------------------------------------------------------'
-        
-        Cluster_Masses = 0.e0_double; Cluster_Masses_Error = 0.e0_double
-        deallocate(Cluster_Masses, Cluster_Masses_Error)
-        
-        !--Output and Plotting--!
-        write(BinString, '(I1)') Bin_Loop_Z
-        Bin_Output_Directory = trim(adjustl(Output_Directory))//'RedshiftBin'//trim(adjustl(BinString))//'/'
-        call system('mkdir '//trim(adjustl(Bin_Output_Directory)))
-        write(BinString, '(I1)') Bin_Loop_M
-        Bin_Output_Directory = trim(adjustl(Bin_Output_Directory))//trim(adjustl(BinString))//'/'
-        call system('mkdir '//trim(adjustl(Bin_Output_Directory)))
-        
-        Output_FilenameDir_AvSize = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_AvSize))
-        Output_FilenameDir_KappaEst = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaEst))
-        Output_FilenameDir_KappaError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaError))
-        Output_FilenameDir_SizeError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SizeError))
-        Output_FilenameDir_OccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_OccGrid))
-        Output_FilenameDir_SmoothedOccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SmoothedOccGrid))
-        
-        call Output_toFile(RAGrid, DecGrid, AverageSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_AvSize, Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_KappaEst, Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_KappaError, Error_AvSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_SizeError, nGrid_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_OccGrid, Smoothed_nGrid_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_SmoothedOccGrid)
-        if(plot_Bin) call Run_Plotting_Routine(Output_FilenameDir_AvSize, Output_FilenameDir_KappaEst, Output_FilenameDir_KappaError, Output_FilenameDir_OccGrid)
+         if(do_Pixel_Based_Method) then
+            mean_size_global = global_mean_size(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), trim(adjustl(Bin_by_Size_Type)))
+            print *, '      Global Mean Size:', mean_size_global
+            print *, '      Variance in Sizes:', size_variance(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M),  trim(adjustl(Bin_by_Size_Type)), mean_size_global)
+            
+            call Average_Size_in_RA_Dec_Grid(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), RAGrid, DecGrid, AvSize, OccupationGrid = nGrid, KappaEst = Kappa, Smoothed_OccupationGrid = Smoothed_nGrid, Size_Type = trim(adjustl(Bin_by_Size_Type)), beta_correction = beta(Bin_Loop_M, Bin_Loop_Z))
+            
+            call Average_Size_in_RA_Dec_Grid_Errors(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), mean_size_global, RAGrid ,DecGrid, Error_AvSize, Error_Kappa, by_Size_Type = trim(adjustl(Bin_by_Size_Type)))
+            
+            
+            !--Store for each bin--!
+            AverageSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) =  AvSize
+            Error_AvSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Error_AvSize
+            Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Kappa
+            Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Error_Kappa
+            nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:) = nGrid
+            Smoothed_nGrid_Bin(Bin_Loop_Z,Bin_Loop_M,:,:) = Smoothed_nGrid
+            
+            deallocate(AvSize, Error_AvSize, Kappa, Error_Kappa, nGrid, Smoothed_nGrid)
+            
+            
+            !-----Mass Estimation---!                                                                            
+            !        call Mass_Estimate_CircularAperture_byPixel(Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), Convergence_Map_Occupation = nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:))
+            
+            
+            
+!!$            PRINT *, 'Reading:'
+!!$            READ(*,*)
+            !        
+            
+!!$        
+            !--Output and Plotting--!
+            Output_FilenameDir_AvSize = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_AvSize))
+            Output_FilenameDir_KappaEst = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaEst))
+            Output_FilenameDir_KappaError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaError))
+            Output_FilenameDir_SizeError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SizeError))
+            Output_FilenameDir_OccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_OccGrid))
+            Output_FilenameDir_SmoothedOccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SmoothedOccGrid))
+            
+            call Output_toFile(RAGrid, DecGrid, AverageSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_AvSize, Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_KappaEst, Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_KappaError, Error_AvSize_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_SizeError, nGrid_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_OccGrid, Smoothed_nGrid_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Output_FilenameDir_SmoothedOccGrid)
+            if(plot_Bin) call Run_Plotting_Routine(Output_FilenameDir_AvSize, Output_FilenameDir_KappaEst, Output_FilenameDir_KappaError, Output_FilenameDir_OccGrid)
+            
+         end if
 
-        if(get_Size_Histograms) then
-           Size_Histogram_Filename = trim(adjustl(Bin_Output_Directory))//'Size_Histogram_Catalogue.dat'
-           call Size_Histogram_Catalogue(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Physical_Sizes, Size_Histogram_Filename)
-           do i = 1, size(Cluster_Pos,1)
-              write(Size_Histogram_Filename, '(I1)') i
-              Size_Histogram_Filename = trim(adjustl(Bin_Output_Directory))//'Size_Histogram_Cluster_'//trim(adjustl(Size_Histogram_Filename))//'.dat'
-              call Size_Histogram_Circular_Aperture(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), Cluster_Pos(i,:), 1.e0_double/60.e0_double, Size_Histogram_Filename)
-              call Size_Histogram_Plotter(trim(adjustl(Bin_Output_Directory))//'Size_Histogram_Catalogue.dat', Size_Histogram_Filename)
-           end do
-        end if
-        
-        print *, 'Finished Bin (Z,M):', Bin_Loop_Z, Bin_Loop_M
-        print *, 'Press Enter to Continue...'
-        !read(*,*)
+         if(get_Size_Histograms) then
+            !--Produce Size Histogams within each aperture--!
+            Size_Histogram_Filename = trim(adjustl(Bin_Output_Directory))//'Size_Histogram_Catalogue.dat'
+            call Size_Histogram_Catalogue(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Physical_Sizes, Size_Histogram_Filename)
+!            call Size_Histogram_Plotter(trim(Size_Histogram_Filename))
+            do i = 1, size(Cluster_Pos,1)
+               write(Size_Histogram_Filename, '(I1)') i
+               Size_Histogram_Filename = trim(adjustl(Bin_Output_Directory))//'Size_Histogram_Cluster_'//trim(adjustl(Size_Histogram_Filename))//'.dat'
+               call Size_Histogram_Circular_Aperture(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), Cluster_Pos(i,:), 1.e0_double/60.e0_double, Size_Histogram_Filename)
+!               call Size_Histogram_Plotter(trim(adjustl(Bin_Output_Directory))//'Size_Histogram_Catalogue.dat', Size_Histogram_Filename)
+            end do
+         end if
+
+
+!!$         print *, 'Finished Bin (Z,M):', Bin_Loop_Z, Bin_Loop_M
+!!$         print *, 'Press Enter to Continue...'
+!!$         read(*,*)
         
      end do
   end do
   
   !--Combine Results--!
-  print *, 'Combining Information'
-  call Combine_Bin_Information(AverageSize_Bin, Error_AvSize_Bin, Kappa_Bin, Error_Kappa_Bin, nGrid_Bin, Smoothed_nGrid_Bin, AvSize, Error_AvSize, Kappa, Error_Kappa, nGrid, Smoothed_nGrid, Occupation_Limit)
-  print *, 'Results combined'
-  call Mass_Estimate_CircularAperture(Kappa, Error_Kappa, RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(Cat%Redshift), Convergence_Map_Occupation = nGrid)
+  print *, 'Recombining:'
+  call Recombine_Mass_Estimates(Cluster_Masses_GalaxyML, Cluster_Masses_Error_GalaxyML, Recombined_Cl_Masses_GalaxyML, Recombined_Cl_Masses_Error_GalaxyML)
+  call Recombine_Mass_Estimates(Cluster_Masses_Shift, Cluster_Masses_Error_Shift, Recombined_Cl_Masses_Shift, Recombined_Cl_Masses_Error_Shift)
+         print *, '---------------------------------------------------------------------------------------------------------------------'
+         print *, 'Cluster Masses (using Galaxy ML) are (in M_Sun/h):'
+        do j = 1, size(Recombined_Cl_Masses_GalaxyML)
+           write(Mass_String, '(e8.2)') Recombined_Cl_Masses_GalaxyML(j); write(Error_Mass_String, '(e8.2)') Recombined_Cl_Masses_Error_GalaxyML(j)
+           print *, 'Cluster:', j, ' has mass: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+        end do
 
-  print *, '---------------------------------------------------------------------------------------------------------------------'
-  print *, 'Cluster Masses are (in 10^18 M_Sun/h):'
-  print *, 'A901a:', Cluster_Masses(1), ' +- ', Cluster_Masses_Error(1)
-  print *, 'A901b:', Cluster_Masses(2),' +- ',Cluster_Masses_Error(2)
-  print *, 'A902:', Cluster_Masses(3),' +- ',Cluster_Masses_Error(3)
-  print *, 'SW Group:', Cluster_Masses(4),' +- ',Cluster_Masses_Error(4)
-  print *, '---------------------------------------------------------------------------------------------------------------------'
+         print *, 'Cluster Masses (using Shift) are (in M_Sun/h):'
+         do j = 1, size(Recombined_Cl_Masses_Shift)
+            write(Mass_String, '(e8.2)') Recombined_Cl_Masses_Shift(j); write(Error_Mass_String, '(e8.2)') Recombined_Cl_Masses_Error_Shift(j)
+           print *, 'Cluster:', j, ' has mass: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+        end do
+         print *, '---------------------------------------------------------------------------------------------------------------------'
+
+!!$
+!!$        print *, '---------------------------------------------------------------------------------------------------------------------'
+!!$        print *, 'Recombined Cluster Masses (using GalaxyML) are (in M_Sun/h):'
+!!$        print *, 'A901a:', Recombined_Cl_Masses_GalaxyML(1), ' +- ', Recombined_Cl_Masses_Error_GalaxyML(1)
+!!$        print *, 'A901b:', Recombined_Cl_Masses_GalaxyML(2),' +- ',Recombined_Cl_Masses_Error_GalaxyML(2)
+!!$        print *, 'A902:', Recombined_Cl_Masses_GalaxyML(3),' +- ',Recombined_Cl_Masses_Error_GalaxyML(3)
+!!$        print *, 'SW Group:', Recombined_Cl_Masses_GalaxyML(4),' +- ',Recombined_Cl_Masses_Error_GalaxyML(4)
+!!$        print *, '---------------------------------------------------------------------------------------------------------------------'
+!!$
+!!$  call Recombine_Mass_Estimates(Cluster_Masses_Shift, Cluster_Masses_Error_Shift, Recombined_Cl_Masses_Shift, Recombined_Cl_Masses_Error_Shift)
+!!$        print *, '---------------------------------------------------------------------------------------------------------------------'
+!!$        print *, 'Recombined Cluster Masses (using Shift) are (in M_Sun/h):'
+!!$        print *, 'A901a:', Recombined_Cl_Masses_Shift(1), ' +- ', Recombined_Cl_Masses_Error_Shift(1)
+!!$        print *, 'A901b:', Recombined_Cl_Masses_Shift(2),' +- ',Recombined_Cl_Masses_Error_Shift(2)
+!!$        print *, 'A902:', Recombined_Cl_Masses_Shift(3),' +- ',Recombined_Cl_Masses_Error_Shift(3)
+!!$        print *, 'SW Group:', Recombined_Cl_Masses_Shift(4),' +- ',Recombined_Cl_Masses_Error_Shift(4)
+!!$        print *, '---------------------------------------------------------------------------------------------------------------------'
+
+
   
-  Bin_Output_Directory = trim(adjustl(Output_Directory))//'Combined/'
-  call system('mkdir '//trim(adjustl(Bin_Output_Directory)))
-  
-  Output_FilenameDir_AvSize = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_AvSize))
-  Output_FilenameDir_KappaEst = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaEst))
-  Output_FilenameDir_KappaError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaError))
-  Output_FilenameDir_SizeError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SizeError))
-  Output_FilenameDir_OccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_OccGrid))
-  Output_FilenameDir_SmoothedOccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SmoothedOccGrid))
-  
-  call Output_toFile(RAGrid, DecGrid, AvSize, Output_FilenameDir_AvSize, Kappa, Output_FilenameDir_KappaEst, Error_Kappa, Output_FilenameDir_KappaError, Error_AvSize, Output_FilenameDir_SizeError, nGrid, Output_FilenameDir_OccGrid, Smoothed_nGrid, Output_FilenameDir_SmoothedOccGrid)
+
+!!$  print *, 'Combining Information'
+!!$  call Combine_Bin_Information(AverageSize_Bin, Error_AvSize_Bin, Kappa_Bin, Error_Kappa_Bin, nGrid_Bin, Smoothed_nGrid_Bin, AvSize, Error_AvSize, Kappa, Error_Kappa, nGrid, Smoothed_nGrid, Occupation_Limit)
+!!$  print *, 'Results combined'
+!!$  call Mass_Estimate_CircularAperture(Kappa, Error_Kappa, RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(Cat%Redshift), Convergence_Map_Occupation = nGrid)
+!!$
+!!$  print *, '---------------------------------------------------------------------------------------------------------------------'
+!!$  print *, 'Cluster Masses are (in 10^18 M_Sun/h):'
+!!$  print *, 'A901a:', Cluster_Masses(1), ' +- ', Cluster_Masses_Error(1)
+!!$  print *, 'A901b:', Cluster_Masses(2),' +- ',Cluster_Masses_Error(2)
+!!$  print *, 'A902:', Cluster_Masses(3),' +- ',Cluster_Masses_Error(3)
+!!$  print *, 'SW Group:', Cluster_Masses(4),' +- ',Cluster_Masses_Error(4)
+!!$  print *, '---------------------------------------------------------------------------------------------------------------------'
+!!$  
+!!$  Bin_Output_Directory = trim(adjustl(Output_Directory))//'Combined/'
+!!$  call system('mkdir '//trim(adjustl(Bin_Output_Directory)))
+!!$  
+!!$  Output_FilenameDir_AvSize = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_AvSize))
+!!$  Output_FilenameDir_KappaEst = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaEst))
+!!$  Output_FilenameDir_KappaError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_KappaError))
+!!$  Output_FilenameDir_SizeError = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SizeError))
+!!$  Output_FilenameDir_OccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_OccGrid))
+!!$  Output_FilenameDir_SmoothedOccGrid = trim(adjustl(Bin_Output_Directory))//trim(adjustl(Output_Filename_SmoothedOccGrid))
+!!$  
+!!$  call Output_toFile(RAGrid, DecGrid, AvSize, Output_FilenameDir_AvSize, Kappa, Output_FilenameDir_KappaEst, Error_Kappa, Output_FilenameDir_KappaError, Error_AvSize, Output_FilenameDir_SizeError, nGrid, Output_FilenameDir_OccGrid, Smoothed_nGrid, Output_FilenameDir_SmoothedOccGrid)
+
   print *, 'Combined Result output to File, press Enter to plot:'
   read(*,*)
   call Run_Plotting_Routine(Output_FilenameDir_AvSize, Output_FilenameDir_KappaEst, Output_FilenameDir_KappaError, Output_FilenameDir_OccGrid)
@@ -291,6 +384,7 @@ contains
              SumWeight_Kappa = SumWeight_Kappa + Weight_Kappa_Bin(i,j,:,:)
           end do
        end do
+       !--Should there be a nbin**2 here?-!
        AverageSize_Error = dsqrt(1.e0_double/SumWeight_Size)
        Convergence_Error = dsqrt(1.e0_double/SumWeight_Kappa)
 

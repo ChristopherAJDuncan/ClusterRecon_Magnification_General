@@ -1,3 +1,4 @@
+
 module Mass_Estimation
   !--Contains Subroutines that return mass estimates--!
   use Param_Types
@@ -5,8 +6,195 @@ module Mass_Estimation
 
 contains
 
-  subroutine Mass_Estimate_Circular_Aperture_Catalogue(Cat, Profile, Aperture_Positions, Aperture_Radiuses, global_average_size)
-    use Catalogues; use Statistics, only: mean_discrete, get_variance; use Cosmology, only:angular_diameter_distance_fromRedshift
+!!$  subroutine draw_Circular_Aperture( Aperture_Positions, Aperture_Radiuses)
+!!$    real(double), intent(in)::Aperture_Positions(:,:), Aperture_Radiuses(:)
+!!$
+!!$    character(20)::filename_header = 'draw_Aperture'
+!!$    character::Cluster_String
+!!$
+!!$    integer::nSample = 1000
+!!$    real(double)
+!!$
+!!$
+!!$    do l = 1, size( Aperture_Positions,1 )
+!!$       write(Cluster_String,'(I1)') l
+!!$       open(48, file = trim(adjustl(filename_header))//'_'//trim(Cluster_String)//'.dat')
+!!$       do n = 1, nSample
+!!$          write(48,
+!!$       end do
+!!$       close(48)
+!!$    end do
+!!$
+!!$
+!!$  end subroutine draw_Circular_Aperture
+
+  subroutine Recombine_Mass_Estimates(Mass, Error, Recombined_Mass, Recombined_Mass_Error)
+    real(double),intent(in),dimension(:,:,:)::Mass, Error
+    real(double),intent(out),dimension(:),allocatable::Recombined_Mass, Recombined_Mass_Error
+
+    integer::Method = 2 !-1: Average, 2: Inverse Variance-!
+
+    integer::i,j,m
+
+    !--Method 2 Declarations--!
+    real(double),allocatable::Weighting(:,:)
+    real(double),allocatable::Sum_Weighting
+
+    if(allocated(Recombined_Mass)) deallocate(Recombined_Mass)
+    allocate(Recombined_Mass(size(Mass,3))); Recombined_Mass = 0.e0_double
+
+    if(allocated(Recombined_Mass_Error)) deallocate(Recombined_Mass_Error)
+    allocate(Recombined_Mass_Error(size(Error,3))); Recombined_Mass_Error = 0.e0_double
+
+    if(size(Mass) /= size(Error)) STOP 'Recombine_Mass_Estimates - Mass and Error not the same size, stopping...'
+    
+    select case(Method)
+    case(1)!-Average-!
+       STOP 'Recombine_Mass_Estimates - Method 1 not used yet'
+    case(2)!-Inverse Variance-!
+       allocate(Weighting(size(Mass,1), size(Mass,2)))
+       do m = 1,  size(Mass,3)    
+          Recombined_Mass(m) = 0.e0_double
+          Weighting = 0.e0_double
+          do i= 1, size(Mass,1)
+             do j = 1, size(Mass,2)
+                Weighting(i,j) = 1.e0_double/(Error(i,j,m)*Error(i,j,m))
+                Recombined_Mass(m) = Recombined_Mass(m) + Weighting(i,j)*Mass(i,j,m)
+             end do
+          end do
+          Recombined_Mass(m) = Recombined_Mass(m)/sum(Weighting)
+          Recombined_Mass_Error(m) = dsqrt(1.e0_double/sum(Weighting))
+       end do
+       deallocate(Weighting)
+    case default
+       STOP 'Recombine_Mass_Estimates - Method not valid'
+    end select
+
+
+  end subroutine Recombine_Mass_Estimates
+
+!Projected_Mass, Error_Projected_Mass,
+ subroutine Mass_Estimate_Circular_Aperture_byShift(Cat, Aperture_Positions, Aperture_Radiuses, Projected_Mass, Error_Projected_Mass,  global_average_size)
+!  subroutine Mass_Estimate_Circular_Aperture_byShift(Cat, Aperture_Positions, Aperture_Radiuses,  global_average_size)
+     use Catalogues; use Statistics, only: mean_discrete, variance_discrete; use Cosmology, only:angular_diameter_distance_fromRedshift; use Convergence_Estimation, only: get_Convergence
+
+    !--Aperture Positions must be in (/RA, Dec/), and Aperture Radiuses in DEGREES--!
+    type(Catalogue),intent(in)::Cat
+    real(double), intent(in)::Aperture_Positions(:,:), Aperture_Radiuses(:)
+    real(double),intent(in),optional::Global_Average_Size
+
+    integer,allocatable::Expected_Number_in_Aperture(:)
+    integer::i,j
+    type(Catalogue),allocatable:: Ap_Cats(:)
+    integer,dimension(size(Aperture_Positions,1))::Ap_Counter
+    real(double),allocatable::Ap_Galaxy_Convergence(:,:)
+
+    real(double)::Projected_Mass(size(Aperture_Positions,1)), Error_Projected_Mass(size(Aperture_Positions,1))
+
+    real(double),allocatable::iAperture_Radiuses(:)
+    real(double)::field_mean_size
+    real(double):: Ap_Mean_Size, Ap_Convergence, Sigma_Crit, Ap_Area
+
+    real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Default_Source_Redshift = 1.e0_double, Source_Redshift
+    real(double)::Redshift_Tolerance = 1.e-1_double
+
+    character(10):: Mass_String, Error_Mass_String
+
+    integer::Convergence_Estimator = 2 !-1:r/<r>-1, 2: ln(r/<r>)-!
+
+    real(double),dimension(size(Aperture_Positions,1)):: Ap_Convergence_Error
+
+    !--Precursors, decalre internals--!
+    allocate(iAperture_Radiuses(size(Aperture_Positions,1)))
+    if(size(Aperture_Radiuses) == 1) then
+       iAperture_Radiuses = Aperture_Radiuses(1)
+    elseif(size(Aperture_Radiuses) /= size(iAperture_Radiuses)) then
+       STOP 'Mass_Estimate_Circular_Aperture_Catalogue - FATAL ERROR - Error assigning Aperture_Radiuses internal'
+    else
+       iAperture_Radiuses = Aperture_Radiuses
+    end if
+
+    if(present(global_average_size)) then
+       field_mean_size = global_average_size
+    else
+       print *, 'Calculating the mass in circular aperture using mean physical size of the full catalogue'
+       field_mean_size = mean_discrete(Cat%Physical_Sizes)
+    end if
+
+    !--Set up Aperture Catalogues--!
+    allocate(Expected_Number_in_Aperture(size(Aperture_Positions,1))); Expected_Number_in_Aperture = 0
+
+    allocate(Ap_Cats(size(Aperture_Positions,1)))
+    do i = 1, size(Ap_Cats)
+       Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Aperture_Positions(i,1))**2.e0_double +(Cat%Dec-Aperture_Positions(i,2))**2.e0_double ) <= iAperture_Radiuses(i))
+       call Catalogue_Construct(Ap_Cats(i), Expected_Number_in_Aperture(i))
+    end do
+
+    !--Loop through galaxies in Catalogue and Assign to Relevent Ap_Catalogue--!
+    Ap_Counter = 0
+    do i = 1, size(Cat%Sizes)
+       do j = 1, size(Ap_Cats)
+          if( dsqrt( (Cat%RA(i)-Aperture_Positions(j,1))**2.e0_double +(Cat%Dec(i)-Aperture_Positions(j,2))**2.e0_double ) <= iAperture_Radiuses(j) ) then
+             Ap_Counter(j) = Ap_Counter(j) + 1
+             call Catalogue_Assign_byGalaxy_byCatalogue(Ap_Cats(j), Ap_Counter(j), Cat, i)
+          end if
+       end do
+    end do
+    !-Check by expected size-!
+    do j =1, size(Ap_Cats)
+       if(Ap_Counter(j) /= size(Ap_Cats(j)%RA)) print *, 'WARNING - Possible Error in assigning galaxies to Aperture:', j, ':Expected;Assigned:', size(Ap_Cats(j)%RA), Ap_Counter(j)
+    end do
+    !--Calculated Convergence Error for each Ap--!
+    do j =1, size(Ap_Cats)
+         !--Both Methods detailed below agree--!
+         !-(Variance of Convergence per Galaxies in Ap)/(Number of Galaxies in Ap) :OR: Varaince of Mean of Convergence of Galaxies in Ap-!
+       Ap_Convergence_Error(j) =  dsqrt(variance_discrete(get_Convergence(Ap_Cats(j)%Physical_Sizes,field_mean_size,Convergence_Estimator), get_Convergence(Ap_Cats(j)%Physical_Sizes,field_mean_size,Convergence_Estimator))/size(Ap_Cats(j)%RA))!dsqrt(variance_discrete((Ap_Cats(j)%Physical_Sizes/field_mean_size)-1.e0_double, (Ap_Cats(j)%Physical_Sizes/field_mean_size)-1.e0_double)/size(Ap_Cats(j)%RA))
+         !-Variance of: [(Mean of Size in Ap)/(Mean of Size in field) - 1]-!
+       !Ap_Convergence_Error(j) = dsqrt(variance_discrete(Ap_Cats(j)%Physical_Sizes, Ap_Cats(j)%Physical_Sizes))/(dsqrt(1.e0_double*size(Ap_Cats(j)%RA))*field_mean_size)
+    end do
+
+
+    !--Galaxies have now been split into Apertures, now statistics for each aperture--!
+    Projected_Mass = 0.e0_double
+    D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
+    do j = 1, size(Ap_Cats)
+       Ap_Mean_Size = mean_discrete(Ap_Cats(j)%Physical_Sizes)
+       Ap_Convergence = get_Convergence(Ap_Mean_Size,field_mean_size, Convergence_Estimator)!(Ap_Mean_Size/field_mean_size) - 1.e0_double
+
+       !--Convert from Convergence to Mass--!
+       Source_Redshift =  mean_discrete(Ap_Cats(j)%Redshift)
+       if( (Source_Redshift <= 0.e0_double) .or. (dabs(Source_Redshift-Lens_Redshift) <= Redshift_Tolerance)) STOP 'Mass_Estimate_Circular_Aperture_byShift - ERROR IN ASSIGNING SOURCE REDSHIFT'
+
+       D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
+       D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Source_Redshift)
+       Sigma_Crit = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-! 
+       
+       Ap_Area = 3.142e0_double*( (D_l*(iAperture_Radiuses(j)*(3.142e0_double/180.e0_double)))**2.e0_double )
+
+       Projected_Mass(j) = Ap_Convergence*Sigma_Crit*Ap_Area
+       Error_Projected_Mass(j) = Sigma_Crit*Ap_Area*Ap_Convergence_Error(j)
+    end do
+
+    Projected_Mass = Projected_Mass*1.e18_double !--in MSun/h--!
+    Error_Projected_Mass = Error_Projected_Mass*1.e18_double
+!!$
+!!$    print *, 'Projected Masses by Shift:'
+!!$    do j = 1, size(Ap_Cats)
+!!$       write(Mass_String, '(e8.2)') Projected_Mass(j); write(Error_Mass_String, '(e8.2)') Error_Projected_Mass(j)
+!!$       print *, 'Cluster:', j, ' has mass: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+!!$    end do
+
+    !--DESTROY--!
+    do j = 1, size(Ap_Cats)
+       call Catalogue_Destruct(AP_Cats(j))
+    end do
+    deallocate(Ap_Cats)
+
+  end subroutine Mass_Estimate_Circular_Aperture_byShift
+
+
+  subroutine Mass_Estimate_Circular_Aperture_byGalaxy(Cat, Profile, Aperture_Positions, Aperture_Radiuses, Projected_Mass, Error_Projected_Mass,global_average_size)
+    use Catalogues; use Statistics, only: mean_discrete, variance_discrete; use Cosmology, only:angular_diameter_distance_fromRedshift; use Convergence_Estimation, only: get_Convergence
     !--Aperture Positions must be in (/RA, Dec/), and Aperture Radiuses in DEGREES--!
     !--Each Galaxy must have a redshift assigned, and physical size associated with it--!
     type(Catalogue),intent(in)::Cat
@@ -25,6 +213,13 @@ contains
 
     real(double),allocatable::Weight(:,:), Sigma_Crit(:), Area(:), Renormalisation(:,:)
     real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Default_Source_Redshift = 1.e0_double, Source_Redshift
+
+    integer,allocatable:: Aperture_Galaxy_Indexs(:,:)
+    integer,allocatable:: Aperture_Counter(:)
+
+    character(10)::Mass_String, Error_Mass_String
+
+    integer::Convergence_Estimator = 2 !-1:r/<r>-1, 2: ln(r/<r>)-!
 
     !---TESTING DECLARATIONS--!
     integer::nNoRedshift
@@ -51,18 +246,19 @@ contains
     !--Get Convergence for each galaxy--!
     allocate(Galaxy_Convergence(size(Cat%Physical_Sizes))); Galaxy_Convergence = 0.e0_double
     do Gal = 1, size(Cat%Physical_Sizes)
-       Galaxy_Convergence(Gal) = (Cat%Physical_Sizes(Gal)/field_mean_size) - 1.e0_double
+       Galaxy_Convergence(Gal) = get_Convergence(Cat%Physical_Sizes(Gal),field_mean_size, Convergence_Estimator)!(Cat%Physical_Sizes(Gal)/field_mean_size) - 1.e0_double
     end do
 
     Mean_Convergence = mean_discrete(Galaxy_Convergence)
-    Convergence_Error = get_variance(Galaxy_Convergence, Galaxy_Convergence, Mean_Convergence, Mean_Convergence)
+    Convergence_Error = dsqrt(variance_discrete(Galaxy_Convergence, Galaxy_Convergence, Mean_Convergence, Mean_Convergence))
 
-    print *, 'Mean/Varaince [Convergence]:', Mean_Convergence, dsqrt(Convergence_Error)
+    print *, 'Mean/Variance [Convergence]:', Mean_Convergence, dsqrt(Convergence_Error)
+    
 
     !--Calculate Sigma_Critical for each galaxy, and area in each aperture--!
     nNoRedshift = 0
     allocate(Sigma_Crit(size(Cat%Redshift)))
-    D_l = angular_diameter_distance_fromRedshift(Lens_Redshift) !-In units of Mpc/h                                                                                                                                                         
+    D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift) !-In units of Mpc/h                                                                                                                                                         
     do Gal = 1, size(Cat%Redshift) 
        Source_Redshift = Cat%Redshift(Gal)
        if(Cat%Redshift(Gal) < 0.e0_double) then
@@ -70,66 +266,117 @@ contains
           Source_Redshift = Default_Source_Redshift
        end if
           
-       D_s = angular_diameter_distance_fromRedshift(Source_Redshift)
+       D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
 
-       D_ls = D_s-D_l
+       D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Source_Redshift)
        Sigma_Crit(Gal) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!      
     end do
     allocate(Area(size(Aperture_Positions,1))); Area = 0.e0_double
     Area = 3.142e0_double*( (D_l*1.746e-2_double*iAperture_Radiuses)**2.e0_double )
     
-    print *, 'Mass_Estimate_Circular_Aperture_Catalogue - ', nNoRedshift, ' galaxies were assigned the default redshift information of ', Default_Source_Redshift, ' as no redshift information was input'
+    !--Create Indexes of Galaxies in Each Aperture--!
+    allocate(Aperture_Galaxy_Indexs(size(Aperture_Positions,1), size(Cat%Physical_Sizes))) ; Aperture_Galaxy_Indexs = -100
+    allocate(Aperture_Counter(size(Aperture_Positions,1))); Aperture_Counter = 0
+    do Gal = 1, size(Cat%Physical_Sizes)
+       do Ap = 1, size(Aperture_Positions,1)
+          if( distance_between_points( (/Cat%RA(Gal), Cat%Dec(Gal)/), Aperture_Positions(Ap,:) ) < iAperture_Radiuses(Ap) ) then
+             !--Galaxy Lies within Aperture--!
+             Aperture_Counter(Ap) = Aperture_Counter(Ap) + 1
+             Aperture_Galaxy_Indexs(Ap, Aperture_Counter(Ap)) = Gal
+          end if
+       end do
+    end do
+
+    if(nNoRedshift>0) print *, 'Mass_Estimate_Circular_Aperture_Catalogue - ', nNoRedshift, ' galaxies were assigned the default redshift information of ', Default_Source_Redshift, ' as no redshift information was input'
 
     nGal_inAperture = 0
     allocate(Weight(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Weight = 0.e0_double
     allocate(Renormalisation(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Renormalisation = 0.e0_double
     Projected_Mass = 0.e0_double
     do Ap = 1, size(Aperture_Positions,1)
-       do Gal = 1, size(Cat%Physical_Sizes)
-          if( distance_between_points( (/Cat%RA(Gal), Cat%Dec(Gal)/), Aperture_Positions(Ap,:) ) > iAperture_Radiuses(Ap) ) cycle
-          nGal_inAperture(Ap) = nGal_inAperture(Ap) + 1
-          select case(Profile)
-          case(0)
-             !--Flat Mass Profile--! !---CHECK THIS MATHS--!
-             Projected_Mass(Ap) = Projected_Mass(Ap) + (Galaxy_Convergence(Gal)/Sigma_Crit(Gal))
-             Renormalisation(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal)*Sigma_Crit(Gal))
-             Weight(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal))
-          case default
-             STOP 'Mass_Estimate_Circular_Aperture_Catalogue - FATAL ERROR - Supported profiles are 0:Flat'
-          end select
-       end do
-
-       print *, 'Done Aperture:', Ap, ', of', size(Aperture_Positions,1)
-       print *, 'Aperture:', Ap, ' had ', nGal_inAperture(Ap), ' galaxies within the Aperture'
+       select case(Profile)
+       case(0)
+          !-Sum Convergence-!
+          do Gal = 1, count(Aperture_Galaxy_Indexs(Ap,:) > 0)
+             Projected_Mass(Ap) = Projected_Mass(Ap) + Galaxy_Convergence(Aperture_Galaxy_Indexs(Ap,Gal))
+             Renormalisation(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal))
+          end do
+          Projected_Mass(Ap) = Projected_Mass(Ap)/sum(Renormalisation(Ap,:))
+          Error_Projected_Mass(Ap) = (dsqrt(1.e0_double*count(Aperture_Galaxy_Indexs(Ap,:) > 0))*Convergence_Error)/sum(Renormalisation(Ap,:))
+       end select
+       print *, 'Aperture:', Ap, ' had ', count(Aperture_Galaxy_Indexs(Ap,:) > 0), ' galaxies within the Aperture'
     end do
+    
+!!$    nGal_inAperture = 0
+!!$    allocate(Weight(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Weight = 0.e0_double
+!!$    allocate(Renormalisation(size(Aperture_Positions,1),size(Cat%Physical_Sizes))); Renormalisation = 0.e0_double
+!!$    Projected_Mass = 0.e0_double
+!!$    do Ap = 1, size(Aperture_Positions,1)
+!!$          do Gal = 1, size(Cat%Physical_Sizes)
+!!$             if( distance_between_points( (/Cat%RA(Gal), Cat%Dec(Gal)/), Aperture_Positions(Ap,:) ) > iAperture_Radiuses(Ap) ) cycle
+!!$             nGal_inAperture(Ap) = nGal_inAperture(Ap) + 1
+!!$
+!!$             select case(Profile)
+!!$             case(0) !--Flat Profile--!
+!!$                !--Sum Convergence Estimates--!
+!!$                Projected_Mass(Ap) = Projected_Mass(Ap)
+!!$                Renormalisation(Ap,Gal) = 
+!!$
+!!$!!!$       do Gal = 1, size(Cat%Physical_Sizes)
+!!$!!!$          if( distance_between_points( (/Cat%RA(Gal), Cat%Dec(Gal)/), Aperture_Positions(Ap,:) ) > iAperture_Radiuses(Ap) ) cycle
+!!$!!!$          nGal_inAperture(Ap) = nGal_inAperture(Ap) + 1
+!!$!!!$          select case(Profile)
+!!$!!!$          case(0)
+!!$!!!$             
+!!$!!!$
+!!$!!!$!             Projected_Mass(Ap) = Projected_Mass(Ap) + (Galaxy_Convergence(Gal)/Sigma_Crit(Gal))
+!!$!!!$!             Renormalisation(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal)*Sigma_Crit(Gal))
+!!$!!!$!             Weight(Ap,Gal) = 1.e0_double/(Sigma_Crit(Gal))
+!!$!!!$          case default
+!!$!!!$             STOP 'Mass_Estimate_Circular_Aperture_Catalogue - FATAL ERROR - Supported profiles are 0:Flat'
+!!$!!!$          end select
+!!$!!!$       end do
+!!$
+!!$       print *, 'Aperture:', Ap, ' had ', nGal_inAperture(Ap), ' galaxies within the Aperture'
+!!$    end do
     
     !--Renormalise--!
     select case(Profile)
     case(0)
-       do Ap = 1, size(Projected_Mass)
-          if(sum(Renormalisation(Ap,:)) /= 0.e0_double) then
-             Projected_Mass(Ap) =  Projected_Mass(Ap)/sum(Renormalisation(Ap,:))
-             Error_Projected_Mass(Ap) = Area(Ap)*dsqrt(Convergence_Error)/sum(Renormalisation(Ap,:))
-          else
-             print *, 'Aperture:', Ap, ' nGal in Aperture:', nGal_inAperture(Ap)
-             print*, 'Mass_Estimate_Circular_Aperture_Catalogue - Renormalisation (and Error) for Aperture: Renormalisation is zero. Enter to continue, Ctrl C to stop'
-             read(*,*)
-          end if
-       end do
+!!$       do Ap = 1, size(Projected_Mass)
+!!$          if(sum(Renormalisation(Ap,:)) /= 0.e0_double) then
+!!$             Projected_Mass(Ap) =  Projected_Mass(Ap)/sum(Renormalisation(Ap,:))
+!!$             Error_Projected_Mass(Ap) = Area(Ap)*dsqrt(Convergence_Error)/sum(Renormalisation(Ap,:))
+!!$          else
+!!$             print *, 'Aperture:', Ap, ' nGal in Aperture:', nGal_inAperture(Ap)
+!!$             print*, 'Mass_Estimate_Circular_Aperture_Catalogue - Renormalisation (and Error) for Aperture: Renormalisation is zero. Enter to continue, Ctrl C to stop'
+!!$             read(*,*)
+!!$          end if
+!!$       end do
     end select
 
     !--Convert from projected Surface Mass Density to Mass--!
-    print *, 'Multiplying by Area:'
-!    Projected_Mass = Area*Projected_Mass
+    Projected_Mass = Area*Projected_Mass
+    Error_Projected_Mass = Area*Error_Projected_Mass
 
-    do Ap = 1, size(Projected_Mass)
-       print *, 'Mass for cluster:', Ap, ' is:', Projected_Mass(Ap), '+-', Error_Projected_Mass(Ap)
-    end do
+    !--Convert to Units MSun/h--!
+    Projected_Mass = Projected_Mass*1.e18_double
+    Error_Projected_Mass = Error_Projected_Mass*1.e18_double
 
-  end subroutine Mass_Estimate_Circular_Aperture_Catalogue
+!!$    print *, '------------------------------------------------------------------------------'
+!!$    print *, 'Masses by galaxy:'
+!!$    do Ap = 1, size(Projected_Mass)
+!!$       write(Mass_String, '(e8.2)') Projected_Mass(Ap); write(Error_Mass_String, '(e8.2)') Error_Projected_Mass(Ap)   
+!!$       print *, 'Mass for cluster:', Ap, ' is: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+!!$    end do
+!!$    print *, '------------------------------------------------------------------------------'
+
+    deallocate(Aperture_Counter, Aperture_Galaxy_Indexs)
+
+  end subroutine Mass_Estimate_Circular_Aperture_byGalaxy
     
 
-  subroutine Mass_Estimate_CircularAperture(Convergence_Map, Error_Convergence, x, y, Aperture_Positions, Aperture_Radiuses, Masses, Error_Masses, Source_Redshift, Convergence_Map_Occupation)
+  subroutine Mass_Estimate_CircularAperture_byPixel(Convergence_Map, Error_Convergence, x, y, Aperture_Positions, Aperture_Radiuses, Masses, Error_Masses, Source_Redshift, Convergence_Map_Occupation)
     use cosmology
     !-Returns the mass estimate with a circular Aperture--!
     !-Masses are calculated in a model independant way, as detailed in Heymasn et al 2008. Note that in that anaylsis, radius of 0.75' is used-!
@@ -215,13 +462,13 @@ contains
     end if
 
     !-Determine Sigma_Critical-!
-    D_l = angular_diameter_distance_fromRedshift(Lens_Redshift) !-In units of Mpc/h
-    D_s = angular_diameter_distance_fromRedshift(iSource_Redshift)
+    D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift) !-In units of Mpc/h
+    D_s = angular_diameter_distance_fromRedshift(0.e0_double, iSource_Redshift)
     !-Convert from comoving distances to physical distances-!
     !D_l = D_l/(1.e0_double+Lens_Redshift)
     !D_s = D_s/(1.e0_double+Source_Redshift)
 
-    D_ls = D_s-D_l
+    D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, iSource_Redshift)
     Sigma_Crit = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
 
     print *, 'Calculating Masses with D_l = ', D_l
@@ -238,6 +485,7 @@ contains
     do i =1, size(Masses)
        if(size(Convergence_Map) == 1) then
           !-Single convergence estimate-!
+          print *, 'Calculating Single Convergence Estimate'
           Masses(i) = 3.142e0_double*( (D_l*1.746e-2_double*Aperture_Radiuses(i))**2.e0_double )* Sigma_Crit * Convergence_Map(1,1)
           cycle
        end if
@@ -304,6 +552,7 @@ contains
                 nPartialPixel = nPartialPixel + 1
              end if
 
+             nPixel = nPixel + (1.e0_double*NoRandomPoints_Success/nRandomPoints)
              Total_Area_Enclosed(i) =  Total_Area_Enclosed(i) + A_pix*(1.e0_double*NoRandomPoints_Success/nRandomPoints)
              if(Inverse_Variance_Weight) then
                    !--Using the occupation numbers as a weight
@@ -311,27 +560,33 @@ contains
                    if(i == 1 .and. x_rad_index == maxval((/x_index-x_index_range,1/)) .and. y_rad_index == maxval((/y_index-y_index_range,1/)) ) print *, 'Getting masses by summing using occupation of pixel as weight'
                    if(Convergence_Map_Occupation(x_rad_index,y_rad_index) > 0) print *, Convergence_Map(x_rad_index,y_rad_index), Convergence_Map_Occupation(x_rad_index,y_rad_index)
 
-                   Masses(i) = Masses(i) + (A_pix*(1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit)*(Convergence_Map(x_rad_index,y_rad_index)*Convergence_Map_Occupation(x_rad_index,y_rad_index))
+                   Masses(i) = Masses(i) + ((1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit)*(Convergence_Map(x_rad_index,y_rad_index)*Convergence_Map_Occupation(x_rad_index,y_rad_index))
                    Sum_Convergence_in_Aperture(i) = Sum_Convergence_in_Aperture(i) + (Convergence_Map(x_rad_index,y_rad_index)*Convergence_Map_Occupation(x_rad_index,y_rad_index))
                    Sum_Weight = Sum_Weight + Convergence_Map_Occupation(x_rad_index,y_rad_index)
                 else
                    if(i == 1 .and. x_rad_index == maxval((/x_index-x_index_range,1/)) .and. y_rad_index == maxval((/y_index-y_index_range,1/)) ) print *, 'Getting masses by summing using inverse error as weight'
                    if(Error_Convergence(x_rad_index,y_rad_index) <= 0.e0_double) cycle
                    !--This bit is inverse variance weighting using the error bars. This is unsuccessful (possibly due to error bars being incorrect?).
-                   Masses(i) = Masses(i) + (A_pix*(1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit)*(Convergence_Map(x_rad_index,y_rad_index)/(Error_Convergence(x_rad_index,y_rad_index)*Error_Convergence(x_rad_index,y_rad_index)))
+                   Masses(i) = Masses(i) + ((1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit)*(Convergence_Map(x_rad_index,y_rad_index)/(Error_Convergence(x_rad_index,y_rad_index)*Error_Convergence(x_rad_index,y_rad_index)))
                    Sum_Convergence_in_Aperture(i) = Sum_Convergence_in_Aperture(i) + (Convergence_Map(x_rad_index,y_rad_index)/(Error_Convergence(x_rad_index,y_rad_index)*Error_Convergence(x_rad_index,y_rad_index)))
                    Sum_Weight = Sum_Weight + 1.e0_double/((Error_Convergence(x_rad_index,y_rad_index)*Error_Convergence(x_rad_index,y_rad_index)))
                 end if
                 !--ERROR??--!
                 if(i == 1 .and. x_rad_index == maxval((/x_index-x_index_range,1/)) .and. y_rad_index == maxval((/y_index-y_index_range,1/)) ) print *, 'I am not calculating errors on inverse variance weighting'
              else
+                if(i == 1 .and. x_rad_index == maxval((/x_index-x_index_range,1/)) .and. y_rad_index == maxval((/y_index-y_index_range,1/)) ) print *, 'Using Model Independant Mass Estimation of Heymans et al'
                 !Masses(i) = Masses(i) + A_pix*(1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit*Convergence_Map(x_rad_index,y_rad_index)
                 !if(Convergence_Map_Occupation(x_rad_index,y_rad_index) > 0) 
-                print *, Convergence_Map(x_rad_index,y_rad_index), Convergence_Map_Occupation(x_rad_index,y_rad_index), A_pix
-                Masses(i) = Masses(i) +  A_pix*((1.e0_double*NoRandomPoints_Success)/nRandomPoints)*Sigma_Crit*Convergence_Map(x_rad_index,y_rad_index)
+
+                !--TESTING--!
+!!$                print *, 'For i, x, y:', i, x_rad_index, y_rad_index, ' K is:', Convergence_Map(x_rad_index,y_rad_index), Sigma_Crit
+!!$                if(x_rad_index ==  minval((/x_index+x_index_range,size(x)-1/)) .and. y_rad_index == minval((/y_index+y_index_range,size(y)-1/)) ) read(*,*)
+                
+
+                Masses(i) = Masses(i) +  Sigma_Crit*Convergence_Map(x_rad_index,y_rad_index)
                 Sum_Convergence_in_Aperture(i) = Sum_Convergence_in_Aperture(i) + Convergence_Map(x_rad_index,y_rad_index); NPix_in_Aperture(i) = NPix_in_Aperture(i) + (1.e0_double*NoRandomPoints_Success/nRandomPoints)
                 !-Add Errors in Quadrature - Error_Masses is Sig^2 until sqrt taken later-!
-                Error_Masses(i) = Error_Masses(i) + (A_pix*(1.e0_double*NoRandomPoints_Success/nRandomPoints)*Sigma_Crit*Error_Convergence(x_rad_index,y_rad_index))**2.e0_double
+                Error_Masses(i) = Error_Masses(i) +Sigma_Crit*(Error_Convergence(x_rad_index,y_rad_index)**2.e0_double)
              end if
              deallocate(Ran)
           END do
@@ -339,16 +594,29 @@ contains
 !       Masses(i) = Masses(i) * Total_Area_Enclosed(i)
        print *, 'nFullPixel:', nFullPixel, nEmptyPixel, nPartialPixel, nPixel
 
+
        if(Inverse_Variance_Weight) then 
+          print *, 'Renormalising as using inverse variance weighting'
           Masses(i) = Masses(i) / Sum_Weight
           Sum_Convergence_in_Aperture(i) = Sum_Convergence_in_Aperture(i)/Sum_Weight
        end if
 
-       print *, 'Done Mass for:', i, ' reading'
-       print *, 'Summed Convergence = ', Sum_Convergence_in_Aperture(i)
-       print *, 'Expected Mass:', ( 3.142e0_double*(D_l*1.746e-2_double*iAperture_Radiuses(i))**2.e0_double )*Sigma_Crit* Sum_Convergence_in_Aperture(i), ' Measured:',  Masses(i), ' Ratio:', ( 3.142e0_double*(D_l*1.746e-2_double*iAperture_Radiuses(i))**2.e0_double )*Sigma_Crit* Sum_Convergence_in_Aperture(i)/Masses(i)
-       read(*,*)
+!!$       print *, 'Done Mass for:', i, ' reading'
+!!$       print *, 'Summed Convergence = ', Sum_Convergence_in_Aperture(i)
+!!$       print *, 'Expected Mass:', ( 3.142e0_double*(D_l*1.746e-2_double*iAperture_Radiuses(i))**2.e0_double )*Sigma_Crit* Sum_Convergence_in_Aperture(i), ' Measured:',  Masses(i), ' Ratio:', ( 3.142e0_double*(D_l*1.746e-2_double*iAperture_Radiuses(i))**2.e0_double )*Sigma_Crit* Sum_Convergence_in_Aperture(i)/Masses(i)
+!!$       read(*,*)
     end do
+
+    print *, 'Size:', size(Masses)
+    print *, 'Masses and Area:', Total_Area_Enclosed, '::', Masses
+    read(*,*)
+
+    Masses = Total_Area_Enclosed*Masses
+    Error_Masses = Total_Area_Enclosed*Error_Masses
+
+    !--Convert to Mean--!
+    Masses = Masses/nPixel
+    Error_Masses = Error_Masses/nPixel
 
     if(verbose) then
        print *, 'Total Area enclosed in Apertures is:', Total_Area_Enclosed
@@ -366,7 +634,7 @@ contains
 
     print *, 'Finished.'
 
-  end subroutine Mass_Estimate_CircularAperture
+  end subroutine Mass_Estimate_CircularAperture_byPixel
 
   function distance_between_points( C1, C2 )
     !-Calculates the straight line distance between grid points, were C1 and C2 are (x,y) pairs-!

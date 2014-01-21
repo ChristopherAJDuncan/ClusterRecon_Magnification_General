@@ -1,10 +1,8 @@
 module cosmology
-  use Param_Types; 
+  use Param_Types; use RunTime_Input, only:Verbose
   implicit none
   
   character(50),private::Rad_Dir
-  logical::Verbose
-
 
   type Cosmology_Parameters
      real(double)::Om_CDM, Om_B, Om_tot, Om_l, w, h_100
@@ -33,13 +31,12 @@ contains
 
   end function LCDM
 
-  function angular_diameter_distance_fromRedshift_array(z1,z2, Cos)
+  function angular_diameter_distance_fromRedshift_array(z, Cos)
        !-Returned in units of Mpc/h                                                                                     
     type(Cosmology_Parameters),optional::cos
-    real(double),intent(in)::z1
-    real(double),intent(in)::z2(:)
+    real(double),intent(in)::z(:)
 
-    real(double),dimension(size(z2))::angular_diameter_distance_fromRedshift_array
+    real(double),dimension(size(z))::angular_diameter_distance_fromRedshift_array
 
     type(Cosmology_Parameters)::Internal_Cos
     real(double),allocatable::Radius(:)
@@ -51,23 +48,19 @@ contains
        Internal_Cos = LCDM()
     end if
 
-    call getrarray(z1, z2, Radius, Internal_Cos)
+    call getrarray(z, Radius, Internal_Cos)
     
-    !--This is flat case only--!
-    !--Extra h_100 converts from Mpc to Mpc/h--!
-    angular_diameter_distance_fromRedshift_array = (Radius*Internal_Cos%h_100)/(1.e0_double+z2)
+    angular_diameter_distance_fromRedshift_array = Radius*Internal_Cos%h_100
 
     deallocate(Radius)
 
 
   end function angular_diameter_distance_fromRedshift_array
 
- function angular_diameter_distance_fromRedshift_scalar(z1, z2, cos)
+ function angular_diameter_distance_fromRedshift_scalar(z, cos)
    !-Returned in units of Mpc/h
-   !--This is returned as a proper distance
     type(Cosmology_Parameters),optional::cos
-    real(double),intent(in)::z1
-    real(double),intent(in)::z2
+    real(double),intent(in)::z
 
     real(double)::angular_diameter_distance_fromRedshift_scalar
 
@@ -81,10 +74,9 @@ contains
        Internal_Cos = LCDM()
     end if
 
-    call getrarray(z1, (/z2/), Radius, Internal_Cos)
+    call getrarray((/z/), Radius, Internal_Cos)
     
-    !--Extra h_100 converts from Mpc to Mpc/h--!
-    angular_diameter_distance_fromRedshift_scalar = (Radius(1)*Internal_Cos%h_100)/(1.e0_double+z2)
+    angular_diameter_distance_fromRedshift_scalar = Radius(1)*Internal_Cos%h_100
 
     deallocate(Radius)
 
@@ -160,23 +152,22 @@ contains
 
   end function Omega_lambda_int
 
-  subroutine getrarray(z1,z2,r,cos)
+  subroutine getrarray(z,r,cos)
     !calculates radius values for z values in zarray, and places them in appropriate slot of rarray
     !- Returned in units of Mpc-!
     !-Calculates CO-MOVING RADIUS [dChi or R_0dr]--!
     use nr;
     type(cosmology_parameters),optional::cos
     real(double), dimension(:),allocatable::r
-    real(double),intent(in)::z1
-    real(double)::z2(:)
-    integer::i 
+    real(double)::z(:)
+    integer(isingle)::i 
     real(double)::ztemp
     character(len=200)::filename
 
     if(allocated(r)) then
        deallocate(r)
     end if
-    allocate(r(size(z2))); r = -1.e0_double
+    allocate(r(size(z))); r = -1.e0_double
 
     !set cosmology params that integrand will use. If coss present, these will be set, otherwise we assume global cosmology is set appropriately
     if(present(cos)) then
@@ -186,12 +177,8 @@ contains
     end if
     
     !get radius for all z values in z, construct r
-    do i=1, size(z2)
-       if(z2(i) >= z1) then
-          r(i) = qromo(zradiusintegrand,z1, z2(i), midpnt, 1.e-6_double)
-       else
-          r(i) = 0.e0_double
-       end if
+    do i=1, size(z)
+       r(i) = qromo(zradiusintegrand,0.0e0_double, z(i), midpnt, 1.e-6_double)
     end do
     
     if(any(r<0.e0_double)) STOP 'Error determining distances from redshift - negatives still exist'

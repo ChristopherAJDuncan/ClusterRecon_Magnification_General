@@ -1,6 +1,6 @@
 program Catalogue_Average_Size_in_RA_Dec_Grid
   use Catalogues; use Param_Types;
-  use Statistics, only: get_variance
+  use Statistics, only: Variance_Discrete
   use Convergence_Estimation
   implicit none
 
@@ -81,7 +81,7 @@ contains
      mean_size_global = global_mean_size(Cat, "Pixel")
      print *, 'Global mean size of catalogue is:', mean_size_global
 
-     print *, 'with variance in size (per galaxy) of:', get_variance(Cat%Sizes, Cat%Sizes, mean_size_global, mean_size_global)
+     print *, 'with variance in size (per galaxy) of:', variance_discrete(Cat%Sizes, Cat%Sizes, mean_size_global, mean_size_global)
      
      call construct_RA_Dec_Gridding(Cat, nRA, nDec, RAGrid, DecGrid)
      call Average_Size_in_RA_Dec_Grid(cat, RAGrid, DecGrid, AvSize, OccupationGrid = nGrid, KappaEst = Kappa, Smoothed_OccupationGrid = Smoothed_nGrid)
@@ -176,7 +176,7 @@ contains
   end if
 
   !-Get Mass Estimates-!
-  call Mass_Estimate_CircularAperture(Kappa, Error_Kappa, RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error)
+  call Mass_Estimate_CircularAperture_byPixel(Kappa, Error_Kappa, RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error)
 
   print *, '---------------------------------------------------------------------------------------------------------------------'
   print *, 'Cluster Masses are (in 10^18 M_Sun/h):'

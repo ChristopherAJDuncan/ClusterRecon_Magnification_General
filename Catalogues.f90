@@ -48,6 +48,44 @@ module Catalogues
 
   contains
 
+    !---Catalogue Inforamtion Storage----!
+    subroutine common_Catalogue_directories(Index, Directory, Filename, Columns)
+      integer,intent(in)::Index
+      character(*)::Filename, Directory
+      integer,intent(out)::Columns(13) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!    
+
+      logical::here
+
+      select case(Index)
+      case(1) !-Full STAGES catalogue--!
+         Directory = 'Catalogues/'
+         Filename = 'STAGES_shear.cat'
+         Columns = (/1,2,3,4,5,6,7,8,9,11,19,20,-1/)
+      case(2) !--COMBO17 redshift - matched to STAGES--!
+         Directory = 'Catalogues/'
+         Filename = 'STAGES_COMBO17_gsMag_size_matched.pzcat'
+         Columns = (/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/)
+      case(3) !-- KSBf90 with RRG output--!
+         Directory = 'Catalogues/'
+         Filename =  'SExtractor_RRG.cat'
+         Columns = (/-1, 12, 13, 10, 11, 5, -1, 3, -1, 31, -1, -1, -1/)
+      case(4) !--Mock Catalogue--!
+         Directory = 'Simulations/Output/'
+         Filename = 'Mock_Catalogue.cat'
+         Columns = (/-1, 1, 2,-1,-1,5,-1,-1,-1,3,-1,-1,4/)
+      case default
+         STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
+      end select
+
+      inquire(file = trim(adjustl(Directory))//trim(adjustl(Filename)), exist = here)
+      if(here == .false.) then
+         print *, 'common_Catalogue_directories - Cannot find Catalogue, does it still exist?'
+         print *, trim(adjustl(Directory))//trim(adjustl(Filename))
+         STOP
+      END if
+
+    end subroutine common_Catalogue_directories
+
     !---Catalogue Binning Routines----!
     subroutine Calculate_Bin_Limits_by_equalNumber(Array, nBin, Limits)
       !--Returns the Bin Limits requires for nBin bins on Array, where the Bin is set so that there are an equal number of elements of Array in each bin (therefore suited to an array that contains information for a set of galaxies, and each element is a different galaxy--!
@@ -117,7 +155,7 @@ module Catalogues
       end do
 
       do i = 1, size(Limits,1)
-         if(Occupation(i) /= Expected_Occupation(i)) print *, 'Expected Error (FATAL): bin_catalogue_by_redshift: Occupation of a bin is not equal to the expected occupation', Occupation(i), Expected_Occupation(i)
+         if(Occupation(i) /= Expected_Occupation(i)) print *, 'Expected Error (FATAL): bin_catalogue_by_magnitude: Occupation of a bin is not equal to the expected occupation', i, Occupation(i), Expected_Occupation(i)
       end do
       
       if(Verbose) then
@@ -244,7 +282,8 @@ module Catalogues
 !!$    end do
 
     where(Cat%Redshift > 0.e0_double)
-       Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(Cat%Redshift))/(1.e0_double+Cat%Redshift)
+       !Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift))/(1.e0_double+Cat%Redshift) !-Use if ang diameter distance is comoving-!
+       Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift)) !--Use if angular diameter distance is already proper-!
     end where
 
     if(Verbose) print *, 'Done'
@@ -538,7 +577,7 @@ module Catalogues
 
     function size_variance(Cat, by_Size_Type, global_mean)
       !-Returns the mean size of galaxies in the catalogue, as 1/N*sum(size)-!                                                                                                                                                               
-      use Statistics, only:get_variance
+      use Statistics, only:variance_discrete
       type(Catalogue)::Cat
       real(double)::size_variance
       character(*), intent(in)::by_Size_Type
@@ -554,9 +593,9 @@ module Catalogues
       end if
 
       if(by_Size_Type == 'Physical' .or. by_Size_Type == 'physical' .or. by_Size_Type == 'Phys'.or. by_Size_Type == 'phys') then
-         size_variance =  get_variance(Cat%Physical_Sizes, Cat%Physical_Sizes, mean_size_global, mean_size_global)
+         size_variance =  variance_discrete(Cat%Physical_Sizes, Cat%Physical_Sizes, mean_size_global, mean_size_global)
       elseif(by_Size_Type == 'Pixel' .or. by_Size_Type == 'pixel' .or. by_Size_Type == 'Pix'.or. by_Size_Type == 'pix') then
-         size_variance =  get_variance(Cat%Sizes, Cat%Sizes, mean_size_global, mean_size_global)
+         size_variance =  variance_discrete(Cat%Sizes, Cat%Sizes, mean_size_global, mean_size_global)
       else
          STOP 'global_mean_size - invalid size type entered'
       end if
@@ -569,7 +608,7 @@ module Catalogues
       use IO, only: ReadIn, IO_Verbose, skip_header; use Strings_lib, only:remove_FileExtension_fromString
       !-Direct ReadIn of Catalogue File-!
       type(Catalogue)::Cat
-      character(120),intent(in)::Cat_Filename
+      character(*),intent(in)::Cat_Filename
 
       real(double),allocatable::Cat_2D(:,:)
 
@@ -622,6 +661,8 @@ module Catalogues
       call Catalogue_Construct(Cat, size(Cat_2D,2))
       Cat%Name = trim(adjustl(Cat_Filename))
 
+      PRINT *, 'Using Cols:', icols
+
       do Column_Index = 1, size(iCols)
          if(iCols(Column_Index) < 0) cycle
          select case (Column_Index)
@@ -658,7 +699,7 @@ module Catalogues
       end do
 
       !--Calculate Physical_sizes for the Catalogue--!
-      call convert_Size_from_Pixel_to_Physical(Cat)
+!      call convert_Size_from_Pixel_to_Physical(Cat)
 
       Cat_2D = 0.e0_double; deallocate(Cat_2D)
 
@@ -847,6 +888,8 @@ module Catalogues
     end subroutine Catalogue_Assign_byGalaxy_byIndex
 
     subroutine Catalogue_Assign_byGalaxy_byCatalogue(Cat, Index, Cat_Ref, Index_Ref)
+      !--Equates a galaxy at position: Index_Ref in Catalogue: Cat_Ref to: Index in Cat
+      !--NEEDS TO BE KEPT UP TO DATE WITH ADDITIONS/SUBTRACTIONS TO THE CATALOGUE DERIVED TYPE DEFINITION--!
       type(Catalogue), intent(inout)::Cat
       integer,intent(in)::Index
       type(Catalogue), intent(in)::Cat_Ref
@@ -897,7 +940,51 @@ module Catalogues
     
     end function get_Total_Corrected_Ellipticity_g
 
+    subroutine get_redshift_Information_combine_Catalogues(Cat, RCat, Default_Redshift)
+      !--Appends the redshift information in RCat onto Cat using RA/Dec Information--!
+      type(Catalogue),intent(in)::RCat
+      type(Catalogue),intent(inout)::Cat
+      real(double),optional::Default_Redshift
+
+      real(double)::iDz!-Internal default Redshift
+      real(double)::Position_Tol = 1.0 !--In arcseconds--!
+      real(double)::Pos_Tol_Degree != Position_Tol/(3600.e0_double)
+
+      integer::c, rc
+      integer::nMatch
+
+      integer,dimension(Size(Cat%Redshift)):: Index_Mapping
+
+      print *, 'Matching Redshift Information to Catalogue'
+
+      Pos_Tol_Degree = Position_Tol/(3600.e0_double)
+
+      !--Set all redshifts to the default--!
+      if(present(Default_Redshift)) then
+         print *, 'Setting Unassigned Redshifts to the Default Redshift of:', Default_Redshift
+         Cat%Redshift = Default_Redshift
+      end if
+     
+      Index_Mapping = -1
+      nMatch = 1
+      do rc = 1, size(RCat%Redshift)
+         do c = 1, size(Cat%Redshift)
+            if( (dsqrt( (Cat%RA(c)-Rcat%RA(rc))*(Cat%RA(c)-Rcat%RA(rc)) + (Cat%Dec(c)-Rcat%Dec(rc))*(Cat%Dec(c)-Rcat%Dec(rc)) ) <= Pos_Tol_Degree) .and. (Index_Mapping(c) < 0)) then
+               Cat%Redshift(c) = RCat%Redshift(rc)
+               nMatch = nMatch + 1
+               Index_Mapping(c) = rc
+               exit
+            end if
+         end do
+      end do
+
+      print *, 'Of ', size(RCat%Redshift), 'galaxies with redshifts, ', nMatch, ' have been matched'
+
+    end subroutine get_redshift_Information_combine_Catalogues
+
+
     !"---------------------------------------DEPRECATED CODE------------------------------------------------------------------------!
+
 
 
     !--COMBO17 Redshift Routines---!

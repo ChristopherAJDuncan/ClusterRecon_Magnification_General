@@ -1,5 +1,5 @@
 program Mass_Mapping_RedshiftBins
-  use Catalogues; use Param_Types; use Mass_Estimation; use Statistics, only: get_variance, Mean_Discrete; use Convergence_Estimation
+  use Catalogues; use Param_Types; use Mass_Estimation; use Statistics, only: Variance_Discrete, Mean_Discrete; use Convergence_Estimation
   implicit none
 
   character(120)::Catalogue_Filename = 'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
@@ -89,7 +89,7 @@ program Mass_Mapping_RedshiftBins
 
      !-----Mass Estimation---!
      !-Get Mass Estimates-!                                                                                                 
-     call Mass_Estimate_CircularAperture(Kappa, Error_Kappa, RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(BCat%Cat(Bin_Loop)%Redshift))
+     call Mass_Estimate_CircularAperture_byPixel(Kappa, Error_Kappa, RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(BCat%Cat(Bin_Loop)%Redshift))
      
      print *, '---------------------------------------------------------------------------------------------------------------------'
      print *, 'Cluster Masses are (in 10^18 M_Sun/h):'

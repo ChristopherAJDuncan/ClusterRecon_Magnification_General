@@ -9,11 +9,58 @@ module Convergence_Estimation
   INTERFACE correct_for_beta
      module procedure Correct_for_Beta_Scalar, Correct_for_Beta_TwoBins
   END INTERFACE correct_for_beta
+  INTERFACE get_Convergence
+     module procedure get_Convergence_scalar, get_Convergence_Vector
+  END INTERFACE get_Convergence
 
 
+  integer, private::Default_Convergence_Estimator = 2
 
 
 contains 
+
+  function get_Convergence_Vector(GSize, GlobalAvSize, Estimator)
+    real(double),intent(in)::GSize(:)
+    real(double),intent(in)::GlobalAvSize
+    integer,intent(in)::Estimator
+
+    real(double),dimension(size(GSize))::get_Convergence_Vector
+
+    integer::i
+
+    do i = 1, size(GSize)
+       get_Convergence_Vector(i) = get_Convergence_scalar(GSize(i), GlobalAvSize, Estimator)
+    end do
+
+  end function get_Convergence_Vector
+
+  real(double) function get_Convergence_scalar(GSize, GlobalAvSize, Estimator)
+    real(double),intent(in)::GSize, GlobalAvSize
+    integer,intent(in)::Estimator
+
+    integer,save::callcount = 0
+    integer,save::Previous_Method = -1
+    logical::Talk_to_Me
+
+    Talk_to_Me = .false.
+    if( (Estimator/=Previous_Method) .or. (callcount == 1) ) Talk_to_Me = .true.
+
+    select case (Estimator)
+    case(1) !-r/<r>  - 1-!
+       if(Talk_To_Me) print *, 'Using r/<r> - 1 as Estimator for convergence'
+       get_Convergence_Scalar = (GSize/GlobalAvSize) - 1.e0_double
+    case(2) !-ln(r/<r>)-!
+       if(Talk_To_Me) print *, 'Using ln(r/<r>) as Estiamtor for convergence'
+       get_Convergence_Scalar = dlog(GSize/GlobalAvSize)
+    case default
+
+    end select
+
+
+    Previous_Method = Estimator
+    callcount = callcount + 1 
+
+  end function get_Convergence_Scalar
 
   subroutine construct_RA_Dec_Gridding(Cat,nRA, nDec, RAGrid, DecGrid)
     type(Catalogue),intent(in)::Cat
@@ -108,18 +155,19 @@ contains
              print *, 'Calculating beta from catalogue...'
              call calculate_beta_fromCatalogue(Cat, beta_correction)
           end if
-          call correct_for_beta(KappaEst, beta_correction)
+          if(callcount ==1) print *, 'I AM NOT CORRECTING FOR BETA'
+          !call correct_for_beta(KappaEst, beta_correction)
        end if
-       !call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_Size = AverageSize, Kappa = KappaEst)
+       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_Size = AverageSize, Kappa = KappaEst)
     else
-       !call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_size = AverageSize)
+       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_size = AverageSize)
     end if
 
-    if(callcount == 1) print *, 'I AM NOT SMOOTHING'
+!    if(callcount == 1) print *, 'I AM NOT SMOOTHING'
 
     if(present(Smoothed_OccupationGrid)) then
        allocate(Smoothed_OccupationGrid(size(OccupationGrid,1), size(OccupationGrid, 2))); Smoothed_OccupationGrid = 1.e0_double*OccupationGrid
-       !call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, OccGrid = Smoothed_OccupationGrid)
+       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, OccGrid = Smoothed_OccupationGrid)
     end if
  
     if(any(isNaN(AverageSize))) STOP 'Average_Size_in_RA_Dec_Grid - FATAL ERROR - average size constains NaNs'
@@ -268,7 +316,7 @@ contains
     do i =1, size(nGrid,1)
        do j = 1, size(nGrid,2)
           if(nGrid(i,j) <= 0) cycle
-          Kappa_In(i,j) = (AverageSize(i,j)/global_mean_size) - 1.e0_double
+          Kappa_In(i,j) = get_Convergence(AverageSize(i,j), global_mean_size, Default_Convergence_Estimator)!(AverageSize(i,j)/global_mean_size) - 1.e0_double
        end do
     end do
 
@@ -489,11 +537,14 @@ contains
 
     !--Bin first by redshift using pre-defined Redshift--!
     call bin_catalogue_by_redshift(Cat, Red_Limits, BCat_Red)
+    print *, 'Average_Size_in_Luminosity_Redshift_Bins - binned in redshift'; read(*,*)
 
     allocate(BCat_Lum_Red(size(Red_Limits,1)))
     do BinZ = 1, size(BCat_Lum_Red)
        call Bin_Catalogue_by_magnitude(BCat_Red%Cat(BinZ), Mag_Limits, BCat_Lum_Red(BinZ))
     end do
+
+    print *, 'Average_Size_in_Luminosity_Redshift_Bins - binned in magnitude'; read(*,*)
 
     if(Verbose) print *, 'Finished Binning'
 
@@ -503,6 +554,8 @@ contains
           if(isNAN(SLR(BinL,BinZ))) SLR(BinL,BinZ) = 0.e0_double
        end do
     end do
+
+     print *, 'Done.'; read(*,*)
 
     if(Verbose) print *, 'Done.'
 
@@ -705,6 +758,7 @@ contains
     real(double),allocatable::SMR(:,:), SMR_Error(:,:)
 
     print *, 'Calculating Beta from fit across whole catalogue'
+    read(*,*)
 
     print *, 'Cat Mag:', allocated(Cat%Mag), size(Cat%Mag), all(Cat%Mag==0.e0_double)
     if(allocated(Cat%Mag)== .false. .or. size(Cat%Mag) == 0 .or. all(Cat%Mag==0.e0_double)) then
@@ -717,14 +771,21 @@ contains
     call Calculate_Bin_Limits_by_equalNumber(Cat%Mag, nMag, Mag_Bin)
     Red_Bin(1,:) = (/ minval(Cat%Redshift), maxval(Cat%Redshift) /)
 
+    print *, 'Got Bin Limits'
+    read(*,*)
 
     !--Calculate beta using all magnitude bins--!
     allocate(SMR(size(Mag_Bin,1), size(Red_Bin,1))); SMR = 0.e0_double
     allocate(SMR_Error(size(Mag_Bin,1), size(Red_Bin,1))); SMR_Error = 0.e0_double
 
     call Average_Size_in_Luminosity_Redshift_Bins(Cat, Mag_bin, Red_Bin, SMR)
+    print *, 'Got SMR'; read(*,*)
     call Average_Size_in_Luminosity_Redshift_Errors(Cat, Mag_Bin, Red_Bin, SMR_Error)
+    print *, 'Got SMR Error';read(*,*)
     call calculate_beta_fromAverageSize_AllMagnitudeBins(SMR(:,1), SMR_Error(:,1), Mag_Bin, beta)
+
+    print *, 'Got beta, reading'
+    read(*,*)
 
   end subroutine calculate_beta_fromCatalogue
 

@@ -33,7 +33,7 @@ contains
     real(double),intent(in)::Sizes(:)
     character(*),intent(in):: filename
 
-    integer,parameter::nBin = 10
+    integer,parameter::nBin = 30
     real(double)::Bin_Limits(nBin,2) 
     integer,allocatable::Number_in_Bin(:)
 
@@ -47,6 +47,7 @@ contains
        Bin_Limits(i,:) = (/ minSize+(i-1)*((maxSize-minSize)/(nBin)) , minSize+(i)*((maxSize-minSize)/(nBin)) /)
     end do
 
+    !--Set histogram bin values--!
     allocate(Number_in_Bin(nBin)); Number_in_Bin = 0.e0_double
     do i =1, size(Sizes)
        if(Sizes(i) < 0.e0_double) cycle
@@ -89,6 +90,8 @@ contains
 
     integer::Expected_Number_in_Aperture
     real(double)::Mean_of_Catalogue, Mean_of_Aperture
+
+    print *, 'Attempting to get a size histogram in filename:', trim(filename)
 
     Mean_of_Catalogue = sum(Cat%Physical_sizes)/size(Cat%Physical_sizes)
 
