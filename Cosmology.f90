@@ -18,6 +18,9 @@ module cosmology
      MODULE PROCEDURE angular_diameter_distance_fromRedshift_array, angular_diameter_distance_fromRedshift_scalar
   END INTERFACE angular_diameter_distance_fromRedshift
 
+  INTERFACE luminosity_distance
+     MODULE PROCEDURE luminosity_distance_array, luminosity_distance_scalar
+  END INTERFACE luminosity_distance
   
 contains
 
@@ -32,6 +35,44 @@ contains
     LCDM%h_100 = 0.7e0_double
 
   end function LCDM
+
+  function luminosity_distance_array(z1,z2,Cos)
+        !-Returned in units of Mpc/h                                                                                                                                                                                                         
+    type(Cosmology_Parameters),optional::cos
+    real(double),intent(in)::z1
+    real(double),intent(in)::z2(:)
+
+    real(double),dimension(size(z2))::luminosity_distance_array
+
+    real(double):: angular_diameter_distance(size(z2))
+
+    type(Cosmology_Parameters)::Internal_Cos
+
+    if(present(cos)) then
+       Internal_Cos = Cos
+    else
+       Internal_Cos = LCDM()
+    end if
+
+    angular_diameter_distance =angular_diameter_distance_fromRedshift_array(z1,z2, Internal_Cos)
+    luminosity_distance_array = ( ((1+z2)/(1+z1))**2.e0_double )*angular_diameter_distance
+
+  end function luminosity_distance_array
+
+  function luminosity_distance_scalar(z1,z2,Cos)
+    !-Returned in units of Mpc/h                                                                                                                                                                                                         
+    type(Cosmology_Parameters),optional::cos
+    real(double),intent(in)::z1
+    real(double),intent(in)::z2
+
+    real(double)::luminosity_distance_scalar
+
+    real(double)::lum_distance(1)
+
+    lum_distance = luminosity_distance_array(z1,(/z2/),Cos)
+    luminosity_distance_scalar = lum_distance(1)
+
+  end function luminosity_distance_scalar
 
   function angular_diameter_distance_fromRedshift_array(z1,z2, Cos)
        !-Returned in units of Mpc/h                                                                                     
@@ -64,7 +105,7 @@ contains
 
  function angular_diameter_distance_fromRedshift_scalar(z1, z2, cos)
    !-Returned in units of Mpc/h
-   !--This is returned as a proper distance
+   !--This is returned as a proper distance--!
     type(Cosmology_Parameters),optional::cos
     real(double),intent(in)::z1
     real(double),intent(in)::z2

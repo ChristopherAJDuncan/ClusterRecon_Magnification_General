@@ -13,7 +13,6 @@ module Catalogues
 !  character(60),private::Catalogue_Name = 'STAGES_shear.cat'
 
   !--Catalogue Derived Type--!
-
   type Catalogue
      character(60)::Name
      character(len = 10)::Mag_Label
@@ -30,12 +29,18 @@ module Catalogues
   end type Catalogue
 
   !-- Binned Catlogue contains a seperate Catalogue derived type for each reshift bin, which contains the subset of galaxies in that Bin--!
+  type Binned_Catalogue_Mapping
+     integer,allocatable::Map(:)
+  end type Binned_Catalogue_Mapping
+
   type Binned_Catalogue
      character(5)::Label
      real(double),dimension(:,:),allocatable::Bin_Limits
      integer,dimension(:),allocatable::Occupation
      type(Catalogue),dimension(:),allocatable::Cat
+     type(Binned_Catalogue_Mapping),dimension(:),allocatable::Index_Mapping
   end type Binned_Catalogue
+
 
 
   !--Global Parameters--!
@@ -55,6 +60,8 @@ module Catalogues
       integer,intent(out)::Columns(13) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!    
 
       logical::here
+
+      character(200)::Base_Directory = '/disk1/cajd/Size_Magnification/'
 
       select case(Index)
       case(1) !-Full STAGES catalogue--!
@@ -76,6 +83,8 @@ module Catalogues
       case default
          STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
       end select
+
+      Directory = trim(Base_Directory)//trim(Directory)
 
       inquire(file = trim(adjustl(Directory))//trim(adjustl(Filename)), exist = here)
       if(here == .false.) then
@@ -116,16 +125,22 @@ module Catalogues
     end subroutine Calculate_Bin_Limits_by_equalNumber
 
     subroutine bin_catalogue_by_magnitude(Cat,Limits,BCat)
+      USE NR, ONLY:SORT
       !--Bins the catalogue by magnitude, returning BCat wof type Binned_Catalogue, which contains a seperate catalogue for each magnitude bin entered in Limits
       type(Catalogue),intent(in)::Cat
       type(Binned_Catalogue)::BCat
       real(double), dimension(:,:),intent(in)::Limits
       
-      integer::c,i
+      integer::c,i, j
       
-      type(Catalogue)::tCat !-temporary allocation-!                                                                                                                                                                                                                          
+      type(Catalogue)::tCat !-temporary allocation-!                                       
+      integer::counter
       integer,allocatable::Expected_Occupation(:), Occupation(:)
       
+      real(double),allocatable::Sorted_Array(:)
+      logical::Stop_Flag
+      logical::Index_Map_Found
+
       if(Verbose) print *, 'Binning Catalogue by Magnitude...'
       
       allocate(Expected_Occupation(size(Limits,1))); Expected_Occupation = 0
@@ -136,28 +151,83 @@ module Catalogues
       
       !-Construct Expected Occupation-!                                                                                                                                                                                    
       do i = 1, size(Limits,1)
-         Expected_Occupation(i) = count(Cat%Mag <= Limits(i,2)) - count(Cat%Mag <= Limits(1,1)) - sum(Expected_Occupation(:i))
-         Expected_Occupation(size(Expected_Occupation)) = Expected_Occupation(size(Expected_Occupation)) + count(Cat%Mag==Limits(size(Limits,1),2))
+         Expected_Occupation(i) = count(Cat%Mag <= Limits(i,2)) - count(Cat%Mag <= Limits(i,1))
+!         Expected_Occupation(i) = count(Cat%Mag <= Limits(i,2)) - count(Cat%Mag <= Limits(1,1)) - sum(Expected_Occupation(:i))
+         if(i==1) Expected_Occupation(1) = Expected_Occupation(1) + count(Cat%Mag==Limits(1,1))
          call Catalogue_Construct(BCat%Cat(i), Expected_Occupation(i))
+         allocate(BCat%Index_Mapping(i)%Map(Expected_Occupation(i))); BCat%Index_Mapping(i)%Map = -1
       end do
       
+      counter = 0
       do c = 1, size(Cat%Sizes)
          do i =1, size(Limits,1)
             if( (Cat%Mag(c) > Limits(i,1)) .and. (Cat%Mag(c) <= Limits(i,2)) ) then
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
+               BCat%Index_Mapping(i)%Map(Occupation(i)) = c
             end if
-            if(i == size(Limits,1) .and. Cat%Mag(c) == Limits(i,2)) then
+            if(i == 1 .and. Cat%Mag(c) == Limits(i,1)) then
+               counter = counter + 1
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
+               BCat%Index_Mapping(i)%Map(Occupation(i))= c
             end if
          end do
       end do
 
-      do i = 1, size(Limits,1)
-         if(Occupation(i) /= Expected_Occupation(i)) print *, 'Expected Error (FATAL): bin_catalogue_by_magnitude: Occupation of a bin is not equal to the expected occupation', i, Occupation(i), Expected_Occupation(i)
+      do i =1, size(Limits,1)
+         if(any(BCat%Index_Mapping(i)%Map > size(Cat%Sizes)) .or. any(BCat%Index_Mapping(i)%Map < 0)) then
+            print *, 'Fatal Error - bin_catalogue_by_magnitude - Mapping to small or large:: Bin, Max/Min Mapping, nGal:', i, maxval(BCat%Index_Mapping(i)%Map), minval(BCat%Index_Mapping(i)%Map), size(Cat%Sizes)
+            STOP
+         end if
       end do
-      
+
+      !--Check for Duplication of Mapping - i.e. there should be a monotonic mapping between catalogues--!
+      allocate(Sorted_Array(sum(Occupation))); Sorted_Array = -100.e0_double
+      counter = 0
+      do i =1, size(Limits,1)
+         Sorted_Array(counter + 1:counter+size(BCat%Index_Mapping(i)%Map)) = BCat%Index_Mapping(i)%Map
+         counter = counter + size(BCat%Index_Mapping(i)%Map)
+      end do
+      call sort(Sorted_Array)
+      do j = 2, size(Sorted_Array)-1
+         if( (Sorted_Array(j-1) == Sorted_Array(j)) .or. (Sorted_Array(j+1) == Sorted_Array(j)) ) then
+            print *, 'Duplication of Mapping, value:', Sorted_Array(j)
+            STOP_FLAG = .true.
+         end if
+      end do
+      if(STOP_FLAG) STOP
+      !---------------------end duplication check-------------------------------------------------------!
+
+      if((minval(Limits) <= minval(Cat%Mag)) .and. (maxval(Limits) >= maxval(Cat%Mag)) .and. (sum(Occupation) /= Size(Cat%RA))) THEN !!THIS IS ONLY TRUE IS LIMITS ARE SUCH TAHT ALL SHOULD BE ACCOUNTED FOR!!
+         pRINT *, 'bin_catalogue_by_magnitude- FATAL ERROR - Sum of occupation is not equal to the size of the original array; not all galaxies accounted for:, Occ, Array', sum(Occupation), Size(Cat%RA)
+         do j = 1, size(Cat%RA)
+            Index_map_Found = .false.
+            do i = 1, size(Limits,1)
+               if(j==1) print *, 'Occ, Expected:', Occupation(i), Expected_Occupation(i)
+               do c = 1, size(BCat%Cat(i)%RA)
+                  if(BCat%Index_Mapping(i)%Map(c) == j) then
+                     !--Success--!
+                     Index_Map_Found = .true.
+                     exit
+                  end if
+                  if(Index_Map_Found== .false. .and. i == size(Limits,1) .and. c == size(BCat%Cat(i)%RA)) then
+                     print *, 'A Missing Galaxy was found:, galaxy:', j, 'with Magnitude:', Cat%Mag(j), ' limits:', Limits(1,1), Limits(size(Limits,1),2)
+                  end if
+               end do
+               if(Index_map_found == .true.) exit
+            end do
+         end do
+
+         STOP
+      end if
+      do i = 1, size(Limits,1)
+         if(Occupation(i) /= Expected_Occupation(i)) then
+            print *, 'Expected Error (FATAL): bin_catalogue_by_magnitude: Occupation of a bin is not equal to the expected occupation', i, Occupation(i), Expected_Occupation(i)
+            STOP
+         END if
+      end do      
+
       if(Verbose) then
          print *, 'Sample of ', size(Cat%Sizes), ' galaxies split as:'
          do i =1, size(Limits,1)
@@ -173,6 +243,8 @@ module Catalogues
 
     subroutine bin_catalogue_by_redshift(Cat,Limits,BCat)
       !--Bins the catalogue by redshift, returning BCat wof type Binned_Catalogue, which contains a seperate catalogue for each redshift bin entered in Limits
+      !--On 13Jan2014, bin by magnitude was edited to account for the one galaxy that will fall into teh first bin, this will probably need done here - EDITED BUT NOT TESTED--!
+
       type(Catalogue),intent(in)::Cat
       type(Binned_Catalogue)::BCat
       real(double), dimension(:,:),intent(in)::Limits
@@ -192,11 +264,14 @@ module Catalogues
       
       !-Construct Expected Occupation-!                                                                                                                                                                                                                                       
       do i = 1, size(Limits,1)
-         Expected_Occupation(i) = count(Cat%Redshift <= Limits(i,2)) - count(Cat%Redshift <= Limits(1,1))  - sum(Expected_Occupation(:i))
+!         Expected_Occupation(i) = count(Cat%Redshift <= Limits(i,2)) - count(Cat%Redshift <= Limits(1,1))  - sum(Expected_Occupation(:i))
+         Expected_Occupation(i) = count(Cat%Redshift <= Limits(i,2)) - count(Cat%Redshift <= Limits(i,1))
+         if(i==1) Expected_Occupation(1) = Expected_Occupation(1) + count(Cat%Redshift==Limits(1,1))
          !--Edit--!
-         Expected_Occupation(size(Expected_Occupation)) = Expected_Occupation(size(Expected_Occupation)) + count(Cat%Redshift==Limits(size(Limits,1),2))
+!         Expected_Occupation(size(Expected_Occupation)) = Expected_Occupation(size(Expected_Occupation)) + count(Cat%Redshift==Limits(size(Limits,1),2))
          !--------!
          call Catalogue_Construct(BCat%Cat(i), Expected_Occupation(i))
+         allocate(BCat%Index_Mapping(i)%Map(Expected_Occupation(i))); BCat%Index_Mapping(i)%Map = -1
       end do
       
       do c = 1, size(Cat%Sizes)
@@ -204,17 +279,27 @@ module Catalogues
             if( (Cat%Redshift(c) > Limits(i,1)) .and. (Cat%Redshift(c) <= Limits(i,2)) ) then
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
+               BCat%Index_Mapping(i)%Map(Occupation(i)) = c
             end if
-            if(i == size(Limits,1) .and. Cat%Redshift(c) == Limits(i,2)) then
+            if(i == 1 .and. Cat%Redshift(c) == Limits(i,1)) then
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
+               BCat%Index_Mapping(i)%Map(Occupation(i)) = c
             end if
          end do
       end do
-      !--Assign all the galaxies at the upper boundary to the highest redshift bin--!
-
+      !--Assign all the galaxies at the upper boundary to the lower redshift bin--!
+      if(sum(Occupation) /= Size(Cat%RA)) THEN
+         pRINT *, 'bin_catalogue_by_redshift- FATAL ERROR - Sum of occupation is not equal to the size of the original array; not all galaxies accounted for:, Occ, Array', sum(Occupation), Size(Cat%RA)
+         do i = 1, size(Limits,1)
+            print *, 'Occ, Expected:', Occupation(i), Expected_Occupation(i)
+         end do
+         STOP
+      end if
+         
       do i = 1, size(Limits,1)
          if(Occupation(i) /= Expected_Occupation(i)) print *, 'Expected Error (FATAL): bin_catalogue_by_redshift: Occupation of a bin is not equal to the expected occupation', Occupation(i), Expected_Occupation(i)
+         
       end do
       
       if(Verbose) then
@@ -257,7 +342,118 @@ module Catalogues
 
     end subroutine bin_catalogue_by_Redshift_and_Magnitude
 
+    subroutine unBin_Binned_Catalogue(BCat, Cat)
+      !--Unpacks the binned catalogue into the full Catalogue, in the order in which it was binned--!
+      type(Binned_Catalogue)::BCat
+      type(Catalogue)::Cat
+
+      integer::b, c, bc
+
+      integer::nGal, counter
+
+      !--Tested 13Jan2014--!
+      integer,allocatable:: Removed_Galaxy_Mapping(:) !-As some galaxies may have been removed from the original-!
+      logical:: Galaxy_Found
+      integer::Galaxy_Index_Adjustment, Max_Mapping
+
+      !--Testing--!
+      integer::Index
+
+      nGal = 0
+      do b = 1, size(BCat%Cat)
+         nGal = nGal + size(BCat%Cat(b)%RA)
+      end do
+
+      call Catalogue_Destruct(Cat)
+      call Catalogue_Construct(Cat, nGal)
+
+!--Unbinning by mapping index only works if NO galaxies where thrown away from the original, binned catalogue, thus there must be a mapping between the full original catalogue (when binned) and the full catalogue now, accounting for discarded galaxies--!
+      Max_Mapping = 0
+      do b = 1, size(BCat%Cat)
+         Max_Mapping = maxval( (/Max_Mapping, maxval(BCat%Index_Mapping(b)%Map)/) )
+      end do
+      allocate(Removed_Galaxy_Mapping(Max_Mapping)); Removed_Galaxy_Mapping = -1
+
+      do c = 1, Max_Mapping
+         Galaxy_Found = .false.
+         !Search through the mappings in BCat to determine whether galaxy is present or cut!
+         do b = 1, size(BCat%Cat)
+            do bc = 1, size(BCat%Index_Mapping(b)%Map)
+               if(BCat%Index_Mapping(b)%Map(bc) == c) then
+                  !--Success--!
+                  Galaxy_Found = .true.
+                  exit
+               end if
+               if(b == size(BCat%Cat) .and. bc == size(BCat%Index_Mapping(b)%Map) .and. Galaxy_Found==.false.) then
+                  !-Final Binned Galaxy checked and galxy not found-!
+                  Galaxy_Index_Adjustment = Galaxy_Index_Adjustment + 1
+               end if
+            end do
+            !-Don't contine to search bins for galaxy-!
+            if(Galaxy_Found) exit
+         end do
+         Removed_Galaxy_Mapping(c) = c - Galaxy_Index_Adjustment
+         if(Galaxy_Found == .false.) then
+            Removed_Galaxy_Mapping(c) = -1000!sqrt(-1.e0_double)!1/0 !-Convert to NaN for missing galaxy so if referenced then error, and adjust all following-!
+         end if
+      end do
+
+      counter = 0
+      do b = 1, size(BCat%Cat)
+         if(allocated(BCat%Index_Mapping(b)) == .false.) STOP 'unBin_Binned_Catalogue - Mapping not allocated'
+         do c = 1, size(BCat%Cat(b)%RA)
+            counter = counter + 1
+            if(BCat%Index_Mapping(b)%Map(c) < 0) then
+               print *, 'For bin:', b, ' galaxy:', c, ' of:', size(BCat%Index_Mapping(b)%Map),':'
+               STOP 'unBin_Binned_Catalogue - Mapping is Negative, stopping'
+            end if
+            !call Catalogue_Assign_byGalaxy_byCatalogue(Cat, counter, BCat%Cat(b), c) if order is not important
+            if(Removed_Galaxy_Mapping(BCat%Index_Mapping(b)%Map(c)) <= 0) STOP 'unBin_Binned_Catalogue - NaN references in removed mapping, stopping'
+            call Catalogue_Assign_byGalaxy_byCatalogue(Cat, Removed_Galaxy_Mapping(BCat%Index_Mapping(b)%Map(c)), BCat%Cat(b), c)
+            Index = BCat%Index_Mapping(b)%Map(c)
+         end do
+      end do
+
+      call Binned_Catalogue_Destruct(BCat)
+
+      deallocate(Removed_Galaxy_Mapping)
+
+    end subroutine unBin_Binned_Catalogue
+
     !------------------END BINNING ROUTINES-------------------------!
+
+    subroutine convert_Size_from_Physical_to_Pixel(Cat)
+      use Cosmology
+      !-Converts from a phyiscal galaxy size to pixel size. Can only be done if there is redshift information for each galaxy!!!-!
+      !--Physical Size in Mpc/h, and is in proper size co-ords (ie extra factor of a)
+      type(Catalogue)::Cat
+
+      integer::g
+
+      real(double)::Pixel_Size_Radians
+
+      if(Verbose) print *, 'Calculating Physical Size using Pixel Size = ', ACSPixel_Size, ' arcseconds'
+
+      if(all(Cat%Redshift < 0.e0_double)) STOP 'convert_Size_from_Pixel_to_Physical - All Galaxies in catalogue have not been assigned a redshift, exiting...'
+
+    if(allocated(Cat%Sizes)) deallocate(Cat%Sizes)
+    allocate(Cat%Sizes(size(Cat%Physical_Sizes))); Cat%Sizes = -1.e0_double
+
+    Pixel_Size_Radians = (ACSPixel_Size*3.141592654e0_double)/(180.e0_double*3600.e0_double)
+!!$    do g = 1, size(Cat%Sizes)
+!!$       if(Cat%Redshift(g) > 0.e0_double) Cat%Physical_Sizes(g) = Pixel_Size_Radians*Cat%Sizes(g)*angular_diameter_distance_fromRedshift(Cat%Redshift(g))
+!!$    end do
+
+    where(Cat%Redshift > 0.e0_double)
+!       Cat%Sizes = (Cat%Physical_Sizes*(1.e0_double+Cat%Redshift))/(Pixel_Size_Radians*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift)) !-Use if angular diameter distance is comoving-!
+       Cat%Sizes = (Cat%Physical_Sizes)/(Pixel_Size_Radians*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift)) !-Use if angular diameter distance is proper-!
+      
+    end where
+
+    if(Verbose) print *, 'Done'
+
+  end subroutine convert_Size_from_Physical_to_Pixel
+
 
     subroutine convert_Size_from_Pixel_to_Physical(Cat)
       use Cosmology
@@ -282,8 +478,8 @@ module Catalogues
 !!$    end do
 
     where(Cat%Redshift > 0.e0_double)
-       !Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift))/(1.e0_double+Cat%Redshift) !-Use if ang diameter distance is comoving-!
-       Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift)) !--Use if angular diameter distance is already proper-!
+!       Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift))/(1.e0_double+Cat%Redshift) !-Use if angular diameter distance is comoving-!
+       Cat%Physical_Sizes = (Pixel_Size_Radians*Cat%Sizes*angular_diameter_distance_fromRedshift(0.e0_double,Cat%Redshift))  !-Use if angular diameter distance is proper-!
     end where
 
     if(Verbose) print *, 'Done'
@@ -749,6 +945,7 @@ module Catalogues
       allocate(BCat%Bin_limits(nBin,2)); BCat%Bin_Limits = 0.e0_double
       allocate(BCat%Occupation(nBin)); BCat%Occupation = 0
       allocate(BCat%Cat(nBin))
+      allocate(BCat%Index_Mapping(nBin))
 
     end subroutine Binned_Catalogue_Construct
 
@@ -1079,4 +1276,4 @@ module Catalogues
 
 
 
-end module Catalogues
+  end module Catalogues
