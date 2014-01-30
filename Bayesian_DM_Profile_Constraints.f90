@@ -4,7 +4,13 @@ program  Bayesian_DM_Profile_Constraints
   use Param_Types; use Catalogues
   implicit none
 
-  character(200)::Output_Directory = 'Bayesian_DM_Profile_Constriants_Output/'
+  character(200):: Output_Directory, Output_Directory_Default = 'Bayesian_DM_Profile_Constraints_Output/'
+  integer:: Catalogue_Identifier = 5
+  integer:: Bin_By_Magnitude_Type = 2 !-1:Absolute Magnitude, 2: Apparent Magnitude-!
+
+  !--Command Line Argument Entry--!
+  integer::narg, i
+  character(120)::arg
 
   real(double),allocatable::Cluster_Posteriors(:,:,:)
   type(Catalogue)::Catt
@@ -23,12 +29,40 @@ program  Bayesian_DM_Profile_Constraints
   Cluster_Pos(4,:) = (/148.9101e0_double,-10.1719e0_double/)
   allocate(Cluster_Aperture_Radius(4)); Cluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-!
 
+
+  !--Read in by Command Line--! 
+  narg = iargc()
+  if(narg == 0) then
+     !-Defaults-!
+     print *, 'No arguments entered'
+     print *, 'Note: Catalogue_Identifier: 1:STAGES_shear, 2: COMBO matched, 3:RRG, 4:STAGES-Mock, 5:COMBO-Mock'
+     print *, 'Press <ENTER> to use defaults'
+     read(*,*)
+     Output_Directory = trim(Output_Directory_Default)
+  else
+     print *, 'Number of arguements:', narg
+     do i =1, narg
+        call get_command_argument(i,arg)
+        select case(i)
+        case(1) !-Catalogue_Identifier-!
+           read(arg, '(I1)') Catalogue_Identifier
+        case(2)
+           Output_Directory = trim(adjustl(arg))
+        case default
+           STOP 'INCORRECT NUMBER OF ARGUEMENTS ENTERED'
+        end select
+     end do
+  end if
+  print *, 'Using Catalogue_Identifier: ', Catalogue_Identifier
+  print *, 'and Output_Directory: ', trim(Output_Directory)
+  print *, ' '
+
   !--Read in the Catalogue with reshifts--!                                                                                                     
   !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks_STAGES; 5:Mocks_COMBO!
-  call common_Catalogue_directories(5, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+  call common_Catalogue_directories(Catalogue_Identifier, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
   call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
 
-  call Clip_Sizes(Catt, (/0.e0_double, 20.e0_double/) )
+!  call Clip_Sizes(Catt, (/0.e0_double, 20.e0_double/) )
   !call convert_Size_from_Pixel_to_Physical(Catt)
   call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!
   call Monte_Carlo_Redshift_Sampling(Catt)
@@ -129,7 +163,7 @@ contains
 
     call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMag, MagBins)
 
-    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Cat, .true.)
+    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Cat, use_Physical_sizes = .true., Magnitude_Type = 2)
     
     !--Get Prior by getting refernce for each bin, and binning each reduced cat using the same definition (mag)--!
     !--Produce Posterior for each mag bin--!
@@ -137,7 +171,7 @@ contains
     do ap = 1, size(Ap_Cats)
        call bin_catalogue_by_magnitude(Ap_Cats(Ap), MagBins, BCat)
 
-       print *, 'Aperture Catalogue binned in the same way with magnitudes: Aperture:', Ap, ' has ', size(Ap_Cats(Ap)%RA), ' galaxies binned accordjing to:', BCat%Occupation
+       print *, 'Aperture Catalogue binned in the same way with magnitudes: Aperture: ', Ap, ' has ', size(Ap_Cats(Ap)%RA), ' galaxies binned accordjing to:', BCat%Occupation
 
        do m = 1, size(MagBins,1)
           !--Set up Prior_Single for that Aperture and Mag Bin-!
@@ -145,13 +179,18 @@ contains
 
           !-Get Posterior for that Magnitude-!
           write(Output_File_Prefix,'(I2)') Ap
-          Output_File_Prefix = 'Aperture_'//trim(adjustl(Output_File_Prefix))//'_'
+          Output_File_Prefix = trim(adjustl(Output_Directory))//'Aperture_'//trim(adjustl(Output_File_Prefix))//'_'
           call DM_Profile_Variable_Posterior(BCat%Cat(m), 1, Prior_Single, Lens_Redshift, Posterior_Single, Output_File_Prefix)
 
-          print *, 'Any NaNs in returned posterior?', any(isNAN(Posterior_Single(2,:))), count(isNAN(Posterior_Single(2,:)) == .true.)
+
+          if(any(isNAN(Posterior_Single(2,:)))) then
+             print *, 'Any NaNs in returned posterior?', any(isNAN(Posterior_Single(2,:))), count(isNAN(Posterior_Single(2,:)) == .true.)
+             print *, 'Stopping'
+             STOP
+          END if
+
 
           if(m==1) then
-             print *, 'Allocating Posterior by mag:', size(MagBins,1), 2, size(Posterior_Single,2)
              allocate(Aperture_Posterior_byMag(size(MagBins,1), 2, size(Posterior_Single,2))); Aperture_Posterior_byMag = 0.e0_double !-Assumes posterior on the same grid as the prior
           end if
           Aperture_Posterior_byMag(m,1,:) = Posterior_Single(1,:); Aperture_Posterior_byMag(m,2,:) = Posterior_Single(2,:)
@@ -163,21 +202,19 @@ contains
 
        !--Recombine Posterior for that Aperture, over all mag bins - Assumes all on the same grid-!
        if(Ap==1) then
-          allocate(Posteriors(size(Ap_Cats),2, size(Aperture_Posterior_byMag,3))); Posteriors = 0.e0_double
+          allocate(Posteriors(size(Ap_Cats),2, size(Aperture_Posterior_byMag,3))); Posteriors = 1.e0_double
        end if
        Posteriors(Ap,1,:) = Aperture_Posterior_byMag(1,1,:);
-       !--Combine as log posteriors--!
+       !--Combine as posteriors--!
+       !-Normalise by a factor to ensure no numerical errors, as taking few mag bins this shouldn't be as important here'
        do m = 1, size(MagBins,1)
-          where(Aperture_Posterior_byMag(m,2,:) /= 0.e0_double)
-             Posteriors(Ap,2,:) = Posteriors(Ap,2,:) + log(Aperture_Posterior_byMag(m,2,:))
-          end where
-!          Posteriors(Ap,2,:) = Posteriors(Ap,2,:)*Aperture_Posterior_byMag(m,2,:)
+             Posteriors(Ap,2,:) = Posteriors(Ap,2,:)*(Aperture_Posterior_byMag(m,2,:)/(0.5e0_double*maxval(Aperture_Posterior_byMag(:,2,:))))!Posteriors(Ap,2,:) + log(Aperture_Posterior_byMag(m,2,:))
        end do
        
 
        !--Output Posterior per Mag Bin--!
        write(apString, '(I1)') Ap
-       open(38, file =trim(Output_Directory)//'lnPosterior_Aperture_'//trim(apString)//'_byMagBin.dat')
+       open(38, file =trim(Output_Directory)//'Posterior_Aperture_'//trim(apString)//'_byMagBin.dat')
        !--Header--!!!!!!!!!!!!!!!!!
        do j = 1, size(MagBins,1)
           write(38, '(A1, 2(e14.7,x))') '#', MagBins(j,:)
@@ -187,14 +224,14 @@ contains
           write(38, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Aperture_Posterior_byMag(1,1,j), Aperture_Posterior_byMag(:,2,j)
        end do
        close(38)
-       print *, 'Output file to: ',trim(Output_Directory)//'lnPosterior_Aperture_'//trim(apString)//'_byMagBin.dat' 
+       print *, 'Output file to: ',trim(Output_Directory)//'Posterior_Aperture_'//trim(apString)//'_byMagBin.dat' 
 
        deallocate(Aperture_Posterior_byMag)
     end do
 
-    where(Posteriors(:,2,:) /= 0.e0_double)
-       Posteriors(:,2,:) = dexp(Posteriors(:,2,:))
-    end where
+!!$    where(Posteriors(:,2,:) /= 0.e0_double)
+!!$       Posteriors(:,2,:) = dexp(Posteriors(:,2,:))
+!!$    end where
 
     !--Renormalising--!
     do Ap = 1, size(Posteriors,1)
@@ -227,13 +264,13 @@ contains
 
        D_l =  angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
        Area = 3.142e0_double*(D_l*((3.142e0_double*Ap_Radius(Ap))/180.e0_double))**2.e0_double
-
-
+       print *, 'Typical Conversion from Sigma to Mass (x10^18 Msun/h):', Area
        write(Error_Mass_String, '(e8.2)') Area*1.e18_double*Cluster_Variance(Ap)
        write(Mass_String, '(e8.2)') Area*Cluster_Mean(Ap)*1.e18_double
-       print *, 'Mass of Cluster :', Ap, ', is: ', trim(Mass_String), ' +- ', Error_Mass_String
+       print *, 'Mass of Cluster :', Ap, ', is (Mean): ', trim(Mass_String), ' +- ', Error_Mass_String
        write(Mass_String, '(e8.2)') Area*Cluster_Mode(Ap)*1.e18_double
-       print *, '                                    and ', trim(Mass_String), ' +- ', Error_Mass_String
+       print *, '                                    and (Mode) ', trim(Mass_String), ' +- ', Error_Mass_String
+       print *, ' '
     end do
     print *, '!----------------------------------------------------------------------------------!'
 
@@ -297,7 +334,7 @@ contains
     case default
        STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
     end select
-    allocate(Posterior(2, nGrid)); Posterior = 0.e0_double
+    allocate(Posterior(2, nGrid)); Posterior = 1.e0_double !*!
     do i =1, nGrid
        Posterior(1,i) = VGrid_Lower + (i-1)*((VGrid_Higher-VGrid_Lower)/(nGrid-1))
     end do
@@ -337,17 +374,7 @@ contains
        end do
        Posterior_perGalaxy(c,:) = Posterior_perGalaxy(c,:)/Renorm
        Renorm = 0.e0_double
-
-
-       do j = 1, size(Posterior,2)
-          if(Posterior_perGalaxy(c,j) /= 0.e0_double) Posterior(2,j) = Posterior(2,j)+log(Posterior_perGalaxy(c,j)) !-Assumes they are on the same grid. Alternatively, ln(Posterior) could be summed
-       end do
     end do
-
-    !--Renormalised ln(P) by an arbirtary factor chosen to ensure ln(P) does not get so large as to introduce numerical errors. This will be accounted for when P = exp(lnP) is renormalised--!
-    Posterior(2,:) = Posterior(2,:)/maxval(Posterior(2,:))
-
-
 
     if(Output_Posterior_Per_Galaxy) then
        Filename = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat'
@@ -357,30 +384,14 @@ contains
           write(17, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior_perGalaxy(:,i)
        end do
       close(17)
-      print *, 'Output Posterior per galaxy to:', trim(adjustl(Filename))
+      print *, 'Output Posterior per galaxy to: ', trim(adjustl(Filename))
    end if
-
-   print *, 'Any NaNs in aperture ln posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
-
-    Filename= trim(adjustl(Output_Prefix))//'lnPosterior_Combined.dat'
-    open(unit = 82, file = Filename)
-    write(fmtstring,'(I1)') 2
-    do i =1, size(Posterior,2)
-       write(82, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior(2,i)
+   
+   !--Combine the posteriors for all galaxies by multiplying. Renormalise by the maximum to ensure that there are no numerical issues. (This---
+   !-- will be wiped out by renomralising in the next step
+    do c = 1, size(Effective_Convergence,1) !-Loop over galaxies-!
+       Posterior(2,:) = Posterior(2,:)*(Posterior_perGalaxy(c,:)/(0.5e0_double*maxval(Posterior_perGalaxy(c,:))))
     end do
-    close(82)
-    print *, 'Output Combined lnPosterior to: ', trim(adjustl(Filename))
-
-    do j = 1, size(Posterior,2)
-       if(Posterior(2,j) /= 0.e0_double) Posterior(2,j) = dexp(Posterior(2,j))
-    end do
-
-
-!!$    where(Posterior(2,:) /= 0.e0_double)
-!!$       Posterior(2,:) = dexp(Posterior(2,:))
-!!$    end where
-
-    print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
 
     Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined.dat'
     open(unit = 82, file = Filename)
@@ -391,6 +402,22 @@ contains
     close(82)
     print *, 'Output Combined Posterior to: ', trim(adjustl(Filename))
 
+!!$    do j = 1, size(Posterior,2)
+!!$       if(Posterior(2,j) /= 0.e0_double) Posterior(2,j) = dexp(Posterior(2,j))
+!!$    end do
+
+
+!!$    where(Posterior(2,:) /= 0.e0_double)
+!!$       Posterior(2,:) = dexp(Posterior(2,:))
+!!$    end where
+
+    if(any(isNAN(Posterior(2,:)))) then
+       print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
+       print *, 'Stopping'
+       STOP
+    END if
+
+
     !--Renormalise--!
     Renorm = 0.e0_double
     do j = 1, size(Posterior,2)-1
@@ -398,6 +425,26 @@ contains
     end do
     Posterior(2,:) = Posterior(2,:)/Renorm
 
+    Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined_Renormalised.dat'
+    open(unit = 82, file = Filename)
+    write(fmtstring,'(I1)') 2
+    do i =1, size(Posterior,2)
+       write(82, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior(2,i)
+    end do
+    close(82)
+    print *, 'Output Combined Posterior to: ', trim(adjustl(Filename))
+
+    if(any(isNAN(Posterior(2,:)))) then
+       print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
+       print *, Renorm
+       print *, 'Stopping'
+       STOP
+    END if
+
+    !--Remove any information less than a tolerance - Numerical Error--!
+    where(Posterior(2,:) < 1.e-12_double)
+       Posterior(2,:) = 0.e0_double
+    end where
 
     deallocate(Effective_Convergence, Posterior_perGalaxy)
 
