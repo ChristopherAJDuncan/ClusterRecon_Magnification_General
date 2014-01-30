@@ -10,9 +10,11 @@ program  Bayesian_DM_Profile_Constraints
   type(Catalogue)::Catt
   
   character(120)::Catalogue_Directory, Catalogue_Filename
-  integer,dimension(13)::Catalogue_Cols
+  integer,dimension(:),allocatable::Catalogue_Cols
 
   real(double),allocatable::Cluster_Pos(:,:), Cluster_Aperture_Radius(:)
+
+  real(double)::Default_Source_Redshift = 1.4e0_double
 
   allocate(Cluster_Pos(4,2)); Cluster_Pos = 0.e0_double
   Cluster_Pos(1,:) = (/149.1099e0_double,-9.9561e0_double/)
@@ -22,12 +24,14 @@ program  Bayesian_DM_Profile_Constraints
   allocate(Cluster_Aperture_Radius(4)); Cluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-!
 
   !--Read in the Catalogue with reshifts--!                                                                                                     
-  !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks!
-  call common_Catalogue_directories(4, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+  !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks_STAGES; 5:Mocks_COMBO!
+  call common_Catalogue_directories(5, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
   call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
 
-  !  call Clip_Sizes(Catt, (/0.e0_double, 20.e0_double/) )
-  call convert_Size_from_Pixel_to_Physical(Catt)
+  call Clip_Sizes(Catt, (/0.e0_double, 20.e0_double/) )
+  !call convert_Size_from_Pixel_to_Physical(Catt)
+  call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!
+  call Monte_Carlo_Redshift_Sampling(Catt)
   call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!
 
   call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Cluster_Pos, Cluster_Aperture_Radius, Cluster_Posteriors)
@@ -60,6 +64,11 @@ contains
   end subroutine Identify_Galaxys_in_Circular_Aperture
 
   subroutine DM_Profile_Variable_Posteriors_CircularAperture(Cat, Ap_Pos, Ap_Radius, Posteriors)
+    !--Main routine that returns the Posteriors over all apertures.
+    !--To Do:
+    !-------: Edit to produce magnitude binning at this level (Control over use of priors)
+    !-------: Produce priors using data fed in from catalogue (e.g. when using mock, produce the prior from the mock rather than the reference catalogue)
+
     use Statistics, only: mean, variance_Distribution, mode_distribution; use Distributions; use Cosmology, only: angular_diameter_distance_fromRedshift
     type(Catalogue), intent(in)::Cat
     real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
@@ -79,7 +88,6 @@ contains
     real(double),allocatable::SizePrior_byMag(:,:) !-MagBin, GridValue-!
     real(double),allocatable::Aperture_Posterior_byMag(:,:,:) !-MagBin, Grid/Posterior, Value-! 
 
-    real(double),allocatable::MagBins(:,:)
     type(Binned_Catalogue)::BCat
     real(double),allocatable::Posterior_Single(:,:) !-Grid/Posterior, Value-!
     real(double),allocatable::Prior_Single(:,:) !!-Grid/Prior, Value-! 
@@ -93,6 +101,12 @@ contains
     real(double)::D_l, Area
     real(double),allocatable::Cluster_Mean(:), Cluster_Variance(:), Cluster_Mode(:)
     character(10):: Mass_String, Error_Mass_String
+
+    !--MAgnitude Binning (by Absolute Magnitude)--!
+    integer::nMag = 1
+    real(double),allocatable::MagBins(:,:)
+
+    character(200):: Output_File_Prefix
 
     if(size(Ap_Radius)==1) then
        iAp_Radius = Ap_Radius(1)
@@ -113,7 +127,9 @@ contains
 !!$       SizeGrid(i) = SizeGrid_Lower + i*dSizeGrid
 !!$    end do
 
-    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag)
+    call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMag, MagBins)
+
+    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Cat, .true.)
     
     !--Get Prior by getting refernce for each bin, and binning each reduced cat using the same definition (mag)--!
     !--Produce Posterior for each mag bin--!
@@ -121,12 +137,18 @@ contains
     do ap = 1, size(Ap_Cats)
        call bin_catalogue_by_magnitude(Ap_Cats(Ap), MagBins, BCat)
 
+       print *, 'Aperture Catalogue binned in the same way with magnitudes: Aperture:', Ap, ' has ', size(Ap_Cats(Ap)%RA), ' galaxies binned accordjing to:', BCat%Occupation
+
        do m = 1, size(MagBins,1)
           !--Set up Prior_Single for that Aperture and Mag Bin-!
           allocate(Prior_Single(2, size(SizePrior_byMag,2))); Prior_Single(1,:) = SizeGrid; Prior_Single(2,:) = SizePrior_byMag(m,:)
 
           !-Get Posterior for that Magnitude-!
-          call DM_Profile_Variable_Posterior(BCat%Cat(m), 1, Prior_Single, Lens_Redshift, Posterior_Single)
+          write(Output_File_Prefix,'(I2)') Ap
+          Output_File_Prefix = 'Aperture_'//trim(adjustl(Output_File_Prefix))//'_'
+          call DM_Profile_Variable_Posterior(BCat%Cat(m), 1, Prior_Single, Lens_Redshift, Posterior_Single, Output_File_Prefix)
+
+          print *, 'Any NaNs in returned posterior?', any(isNAN(Posterior_Single(2,:))), count(isNAN(Posterior_Single(2,:)) == .true.)
 
           if(m==1) then
              print *, 'Allocating Posterior by mag:', size(MagBins,1), 2, size(Posterior_Single,2)
@@ -144,18 +166,18 @@ contains
           allocate(Posteriors(size(Ap_Cats),2, size(Aperture_Posterior_byMag,3))); Posteriors = 0.e0_double
        end if
        Posteriors(Ap,1,:) = Aperture_Posterior_byMag(1,1,:);
+       !--Combine as log posteriors--!
        do m = 1, size(MagBins,1)
           where(Aperture_Posterior_byMag(m,2,:) /= 0.e0_double)
              Posteriors(Ap,2,:) = Posteriors(Ap,2,:) + log(Aperture_Posterior_byMag(m,2,:))
           end where
 !          Posteriors(Ap,2,:) = Posteriors(Ap,2,:)*Aperture_Posterior_byMag(m,2,:)
        end do
-
        
 
        !--Output Posterior per Mag Bin--!
        write(apString, '(I1)') Ap
-       open(38, file =trim(Output_Directory)//'Posterior_Aperture_'//trim(apString)//'_byMagBin.dat')
+       open(38, file =trim(Output_Directory)//'lnPosterior_Aperture_'//trim(apString)//'_byMagBin.dat')
        !--Header--!!!!!!!!!!!!!!!!!
        do j = 1, size(MagBins,1)
           write(38, '(A1, 2(e14.7,x))') '#', MagBins(j,:)
@@ -165,7 +187,7 @@ contains
           write(38, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Aperture_Posterior_byMag(1,1,j), Aperture_Posterior_byMag(:,2,j)
        end do
        close(38)
-       print *, 'Output file to: ',trim(Output_Directory)//'Posterior_Aperture_'//trim(apString)//'_byMagBin.dat' 
+       print *, 'Output file to: ',trim(Output_Directory)//'lnPosterior_Aperture_'//trim(apString)//'_byMagBin.dat' 
 
        deallocate(Aperture_Posterior_byMag)
     end do
@@ -219,7 +241,7 @@ contains
 
 
 
-  subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Prior, Lens_Redshift, Posterior)
+  subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Prior, Lens_Redshift, Posterior, Output_Prefix)
     use cosmology, only:angular_diameter_distance_fromRedshift
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
     !-For Mass_Profile = 1 (Flat): Sigma_0
@@ -234,8 +256,9 @@ contains
     type(Catalogue)::Cat
     integer,intent(in)::Mass_Profile !-1:Flat, 2:SIS-!
     real(double),intent(in)::Lens_Redshift
-    real(double),intent(in)::Prior(:,:) 
+    real(double),intent(inout)::Prior(:,:) 
     real(double),allocatable,intent(Out)::Posterior(:,:) !-Grid/Posterior, Value-!
+    character(*), intent(in)::Output_Prefix
 
     integer::i, c, j
 
@@ -251,10 +274,24 @@ contains
     
     real(double)::Renorm
 
+    logical:: Output_Posterior_Per_Galaxy = .true.
+    character(7)::fmtstring
+    character(200)::Filename
+
+    !--Renomralise the Priors her to ensure that they are renormalised and to avoid issues later:--!
+    Renorm = 0.e0_double
+    do j = 1, size(Prior,2)-1
+       Renorm = Renorm + 0.5e0_double*(Prior(2,j) + Prior(2,j+1))*(Prior(1,j+1)-Prior(1,j))
+    end do
+    Prior(2,:) = Prior(2,:)/Renorm
+    Renorm = 0.e0_double
+    
+
     !-Set Up Posterior Grid-!
     select case(Mass_Profile)
     case(1) !-Flat-!
-       VGrid_Lower = -1.e-2_double; VGrid_Higher = 1.e-2_double !-- SMD ~ Masses 10^12 -> 10^15 Msun/h, in Units of 10^18 Msun/h  
+       nGrid = 100000
+       VGrid_Lower = -5.e-2_double; VGrid_Higher = 1.e-1_double !-- SMD ~ Masses 10^12 -> 10^15 Msun/h, in Units of 10^18 Msun/h  
     case(2) !-SIS-!
        VGrid_Lower= 0.e0_double; VGrid_Higher = 0.e0_double    !--------------------------!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     case default
@@ -271,8 +308,14 @@ contains
     allocate(Posterior_perGalaxy(size(Cat%RA), size(Posterior,2))); Posterior_perGalaxy = 0.e0_double
     allocate(Effective_Convergence(size(Cat%RA), size(Posterior,2))); Effective_Convergence = 0.e0_double
     do c = 1, size(Effective_Convergence,1) !-Loop over galaxies-!
-       D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
-       D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
+       if(Cat%Redshift(c) >= 0.e0_double) then
+          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
+          D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
+       else
+          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
+          D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
+          !--Check number of times used--!
+       end if
        Sigma_Crit = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
        do i = 1, size(Effective_Convergence,2)
           select case(Mass_Profile)
@@ -287,14 +330,66 @@ contains
           !--Linearly Interpolate--!
           Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), Cat%Physical_Sizes(c)/(1.e0_double+Effective_Convergence(c,i)))*(1.e0_double/(1+Effective_Convergence(c,i)))
        end do
+       !--Renomralised to the posterior per galaxy
+       Renorm = 0.e0_double
+       do j = 1, size(Posterior_perGalaxy,2)-1
+          Renorm = Renorm + 0.5e0_double*(Posterior_perGalaxy(c,j) + Posterior_perGalaxy(c,j+1))*(Posterior(1,j+1)-Posterior(1,j))
+       end do
+       Posterior_perGalaxy(c,:) = Posterior_perGalaxy(c,:)/Renorm
+       Renorm = 0.e0_double
+
+
        do j = 1, size(Posterior,2)
           if(Posterior_perGalaxy(c,j) /= 0.e0_double) Posterior(2,j) = Posterior(2,j)+log(Posterior_perGalaxy(c,j)) !-Assumes they are on the same grid. Alternatively, ln(Posterior) could be summed
        end do
     end do
 
-    where(Posterior(2,:) /= 0.e0_double)
-       Posterior(2,:) = dexp(Posterior(2,:))
-    end where
+    !--Renormalised ln(P) by an arbirtary factor chosen to ensure ln(P) does not get so large as to introduce numerical errors. This will be accounted for when P = exp(lnP) is renormalised--!
+    Posterior(2,:) = Posterior(2,:)/maxval(Posterior(2,:))
+
+
+
+    if(Output_Posterior_Per_Galaxy) then
+       Filename = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat'
+       open(unit = 17, file = Filename)
+       write(fmtstring,'(I7)') size(Posterior_perGalaxy,1)+1
+       do i =1, size(Posterior,2)
+          write(17, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior_perGalaxy(:,i)
+       end do
+      close(17)
+      print *, 'Output Posterior per galaxy to:', trim(adjustl(Filename))
+   end if
+
+   print *, 'Any NaNs in aperture ln posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
+
+    Filename= trim(adjustl(Output_Prefix))//'lnPosterior_Combined.dat'
+    open(unit = 82, file = Filename)
+    write(fmtstring,'(I1)') 2
+    do i =1, size(Posterior,2)
+       write(82, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior(2,i)
+    end do
+    close(82)
+    print *, 'Output Combined lnPosterior to: ', trim(adjustl(Filename))
+
+    do j = 1, size(Posterior,2)
+       if(Posterior(2,j) /= 0.e0_double) Posterior(2,j) = dexp(Posterior(2,j))
+    end do
+
+
+!!$    where(Posterior(2,:) /= 0.e0_double)
+!!$       Posterior(2,:) = dexp(Posterior(2,:))
+!!$    end where
+
+    print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
+
+    Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined.dat'
+    open(unit = 82, file = Filename)
+    write(fmtstring,'(I1)') 2
+    do i =1, size(Posterior,2)
+       write(82, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior(2,i)
+    end do
+    close(82)
+    print *, 'Output Combined Posterior to: ', trim(adjustl(Filename))
 
     !--Renormalise--!
     Renorm = 0.e0_double
