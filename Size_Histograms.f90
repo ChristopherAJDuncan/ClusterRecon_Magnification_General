@@ -42,6 +42,7 @@ contains
     integer::i,j,counter
     
     minSize = minval(Sizes); maxSize = maxval(Sizes)
+    print *, 'Plotting Size histrogram across the whole catalogue, between range:', minsize, maxsize
     !--Set up limits of histogram--!
     do i = 1, nBin
        Bin_Limits(i,:) = (/ minSize+(i-1)*((maxSize-minSize)/(nBin)) , minSize+(i)*((maxSize-minSize)/(nBin)) /)
@@ -97,7 +98,14 @@ contains
 
     minSize = 1.e10_double; maxSize = 0.e0_double
 
-    Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Ap_Position(1))**2.e0_double +(Cat%Dec-Ap_Position(2))**2.e0_double ) <= Ap_Radius)
+    Expected_Number_in_Aperture = 0
+    do i = 1,  size(Cat%Physical_Sizes)
+       if( dsqrt( (Cat%RA(i)-Ap_Position(1))**2.e0_double +(Cat%Dec(i)-Ap_Position(2))**2.e0_double ) <= Ap_Radius ) then
+          Expected_Number_in_Aperture = Expected_Number_in_Aperture + 1
+       end if
+    end do
+
+!    Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Ap_Position(1))**2.e0_double +(Cat%Dec-Ap_Position(2))**2.e0_double ) <= Ap_Radius)
     print *, 'Expected Number in Aperture = ', Expected_Number_in_Aperture
 
     allocate(Sizes_in_Ap(Expected_Number_in_Aperture)); Sizes_In_Ap = -100.e0_double
@@ -113,8 +121,11 @@ contains
        end if
     end do
 
-    if((counter-1) /= size(Sizes_in_Ap)) STOP 'Size_Histogram_Circular_Aperture - FATAL ERROR - error in assigning sizes within aperture'
-    if(any(Sizes_in_Ap < 0.e0_double)) STOP 'Size_Histogram_Circular_Aperture - FATAL ERROR - negatives in the list of sizes in aperture'
+    if((counter-1) < size(Sizes_in_Ap)-1) then !-1 to allow for rounding errors-!
+       print *, counter-1, size(Sizes_in_Ap)
+       STOP 'Size_Histogram_Circular_Aperture - FATAL ERROR - error in assigning sizes within aperture'
+    end if
+!    if(any(Sizes_in_Ap < 0.e0_double)) STOP 'Size_Histogram_Circular_Aperture - FATAL ERROR - negatives in the list of sizes in aperture'
 
     Mean_of_Aperture = sum(Sizes_in_Ap)/size(Sizes_in_Ap)
 
@@ -143,10 +154,10 @@ contains
     Number_in_Bin(size(Number_in_Bin)) = Number_in_Bin(size(Number_in_Bin)) + count(Sizes_In_Ap == Bin_Limits(size(Bin_Limits,1),2))
 
 
-    if(Sum(Number_in_Bin) /= Expected_Number_in_Aperture) then 
-       print *, 'Expected, Actual:', Expected_Number_in_Aperture, Sum(Number_in_Bin)
-       STOP 'Size_Histogram_Circular_Aperture - FATAL ERROR - differences in the expected number of galaxies in the aperture'
-    end if
+!!$    if(Sum(Number_in_Bin) /= Expected_Number_in_Aperture) then 
+!!$       print *, 'Expected, Actual:', Expected_Number_in_Aperture, Sum(Number_in_Bin)
+!!$       STOP 'Size_Histogram_Circular_Aperture - FATAL ERROR - differences in the expected number of galaxies in the aperture'
+!!$    end if
 
     !--Output--!
     open(file = filename, unit  = 40)

@@ -14,7 +14,7 @@ module Convergence_Estimation
   END INTERFACE get_Convergence
 
 
-  integer, private::Default_Convergence_Estimator = 2
+  integer, private::Default_Convergence_Estimator = 1
 
 
 contains 
@@ -760,15 +760,15 @@ contains
     print *, 'Calculating Beta from fit across whole catalogue'
     read(*,*)
 
-    print *, 'Cat Mag:', allocated(Cat%Mag), size(Cat%Mag), all(Cat%Mag==0.e0_double)
-    if(allocated(Cat%Mag)== .false. .or. size(Cat%Mag) == 0 .or. all(Cat%Mag==0.e0_double)) then
+    print *, 'Cat Abs_Mag:', allocated(Cat%Absolute_Magnitude), size(Cat%Absolute_Magnitude), all(Cat%Absolute_Magnitude==0.e0_double)
+    if(allocated(Cat%Absolute_Magnitude)== .false. .or. size(Cat%Absolute_Magnitude) == 0 .or. all(Cat%Absolute_Magnitude==0.e0_double)) then
        print *, 'calculate_beta_fromCatalogue - No magnitude information, returning zero'
        beta = 0.e0_double
        return
     end if
 
     !-Create Magnitude Bins, roughly as the same number of galxies in each bin. Ideally, nBin shoud iterate towards a value which balances low noise with enough data points-!
-    call Calculate_Bin_Limits_by_equalNumber(Cat%Mag, nMag, Mag_Bin)
+    call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMag, Mag_Bin)
     Red_Bin(1,:) = (/ minval(Cat%Redshift), maxval(Cat%Redshift) /)
 
     print *, 'Got Bin Limits'
@@ -800,7 +800,7 @@ contains
 
     print *, 'Calculating beta from Catalogue, via binned Magnitude and Redshift Method'
 
-    if(allocated(Cat%Mag)== .false. .or. size(Cat%Mag) == 0 .or. all(Cat%Mag==0.e0_double)) then
+    if(allocated(Cat%Absolute_Magnitude)== .false. .or. size(Cat%Absolute_Magnitude) == 0 .or. all(Cat%Absolute_Magnitude==0.e0_double)) then
        print *, 'calculate_beta_fromCatalogue - No magnitude information, returning zero'
        beta = 0.e0_double
        return

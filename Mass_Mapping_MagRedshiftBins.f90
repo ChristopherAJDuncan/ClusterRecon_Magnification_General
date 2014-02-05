@@ -1,12 +1,12 @@
 !---Code for the estiamtion of the convergence from Binning by ***ABSOLUTE** magnitude---!
 program Mass_Mapping_MagBins
-  use Catalogues; use Param_Types; use Convergence_Estimation; use Statistics, only: variance_discrete, mean_discrete; use MAss_Estimation; use Size_Histograms, only:Size_Histogram_Plotter, Size_Histogram_Catalogue, Size_Histogram_Circular_Aperture
+  use Catalogues; use Param_Types; use Convergence_Estimation; use Statistics, only: variance_discrete, mean_discrete; use MAss_Estimation; use Size_Histograms, only:Size_Histogram_Plotter, Size_Histogram_Catalogue, Size_Histogram_Circular_Aperture; use MC_Redshift_Sampling
   implicit none
 
   character(120)::Catalogue_Directory = 'Simulations/Output/'
-  character(120)::Catalogue_Filename = 'Mock_Catalogue.cat'!'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
+  character(120)::Catalogue_Filename = 'Mock_STAGES.cat'!'Mock_Catalogue.cat'!'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
   character(120):: Redshift_Catalogue_Directory, Redshift_Catalogue_Filename
-  integer,dimension(13)::Catalogue_Cols, Redshift_Catalogue_Cols != (/-1, 1, 2,-1,-1,-1,-1,-1,-1,3,-1,-1,4/)!(/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!       
+  integer,dimension(:),allocatable::Catalogue_Cols, Redshift_Catalogue_Cols != (/-1, 1, 2,-1,-1,-1,-1,-1,-1,3,-1,-1,4/)!(/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!       
 
   logical:: Use_Redshift_Sample = .false.
 
@@ -26,7 +26,7 @@ program Mass_Mapping_MagBins
   character(120)::Size_Histogram_Filename
   logical::here
 
-  real(double)::Default_z = 1.4e0_double !-1.4 given in Heymasn et al 2008, Sec 3.2-!
+!  real(double)::Default_z = 1.4e0_double !-1.4 given in Heymasn et al 2008, Sec 3.2-!
 
   type(Catalogue)::Cat, Redshift_Cat
 
@@ -35,7 +35,7 @@ program Mass_Mapping_MagBins
   !--Redshift Binning Decalrations--!                                                                                                                                                                                      
   real(double)::lmag, hmag
   type(Binned_Catalogue),allocatable:: BBCat(:)
-  integer, parameter::nMagBin = 5, nRedBin = 1 !5, 4
+  integer, parameter::nMagBin = 1, nRedBin = 1 !5, 4
   real(double),allocatable:: MagBinLimits(:,:), RedshiftLimits(:,:)
   character::BinString
   !----------------------------------!                                                                                                                                                                                                        
@@ -76,7 +76,7 @@ program Mass_Mapping_MagBins
   
  
   !--Read in the Catalogue with reshifts--!                                                                                                     
-  !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks!
+  !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks STAGES, 5:Mock COMBO !
   call common_Catalogue_directories(4, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
   print *, 'Using COls:', Catalogue_Cols
   call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
@@ -85,17 +85,21 @@ program Mass_Mapping_MagBins
   if(use_Redshift_Sample) then
      call common_Catalogue_directories(2, Redshift_Catalogue_Directory, Redshift_Catalogue_Filename,Redshift_Catalogue_Cols)
      call catalogue_readin(Redshift_Cat, trim(adjustl(Redshift_Catalogue_Directory))//trim(adjustl(Redshift_Catalogue_Filename)), ' ', Redshift_Catalogue_Cols)
+
      
      !--Combine Catalogues--!
-     call get_redshift_Information_combine_Catalogues(Cat, Redshift_Cat, Default_z)
+     call get_redshift_Information_combine_Catalogues(Cat, Redshift_Cat)
   end if
 
-!  call Clip_Sizes(Cat, (/0.e0_double, 20.e0_double/) )
-  print *, 'Convertin physica sizes'
-  call convert_Size_from_Pixel_to_Physical(Cat)
+  call Clip_Sizes(Cat, (/0.e0_double, 20.e0_double/) )
+  print *, 'Converting to physical sizes....'
+  call Cut_By_Magnitude(Cat, 23.e0_double) !-MF606W Cut taken from CH08, p 1435 to cut out foreground-!
+  call Cut_By_PhotoMetricRedshift(Redshift_Cat, 0.21e0_double) !--Cut out foreground--!     
+  call Monte_Carlo_Redshift_Sampling_Catalogue(Cat)
+!  call convert_Size_from_Pixel_to_Physical(Cat)
   print *, 'Done'
 !  call PSF_Correction(Cat, 1)
-  call Cut_By_PhotoMetricRedshift(Cat, 0.21e0_double) !--Cut out foreground--!     
+
 
   if(get_Size_Histograms) then
      call Size_Histogram_Catalogue(Cat%Physical_Sizes, trim(adjustl(Output_Directory))//'Size_Histogram_FullCatalogue.dat')
@@ -105,7 +109,7 @@ program Mass_Mapping_MagBins
   print *, 'There are:', count(Cat%Redshift < 0.e0_Double), ' unassigned redshifts in the main catalogue'
 
   call Calculate_Bin_Limits_by_equalNumber(Cat%Redshift, nRedBin, RedshiftLimits)
-  call Calculate_Bin_Limits_by_equalNumber(Cat%Mag, nMagBin, MagBinLimits)
+  call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMagBin, MagBinLimits) !--Set up to bin by absolute mangitude-!
   Verbose = .true.
   do i = 1, nMagBin
      print *, 'Mag Bins:', i, ' :', MagBinLimits(i,:)
@@ -141,14 +145,14 @@ program Mass_Mapping_MagBins
         print *, 'Doing Bin_Loop:', Bin_Loop_Z, Bin_Loop_M
 
         !--Check for unassigned redshifts: ERROR HANDLING--!
-        if(any(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift < 0.e0_double)) then           
-           print *, 'Of:', size(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), ' galaxies in bin, ', count(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift < 0.e0_double) , 'are less than zero...'
-           print *, BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift
-           STOP 'Binned catalogue has unassigned redshifts'
-        end if
+!!$        if(any(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift < 0.e0_double)) then           
+!!$           print *, 'Of:', size(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), ' galaxies in bin, ', count(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift < 0.e0_double) , 'are less than zero...'
+!!$           print *, BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift
+!!$           STOP 'Binned catalogue has unassigned redshifts'
+!!$        end if
 
         !--Do not evaluate if there are too few galaxies in the sample--!
-        if(BBCat(Bin_Loop_Z)%Occupation(Bin_Loop_M) <= Occupation_Limit) cycle
+!        if(BBCat(Bin_Loop_Z)%Occupation(Bin_Loop_M) <= Occupation_Limit) cycle
 
         call Mass_Estimate_Circular_Aperture_byGalaxy(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), 0, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses_GalaxyML(Bin_Loop_Z,Bin_Loop_M,:), Cluster_Masses_Error_GalaxyML(Bin_Loop_Z,Bin_Loop_M,:))
 !        call Mass_Estimate_Circular_Aperture_byShift(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M), Cluster_Pos, (/1.e0_double/60.e0_double/))

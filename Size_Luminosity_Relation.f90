@@ -44,13 +44,13 @@ program size_luminosity_relation
 
       !--Binning Declarations--!
 
-      Mag_low = minval(Cat%Mag)
+      Mag_low = minval(Cat%Absolute_Magnitude)
       !-Determine Mag_low only from sample which is greater than zero-!
 !!$      Mag_low = 100.e0_double
 !!$      do i =1, size(Cat%Mag)
 !!$         if( (Cat%Mag(i) > 0.e0_double) .and. (Cat%Mag(i) < Mag_Low) ) Mag_low = Cat%Mag(i)
 !!$      end do
-      Mag_high = maxval(Cat%Mag)
+      Mag_high = maxval(Cat%Absolute_Magnitude)
       nMag = 50
       
       z_low = minval(Cat%Redshift)
@@ -151,9 +151,9 @@ program size_luminosity_relation
       if(size(Res) /= size(Bin_Limits,1)) STOP 'average_size_by_magnitudebin - Result to be output is not conformal with the entered bin limits, stopping ....'
       allocate(iOccupation(size(Res))); iOccupation = 0
 
-      do c = 1, size(Cat%Mag)
+      do c = 1, size(Cat%Absolute_Magnitude)
          do i = 1, size(Bin_Limits,1)
-            if((Cat%Mag(c) > Bin_Limits(i,1)) .and. (Cat%Mag(c) <= Bin_Limits(i,2))) then
+            if((Cat%Absolute_Magnitude(c) > Bin_Limits(i,1)) .and. (Cat%Absolute_Magnitude(c) <= Bin_Limits(i,2))) then
                if(Cat%Physical_Sizes(c) < 0.e0_double) cycle
                iOccupation(i) = iOccupation(i) + 1
                Res(i) = Res(i) + Cat%Physical_Sizes(c)

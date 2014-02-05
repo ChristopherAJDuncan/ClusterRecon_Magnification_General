@@ -4,6 +4,8 @@ module Mass_Estimation
   use Param_Types
   implicit none
 
+  real(double),private::Default_Source_Redshift = 1.4e0_double !-Used to Calcualte Sigma_Critical when no redhift information is present-!
+
 contains
 
 !!$  subroutine draw_Circular_Aperture( Aperture_Positions, Aperture_Radiuses)
@@ -95,12 +97,12 @@ contains
     real(double)::field_mean_size
     real(double):: Ap_Mean_Size, Ap_Convergence, Sigma_Crit, Ap_Area
 
-    real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Default_Source_Redshift = 1.e0_double, Source_Redshift
+    real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Source_Redshift
     real(double)::Redshift_Tolerance = 1.e-1_double
 
     character(10):: Mass_String, Error_Mass_String
 
-    integer::Convergence_Estimator = 2 !-1:r/<r>-1, 2: ln(r/<r>)-!
+    integer::Convergence_Estimator = 1 !-1:r/<r>-1, 2: ln(r/<r>)-!
 
     real(double),dimension(size(Aperture_Positions,1)):: Ap_Convergence_Error
 
@@ -163,6 +165,15 @@ contains
 
        !--Convert from Convergence to Mass--!
        Source_Redshift =  mean_discrete(Ap_Cats(j)%Redshift)
+       do i = 1, size(Ap_Cats(j)%Redshift)
+          if(Ap_Cats(j)%Redshift(i) >= 0.e0_double) then
+             Source_Redshift = Source_Redshift + Ap_Cats(j)%Redshift(i)
+          else
+             Source_Redshift = Source_Redshift + Default_Source_Redshift
+          end if
+       end do
+       Source_Redshift = Source_Redshift/size(Ap_Cats(j)%Redshift)
+
        if( (Source_Redshift <= 0.e0_double) .or. (dabs(Source_Redshift-Lens_Redshift) <= Redshift_Tolerance)) STOP 'Mass_Estimate_Circular_Aperture_byShift - ERROR IN ASSIGNING SOURCE REDSHIFT'
 
        D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
@@ -212,14 +223,14 @@ contains
     real(double)::Projected_Mass(size(Aperture_Positions,1)), Error_Projected_Mass(size(Aperture_Positions,1))
 
     real(double),allocatable::Weight(:,:), Sigma_Crit(:), Area(:), Renormalisation(:,:)
-    real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Default_Source_Redshift = 1.e0_double, Source_Redshift
+    real(double)::D_l, D_ls , D_s, Lens_Redshift = 0.165e0_double, Source_Redshift
 
     integer,allocatable:: Aperture_Galaxy_Indexs(:,:)
     integer,allocatable:: Aperture_Counter(:)
 
     character(10)::Mass_String, Error_Mass_String
 
-    integer::Convergence_Estimator = 2 !-1:r/<r>-1, 2: ln(r/<r>)-!
+    integer::Convergence_Estimator = 1 !-1:r/<r>-1, 2: ln(r/<r>)-!
 
     !---TESTING DECLARATIONS--!
     integer::nNoRedshift

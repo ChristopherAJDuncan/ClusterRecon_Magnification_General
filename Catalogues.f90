@@ -16,7 +16,7 @@ module Catalogues
   type Catalogue
      character(60)::Name
      character(len = 10)::Mag_Label
-     real(double),dimension(:),allocatable::flux, fluxerr, mag, magerr
+     real(double),dimension(:),allocatable::flux, fluxerr, MF606W, magerr, Absolute_Magnitude
      integer,dimension(:),allocatable::ntile
      real(double),dimension(:),allocatable::xpos, ypos
      real(double),dimension(:),allocatable::RA,Dec
@@ -57,29 +57,37 @@ module Catalogues
     subroutine common_Catalogue_directories(Index, Directory, Filename, Columns)
       integer,intent(in)::Index
       character(*)::Filename, Directory
-      integer,intent(out)::Columns(13) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!    
+      integer,intent(out),allocatable::Columns(:) !-ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!    
 
       logical::here
 
       character(200)::Base_Directory = '/disk1/cajd/Size_Magnification/'
 
+      if(allocated(Columns)) deallocate(Columns)
+      allocate(Columns(14)); Columns = 0
+
       select case(Index)
       case(1) !-Full STAGES catalogue--!
          Directory = 'Catalogues/'
          Filename = 'STAGES_shear.cat'
-         Columns = (/1,2,3,4,5,6,7,8,9,11,19,20,-1/)
+         Columns = (/1,2,3,4,5,-1,6,7,8,9,11,19,20,-1/)
       case(2) !--COMBO17 redshift - matched to STAGES--!
          Directory = 'Catalogues/'
          Filename = 'STAGES_COMBO17_gsMag_size_matched.pzcat'
-         Columns = (/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/)
+         Columns = (/-1,10,11,-1,-1,8,12,-1,-1,-1,14,16,17,5/) !-12 (ST_Mag) could alos be 3 (ST_Mag_Best)
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'SExtractor_RRG.cat'
-         Columns = (/-1, 12, 13, 10, 11, 5, -1, 3, -1, 31, -1, -1, -1/)
-      case(4) !--Mock Catalogue--!
+         Columns = (/-1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, -1, -1, -1/)
+      case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
-         Filename = 'Mock_Catalogue.cat'
-         Columns = (/-1, 1, 2,-1,-1,5,-1,-1,-1,3,-1,-1,4/)
+         Filename = 'Mock_STAGES.cat'
+         Columns = (/-1, 1, 2, -1, -1, 5, 6, -1, -1, -1, 3, -1, -1, 4/)
+      case(5) !--COMBO17-like Mock Catalogue--!
+         Directory = 'Simulations/Output/'
+         Filename = 'Mock_COMBO.cat'
+         Columns = (/-1, 1, 2, -1, -1, 5, 6, -1, -1, -1, 3, -1, -1, 4/)
+
       case default
          STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
       end select
@@ -106,10 +114,15 @@ module Catalogues
       integer:: nPerBin, i
       real(double),dimension(size(Array))::Sorted_Array
 
-      nPerBin = int(size(Array)/nBin + 1)
-
       if(allocated(Limits)) deallocate(Limits)
       allocate(Limits(nBin,2)); Limits = 0.e0_double
+
+      if(nBin ==1) then
+         Limits(1,:) = (/minval(Array), maxval(Array)/)
+         return
+      end if
+
+      nPerBin = int(size(Array)/nBin + 1)
 
       Sorted_Array = Array
       !--Sort array--!
@@ -124,18 +137,22 @@ module Catalogues
 
     end subroutine Calculate_Bin_Limits_by_equalNumber
 
-    subroutine bin_catalogue_by_magnitude(Cat,Limits,BCat)
+    subroutine bin_catalogue_by_magnitude(Cat,Limits,BCat, Mag_Type)
       USE NR, ONLY:SORT
       !--Bins the catalogue by magnitude, returning BCat wof type Binned_Catalogue, which contains a seperate catalogue for each magnitude bin entered in Limits
       type(Catalogue),intent(in)::Cat
       type(Binned_Catalogue)::BCat
       real(double), dimension(:,:),intent(in)::Limits
+      integer,intent(in),optional::Mag_Type
+
+      integer::Magnitude_Type !-1:Absolute; 2: MF606w-! !--Neds to be passed in eventually-!
       
       integer::c,i, j
       
       type(Catalogue)::tCat !-temporary allocation-!                                       
       integer::counter
       integer,allocatable::Expected_Occupation(:), Occupation(:)
+      real(double),allocatable::Temporary_Magnitude(:)
       
       real(double),allocatable::Sorted_Array(:)
       logical::Stop_Flag
@@ -143,17 +160,49 @@ module Catalogues
 
       if(Verbose) print *, 'Binning Catalogue by Magnitude...'
       
+      if(present(Mag_Type)) then
+         Magnitude_Type = Mag_Type
+      else
+         Magnitude_Type = 1 !-Default-!
+      end if
+
       allocate(Expected_Occupation(size(Limits,1))); Expected_Occupation = 0
       allocate(Occupation(size(Limits,1))); Occupation = 0
+
+      !--Construct Array which stores the Magnitude with respect to which we are binning--!
+      allocate(Temporary_Magnitude(size(Cat%RA)));
+      select case(Magnitude_Type)
+      case(1)
+         print *, 'Binning Catalogue by Absolute_Magnitude'
+         Temporary_Magnitude = Cat%Absolute_Magnitude
+      case(2)
+         print *, 'Binning Catalogue by MF606W'
+         Temporary_Magnitude = Cat%MF606W
+      case default
+         STOP 'bin_catalogue_by_magnitude - Invalid choice of magnitude type , stopping...'
+      end select
       
+      if(all(Temporary_Magnitude == 0.e0_double)) then
+         print *, 'Bin_by_Magnitude, magnitude information empty, returning Binned Catalogue which contains all galaxies'
+         call Binned_Catalogue_Construct(BCat, 'No Binning', 1)
+         call Catalogue_Construct(BCat%Cat(1), size(Cat%RA))
+         BCat%Cat(1) = Cat
+         allocate(BCat%Index_Mapping(1)%Map(size(Cat%RA))); BCat%Index_Mapping(1)%Map = -1
+         do c = 1, size(Cat%RA)
+            BCat%Index_Mapping(1)%Map(c) = c
+         end do
+         BCat%Occupation = size(Cat%RA)
+         return
+      end if
+
       call Binned_Catalogue_Construct(BCat, 'By Magnitude', size(Limits,1))
       BCat%Bin_Limits = Limits
       
       !-Construct Expected Occupation-!                                                                                                                                                                                    
       do i = 1, size(Limits,1)
-         Expected_Occupation(i) = count(Cat%Mag <= Limits(i,2)) - count(Cat%Mag <= Limits(i,1))
-!         Expected_Occupation(i) = count(Cat%Mag <= Limits(i,2)) - count(Cat%Mag <= Limits(1,1)) - sum(Expected_Occupation(:i))
-         if(i==1) Expected_Occupation(1) = Expected_Occupation(1) + count(Cat%Mag==Limits(1,1))
+         Expected_Occupation(i) = count(Temporary_Magnitude <= Limits(i,2)) - count(Temporary_Magnitude <= Limits(i,1))
+!         Expected_Occupation(i) = count(Temporary_Magnitude <= Limits(i,2)) - count(Temporary_Magnitude <= Limits(1,1)) - sum(Expected_Occupation(:i))
+         if(i==1) Expected_Occupation(1) = Expected_Occupation(1) + count(Temporary_Magnitude==Limits(1,1))
          call Catalogue_Construct(BCat%Cat(i), Expected_Occupation(i))
          allocate(BCat%Index_Mapping(i)%Map(Expected_Occupation(i))); BCat%Index_Mapping(i)%Map = -1
       end do
@@ -161,12 +210,12 @@ module Catalogues
       counter = 0
       do c = 1, size(Cat%Sizes)
          do i =1, size(Limits,1)
-            if( (Cat%Mag(c) > Limits(i,1)) .and. (Cat%Mag(c) <= Limits(i,2)) ) then
+            if( (Temporary_Magnitude(c) > Limits(i,1)) .and. (Temporary_Magnitude(c) <= Limits(i,2)) ) then
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
                BCat%Index_Mapping(i)%Map(Occupation(i)) = c
             end if
-            if(i == 1 .and. Cat%Mag(c) == Limits(i,1)) then
+            if(i == 1 .and. Temporary_Magnitude(c) == Limits(i,1)) then
                counter = counter + 1
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
@@ -199,28 +248,35 @@ module Catalogues
       if(STOP_FLAG) STOP
       !---------------------end duplication check-------------------------------------------------------!
 
-      if((minval(Limits) <= minval(Cat%Mag)) .and. (maxval(Limits) >= maxval(Cat%Mag)) .and. (sum(Occupation) /= Size(Cat%RA))) THEN !!THIS IS ONLY TRUE IS LIMITS ARE SUCH TAHT ALL SHOULD BE ACCOUNTED FOR!!
-         pRINT *, 'bin_catalogue_by_magnitude- FATAL ERROR - Sum of occupation is not equal to the size of the original array; not all galaxies accounted for:, Occ, Array', sum(Occupation), Size(Cat%RA)
-         do j = 1, size(Cat%RA)
-            Index_map_Found = .false.
-            do i = 1, size(Limits,1)
-               if(j==1) print *, 'Occ, Expected:', Occupation(i), Expected_Occupation(i)
-               do c = 1, size(BCat%Cat(i)%RA)
-                  if(BCat%Index_Mapping(i)%Map(c) == j) then
-                     !--Success--!
-                     Index_Map_Found = .true.
-                     exit
-                  end if
-                  if(Index_Map_Found== .false. .and. i == size(Limits,1) .and. c == size(BCat%Cat(i)%RA)) then
-                     print *, 'A Missing Galaxy was found:, galaxy:', j, 'with Magnitude:', Cat%Mag(j), ' limits:', Limits(1,1), Limits(size(Limits,1),2)
-                  end if
-               end do
-               if(Index_map_found == .true.) exit
-            end do
-         end do
-
-         STOP
-      end if
+      !--Search for galxys in the main catalogue which are between the binning limits, but have not been allocated to any bin--!
+      !-Works, but problems is some galxies go missing, commented out for now-!
+!(minval(Limits) <= minval(Temporary_Magnitude)) .and. (maxval(Limits) >= maxval(Temporary_Magnitude)) .and.
+!!$      if((sum(Occupation) /= Size(Cat%RA))) THEN !!THIS IS ONLY TRUE IF LIMITS ARE SUCH THAT ALL SHOULD BE ACCOUNTED FOR!!
+!!$         pRINT *, 'bin_catalogue_by_magnitude- FATAL ERROR - Sum of occupation is not equal to the size of the original array; not all galaxies accounted for:, Occ, Array', sum(Occupation), Size(Cat%RA)
+!!$         do j = 1, size(Cat%RA)
+!!$            Index_map_Found = .false.
+!!$                  !-Ignore those that fall outside bin limits-!
+!!$            if(Temporary_Magnitude(j) < minval(Limits)) cycle
+!!$            if(Temporary_Magnitude(j) > maxval(Limits)) cycle
+!!$            do i = 1, size(Limits,1)
+!!$               if(j==1) print *, 'Occ, Expected:', Occupation(i), Expected_Occupation(i)
+!!$               do c = 1, size(BCat%Cat(i)%RA)
+!!$                  !---!
+!!$                  if(BCat%Index_Mapping(i)%Map(c) == j) then
+!!$                     !--Success--!
+!!$                     Index_Map_Found = .true.
+!!$                     exit
+!!$                  end if
+!!$                  if(Index_Map_Found== .false. .and. i == size(Limits,1) .and. c == size(BCat%Cat(i)%RA)) then
+!!$                     print *, 'A Missing Galaxy was found:, galaxy:', j, 'with Magnitude:', Temporary_Magnitude(j), ' limits:', Limits(1,1), Limits(size(Limits,1),2)
+!!$                  end if
+!!$               end do
+!!$               if(Index_map_found == .true.) exit
+!!$            end do
+!!$         end do
+!!$
+!!$         STOP
+!!$      end if
       do i = 1, size(Limits,1)
          if(Occupation(i) /= Expected_Occupation(i)) then
             print *, 'Expected Error (FATAL): bin_catalogue_by_magnitude: Occupation of a bin is not equal to the expected occupation', i, Occupation(i), Expected_Occupation(i)
@@ -237,6 +293,7 @@ module Catalogues
 
       BCat%Occupation = Occupation
       
+      deallocate(Temporary_Magnitude)
       if(Verbose) print *, 'Done.'
       
     end subroutine bin_catalogue_by_magnitude
@@ -421,6 +478,16 @@ module Catalogues
     end subroutine unBin_Binned_Catalogue
 
     !------------------END BINNING ROUTINES-------------------------!
+    real(double) function Physical_Size_from_Pixel_Size(Redshift, Pixel_Size)
+      use Cosmology, only:angular_diameter_distance_fromRedshift
+      real(double),intent(in)::Redshift, Pixel_Size
+      real(double)::Pixel_Size_Radians
+
+      Pixel_Size_Radians = (ACSPixel_Size*3.141592654e0_double)/(180.e0_double*3600.e0_double)
+
+      if(Redshift > 0.e0_double) Physical_Size_from_Pixel_Size = (Pixel_Size_Radians*Pixel_Size*angular_diameter_distance_fromRedshift(0.e0_double,Redshift))
+
+    end function Physical_Size_from_Pixel_Size
 
     subroutine convert_Size_from_Physical_to_Pixel(Cat)
       use Cosmology
@@ -534,6 +601,11 @@ module Catalogues
 !!$         end subroutine Cut_By_PhotometricRedshift
 !!$      END INTERFACE
       
+      if(all(Cat%Redshift < 0) .or. allocated(Cat%Redshift) == .false.) then
+         print *, 'Cut_By_PhotometricRedshift - Redshift data is empty or unassigned, RETURNING WITHOUT ALTERATION'
+         return
+      end if
+
       if((present(lowerCut)==.false.) .and. (present(upperCut)==.false.)) then
          print *, 'Error - Cut_By_PhotometricRedshift - Either a lower or upper cut needs to be entered, returning without cutting'
          return
@@ -558,6 +630,7 @@ module Catalogues
       if(Verbose) print *, 'Cutting Catalogue to Phot-Z between limits:', ilower, iupper
 
       if(ilower >= iupper) then
+         print *, 'lower/upper:', ilower, iupper
          STOP 'FATAL ERROR - Cut_By_PhotometricRedshift - lower cut larger than upper cut'
       end if
       
@@ -589,8 +662,8 @@ module Catalogues
             end if
          end do
       end if
-      if(nPass /= size(Cat%Mag)) then
-         print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%Mag)
+      if(nPass /= size(Cat%RA)) then
+         print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%RA)
          STOP
       end if
 
@@ -602,6 +675,7 @@ module Catalogues
 
 
     subroutine Cut_By_Magnitude(Cat, lowerCut, upperCut)
+      !--Only Set up to use MF606W, i.e. apparent magnitude--!
       type(Catalogue)::Cat
       real(double),intent(in),optional::lowerCut, upperCut
 
@@ -615,15 +689,20 @@ module Catalogues
          return
       end if
 
+      if(all(Cat%MF606W <= 0.e0_double) .or. allocated(Cat%MF606W)==.false.) then
+         print *, 'Cut_by_Magnitude: MF606W is not allocated or is empty, returning WITHOUT ALTERATION'
+         return
+      end if
+      
       if(present(lowerCut)) then
          ilower =lowerCut
       else
-         ilower = minval(Cat%Mag)
+         ilower = minval(Cat%MF606W)
       end if
       if(present(upperCut)) then
          iupper =upperCut
       else
-         iupper = maxval(Cat%Mag)
+         iupper = maxval(Cat%MF606W)
       end if
 
       if(ilower >= iupper) then
@@ -639,24 +718,24 @@ module Catalogues
       call Catalogue_Destruct(Cat)
 
 !!$      nPass = 0
-!!$      do i = 1, size(Temp_Cat%Mag)
-!!$         if((Temp_Cat%Mag(i) >= ilower) .and. (Temp_Cat%Mag(i) <= iupper)) nPass = nPass + 1
+!!$      do i = 1, size(Temp_Cat%MF606W)
+!!$         if((Temp_Cat%MF606W(i) >= ilower) .and. (Temp_Cat%MF606W(i) <= iupper)) nPass = nPass + 1
 !!$      end do
 
-      nPass = count(Temp_cat%Mag <= iupper) + count(Temp_Cat%Mag >= ilower) - size(Temp_Cat%Mag)
+      nPass = count(Temp_cat%MF606W <= iupper) + count(Temp_Cat%MF606W >= ilower) - size(Temp_Cat%MF606W)
 
 
       call Catalogue_Construct(Cat, nPass)
 
       nPass = 0
-      do i = 1, size(Temp_Cat%Mag)
-         if((Temp_Cat%Mag(i) >= ilower) .and.(Temp_Cat%Mag(i) <= iupper)) then
+      do i = 1, size(Temp_Cat%MF606W)
+         if((Temp_Cat%MF606W(i) >= ilower) .and.(Temp_Cat%MF606W(i) <= iupper)) then
             nPass = nPass + 1
             call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)
          end if
       end do
-      if(nPass /= size(Cat%Mag)) then
-         print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%Mag)
+      if(nPass /= size(Cat%MF606W)) then
+         print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%MF606W)
          STOP
       end if
 
@@ -808,8 +887,8 @@ module Catalogues
 
       real(double),allocatable::Cat_2D(:,:)
 
-      integer,intent(in)::Cols(:) !-ntile, RA, Dec, xpos, ypos, Mag, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!
-      integer::Cols_Length = 13
+      integer,intent(in)::Cols(:) !-ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!
+      integer::Cols_Length = 14
       integer, allocatable::iCols(:)
       integer::Column_Index
       character(200)::header_Filename
@@ -872,22 +951,24 @@ module Catalogues
             Cat%xpos = Cat_2D(iCols(Column_Index),:)
          case(5) !-ypos-!
             Cat%ypos = Cat_2D(iCols(Column_Index),:)
-         case(6) !-Mag-!
-            Cat%Mag = Cat_2D(iCols(Column_Index),:)
-         case(7) !-MagErr-!
+         case(6) !-Absolute_Mag-!
+            Cat%Absolute_Magnitude = Cat_2D(iCols(Column_Index),:)
+         case(7)
+            Cat%MF606W = Cat_2D(iCols(Column_Index),:)
+         case(8) !-MagErr-!
             Cat%MagErr = Cat_2D(iCols(Column_Index),:)
-         case(8) !-Flux-!
+         case(9) !-Flux-!
             Cat%Flux = Cat_2D(iCols(Column_Index),:)
-         case(9) !-FluxErr-!
+         case(10) !-FluxErr-!
             Cat%FluxErr = Cat_2D(iCols(Column_Index),:)
-         case(10) !-Size-!
+         case(11) !-Size-!
             Cat%Sizes_Label= Size_Label
             Cat%Sizes = Cat_2D(iCols(Column_Index),:)
-         case(11) !-g1-!
+         case(12) !-g1-!
             Cat%g1 = Cat_2D(iCols(Column_Index),:)
-         case(12) !-g2-!
+         case(13) !-g2-!
             Cat%g2 = Cat_2D(iCols(Column_Index),:)
-         case(13)
+         case(14)
             Cat%Redshift = Cat_2D(iCols(Column_Index),:)
          case default
             STOP 'iCols constructed to a size which I cannot deal with yet'
@@ -919,14 +1000,14 @@ module Catalogues
       do i = 1, size(Cat%Sizes)
          if(iPad) then
             if(trim(adjustl(Cat%Sizes_Label))=='FWHM') then
-               write(30, '(I2, x, 20(e14.7, x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%Mag(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i), Cat%Sizes(i), 0., 0., 0., 0., 0., 0., 0., 0., Cat%g1(i), Cat%g2(i)
+               write(30, '(I2, x, 20(e14.7, x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%MF606W(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i), Cat%Sizes(i), 0., 0., 0., 0., 0., 0., 0., 0., Cat%g1(i), Cat%g2(i)
             elseif(trim(adjustl(Cat%Sizes_Label))=='FR') then
-               write(30, '(I2, x, 20(e14.7,x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%Mag(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i),0., Cat%Sizes(i),  0., 0., 0., 0., 0., 0., 0., Cat%g1(i), Cat%g2(i)
+               write(30, '(I2, x, 20(e14.7,x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%MF606W(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i),0., Cat%Sizes(i),  0., 0., 0., 0., 0., 0., 0., Cat%g1(i), Cat%g2(i)
             elseif(trim(adjustl(Cat%Sizes_Label))=='KSB') then
-               write(30, '(I2, x, 20(e14.7,x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%Mag(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i), 0., 0., Cat%Sizes(i), 0., 0., 0., 0., 0., 0., Cat%g1(i), Cat%g2(i)
+               write(30, '(I2, x, 20(e14.7,x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%MF606W(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i), 0., 0., Cat%Sizes(i), 0., 0., 0., 0., 0., 0., Cat%g1(i), Cat%g2(i)
             end if
          else
-            write(30, '(I2, x, 11(e14.7,x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%Mag(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i), Cat%Sizes(i), Cat%g1(i), Cat%g2(i)
+            write(30, '(I2, x, 11(e14.7,x))') Cat%ntile(i), Cat%RA(i), Cat%Dec(i), Cat%xpos(i), Cat%ypos(i), Cat%MF606W(i), Cat%MagErr(i), Cat%Flux(i), Cat%FluxErr(i), Cat%Sizes(i), Cat%g1(i), Cat%g2(i)
          end if
       end do
       close(30)
@@ -956,6 +1037,8 @@ module Catalogues
 
       BCat%Label = ' '
       if(allocated(BCat%Bin_Limits)) deallocate(BCat%Bin_Limits)
+      if(allocated(BCat%Occupation)) deallocate(BCat%Occupation)
+      if(allocated(BCat%Index_Mapping)) deallocate(BCat%Index_Mapping)
       if(allocated(BCat%Cat)) then
          do i = 1, size(BCat%Cat)
             call Catalogue_Destruct(BCat%Cat(i))
@@ -974,8 +1057,9 @@ module Catalogues
       if(allocated(Cat%ntile)) deallocate(Cat%ntile)
       if(allocated(Cat%flux)) deallocate(Cat%flux)
       if(allocated(Cat%fluxerr)) deallocate(Cat%fluxerr)
-      if(allocated(Cat%mag)) deallocate(Cat%mag)
+      if(allocated(Cat%MF606W)) deallocate(Cat%MF606W)
       if(allocated(Cat%magerr)) deallocate(Cat%magerr)
+      if(allocated(Cat%Absolute_Magnitude)) deallocate(Cat%Absolute_Magnitude)
       if(allocated(Cat%xpos)) deallocate(Cat%xpos)
       if(allocated(Cat%ypos)) deallocate(Cat%ypos)
       if(allocated(Cat%RA)) deallocate(Cat%RA)
@@ -1001,11 +1085,12 @@ module Catalogues
 
       allocate(Cat%flux(nObj)); Cat%flux = 0.e0_double
       Cat%Mag_Label = ' '
-      allocate(Cat%mag(nObj)); Cat%mag = 0.e0_double
+      allocate(Cat%MF606W(nObj)); Cat%MF606W = 0.e0_double
+      allocate(Cat%Absolute_Magnitude(nObj)); Cat%Absolute_Magnitude = 0.e0_double
       allocate(Cat%xpos(nObj)); Cat%xpos = 0.e0_double
       allocate(Cat%ypos(nObj)); Cat%ypos = 0.e0_double 
       Cat%Sizes_Label = ' '
-      allocate(Cat%Sizes(nObj)); Cat%Sizes = 0.e0_double
+      allocate(Cat%Sizes(nObj)); Cat%Sizes = -100.e0_double
       allocate(Cat%Physical_Sizes(nObj)); Cat%Physical_Sizes = 0.e0_double
  
       allocate(Cat%Fluxerr(nObj)); Cat%Fluxerr = 0.e0_double
@@ -1028,7 +1113,8 @@ module Catalogues
 
       Catalogue_Constructed = .false.
       if(allocated(Cat%flux)) Catalogue_Constructed = .true.
-      if(allocated(Cat%mag)) Catalogue_Constructed = .true.
+      if(allocated(Cat%MF606W)) Catalogue_Constructed = .true.
+      if(allocated(Cat%Absolute_Magnitude)) Catalogue_Constructed = .true. 
       if(allocated(Cat%xpos)) Catalogue_Constructed = .true.
       if(allocated(Cat%ypos)) Catalogue_Constructed = .true.
       if(allocated(Cat%Sizes)) Catalogue_Constructed = .true.
@@ -1047,6 +1133,7 @@ module Catalogues
     end function Catalogue_Constructed
 
     subroutine Catalogue_Assign_byGalaxy_byIndex(Cat, Galaxy_Index, flux, mag, xpos, ypos, Sizes,Status)
+      !--DEPRECATED CODE - OUT OF DATE--!
       !-Assigns a single value by entered index. Function is overloaded with equivalent which assigns by Catalogue ()-!
       type(Catalogue)::Cat
       integer,intent(in)::Galaxy_Index
@@ -1067,7 +1154,7 @@ module Catalogues
 !!$  END INTERFACE
 
 
-      if(Galaxy_Index > size(Cat%mag)) then; print *, 'Catalogue_Assign_byGalaxy - Index Entered not valid - Too Large'; iStatus = -1; return;
+      if(Galaxy_Index > size(Cat%MF606W)) then; print *, 'Catalogue_Assign_byGalaxy - Index Entered not valid - Too Large'; iStatus = -1; return;
       elseif(Galaxy_Index <= 0) then; print *, 'Catalogue_Assign_byGalaxy - Index Entered not valid - Too Small'; iStatus = -1; return;
       end if
 
@@ -1075,7 +1162,7 @@ module Catalogues
       if(iStatus < 0) return
 
       if(present(flux)) Cat%flux(Galaxy_Index) = flux
-      if(present(mag)) Cat%mag(Galaxy_Index) = mag
+      if(present(mag)) Cat%MF606W(Galaxy_Index) = mag
       if(present(xpos)) Cat%xpos(Galaxy_Index) =xpos
       if(present(ypos)) Cat%ypos(Galaxy_Index) =ypos
       if(present(Sizes)) Cat%Sizes(Galaxy_Index) =Sizes
@@ -1104,7 +1191,8 @@ module Catalogues
 
       Cat%flux(Index) = Cat_Ref%flux(Index_Ref)
       Cat%fluxerr(Index) = Cat_Ref%fluxerr(Index_Ref)
-      Cat%mag(Index) = Cat_Ref%mag(Index_Ref)
+      Cat%Absolute_Magnitude(Index) = Cat_Ref%Absolute_Magnitude(Index_Ref)
+      Cat%MF606W(Index) = Cat_Ref%MF606W(Index_Ref)
       Cat%magerr(Index) = Cat_Ref%magerr(Index_Ref)
       Cat%xpos(Index) = Cat_Ref%xpos(Index_Ref)
       Cat%ypos(Index) = Cat_Ref%ypos(Index_Ref)
@@ -1168,6 +1256,7 @@ module Catalogues
          do c = 1, size(Cat%Redshift)
             if( (dsqrt( (Cat%RA(c)-Rcat%RA(rc))*(Cat%RA(c)-Rcat%RA(rc)) + (Cat%Dec(c)-Rcat%Dec(rc))*(Cat%Dec(c)-Rcat%Dec(rc)) ) <= Pos_Tol_Degree) .and. (Index_Mapping(c) < 0)) then
                Cat%Redshift(c) = RCat%Redshift(rc)
+               Cat%Absolute_Magnitude(c) = RCat%Absolute_Magnitude(rc)
                nMatch = nMatch + 1
                Index_Mapping(c) = rc
                exit

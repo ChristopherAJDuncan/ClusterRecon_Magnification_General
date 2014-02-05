@@ -29,7 +29,7 @@ program Size_Luminosity_Redshift_Relation
 
   !--Get Bin Limits. This gives **approximately the same number in each bin**--!
   call Calculate_Bin_Limits_by_equalNumber(Cat%Redshift, nBinZ, Redshift_Limits)
-  call Calculate_Bin_Limits_by_equalNumber(Cat%Mag, nBinM, Magnitude_Limits)
+  call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nBinM, Magnitude_Limits)
 
   allocate(SizeMagRelation(size(Magnitude_Limits,1), size(Redshift_Limits,1))); SizeMagRelation = 0.e0_double
   allocate(SizeMagRelation_Error(size(Magnitude_Limits,1), size(Redshift_Limits,1))); SizeMagRelation_Error = 0.e0_double
