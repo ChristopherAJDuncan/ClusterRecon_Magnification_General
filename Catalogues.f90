@@ -18,6 +18,7 @@ module Catalogues
      character(len = 10)::Mag_Label
      real(double),dimension(:),allocatable::flux, fluxerr, MF606W, magerr, Absolute_Magnitude
      integer,dimension(:),allocatable::ntile
+     integer,dimension(:), allocatable::Galaxy_Number
      real(double),dimension(:),allocatable::xpos, ypos
      real(double),dimension(:),allocatable::RA,Dec
      character(len = 4)::Sizes_Label
@@ -55,39 +56,58 @@ module Catalogues
 
     !---Catalogue Inforamtion Storage----!
     subroutine common_Catalogue_directories(Index, Directory, Filename, Columns)
+      !-Index < 0 indeicates a blank field catalogue-!
       integer,intent(in)::Index
       character(*)::Filename, Directory
-      integer,intent(out),allocatable::Columns(:) !-ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!    
+      integer,intent(out),allocatable::Columns(:) !-Galaxy_Number, ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!    
 
       logical::here
 
       character(200)::Base_Directory = '/disk1/cajd/Size_Magnification/'
 
       if(allocated(Columns)) deallocate(Columns)
-      allocate(Columns(14)); Columns = 0
+      allocate(Columns(15)); Columns = 0
 
       select case(Index)
       case(1) !-Full STAGES catalogue--!
          Directory = 'Catalogues/'
          Filename = 'STAGES_shear.cat'
-         Columns = (/1,2,3,4,5,-1,6,7,8,9,11,19,20,-1/)
-      case(2) !--COMBO17 redshift - matched to STAGES--!
+         Columns = (/-1,1,2,3,4,5,-1,6,7,8,9,11,19,20,-1/)
+      case(2) !--COMBO17 redshift - Matched to STAGES--!
          Directory = 'Catalogues/'
-         Filename = 'STAGES_COMBO17_gsMag_size_matched.pzcat'
-         Columns = (/-1,10,11,-1,-1,8,12,-1,-1,-1,14,16,17,5/) !-12 (ST_Mag) could alos be 3 (ST_Mag_Best)
+         Filename = 'STAGES_COMBO-17_Matched_20140304.pzcat'
+         Columns = (/-1,-1,12,13,10,11,37,5,-1,3,-1,31,-1,-1,35/)
+
+!!$         Filename = 'STAGES_COMBO17_gsMag_size_matched.pzcat'
+!!$         Columns = (/-1,10,11,-1,-1,8,12,-1,-1,-1,14,16,17,5/) !-12 (ST_Mag) could alos be 3 (ST_Mag_Best)
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'SExtractor_RRG.cat'
-         Columns = (/-1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, -1, -1, -1/)
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'
-         Columns = (/-1, 1, 2, -1, -1, 5, 6, -1, -1, -1, 3, -1, -1, 4/)
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, -1/)
       case(5) !--COMBO17-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_COMBO.cat'
-         Columns = (/-1, 1, 2, -1, -1, 5, 6, -1, -1, -1, 3, -1, -1, 4/)
-
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+      case(6) !--COMBO-17 RRG Sizes--!
+         Directory = 'Catalogues/'
+         Filename = 'RRG_COMBO-17_gsMag.pzcat'
+         Columns = (/-1,10, 1, 2, 13, 14, 8, 12, -1, 11, -1, 24, -1, -1, 5/)!-Sizes 24 (Tr), 25(det)-! 
+      case(7) !--COMBO17 Catalogue: Unmatched, taken directly from COMBO-STAGES master :stages_20080529_v1pub.fits:--!
+         Directory = 'Catalogues/'
+         Filename = 'COMBO-17-Redshift_Cuts_21022014.pzcat'
+         Columns = -1
+      case(-4) !-STAGES-like Blank Field (Unlensed) Mock Catalogue-!
+         Directory = 'Simulations/Output/'
+         Filename = 'Mock_STAGES_Unlensed.cat'
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, -1/)         
+      case(-5) !-COMBO-like Blank Field (Unlensed) Mock Catalogue-!
+         Directory = 'Simulations/Output/'
+         Filename = 'Mock_COMBO_Unlensed.cat'
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
       case default
          STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
       end select
@@ -711,7 +731,6 @@ module Catalogues
          STOP
       end if
 
-      print *, 'Cutting Catalogue by magnitude between limits:', ilower, iupper
       
       Temp_Cat = Cat
 
@@ -738,6 +757,8 @@ module Catalogues
          print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%MF606W)
          STOP
       end if
+
+      print *, 'Cut Catalogue by magnitude between limits:', ilower, iupper, '; nCut = ', size(Temp_Cat%RA) - nPass
 
       call Catalogue_Destruct(Temp_Cat)
 
@@ -887,8 +908,8 @@ module Catalogues
 
       real(double),allocatable::Cat_2D(:,:)
 
-      integer,intent(in)::Cols(:) !-ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!
-      integer::Cols_Length = 14
+      integer,intent(in)::Cols(:) !- Number, ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!
+      integer::Cols_Length = 15
       integer, allocatable::iCols(:)
       integer::Column_Index
       character(200)::header_Filename
@@ -941,34 +962,36 @@ module Catalogues
       do Column_Index = 1, size(iCols)
          if(iCols(Column_Index) < 0) cycle
          select case (Column_Index)
-         case(1) !-ntile-!
+         case(1)
+            Cat%Galaxy_Number = Cat_2D(iCols(Column_Index),:)
+         case(2) !-ntile-!
             Cat%ntile = Cat_2D(iCols(Column_Index),:)
-         case(2) !-RA-!
+         case(3) !-RA-!
             Cat%RA = Cat_2D(iCols(Column_Index),:)
-         case(3) !-Dec-!
+         case(4) !-Dec-!
             Cat%Dec = Cat_2D(iCols(Column_Index),:)
-         case(4) !-xpos-!
+         case(5) !-xpos-!
             Cat%xpos = Cat_2D(iCols(Column_Index),:)
-         case(5) !-ypos-!
+         case(6) !-ypos-!
             Cat%ypos = Cat_2D(iCols(Column_Index),:)
-         case(6) !-Absolute_Mag-!
+         case(7) !-Absolute_Mag-!
             Cat%Absolute_Magnitude = Cat_2D(iCols(Column_Index),:)
-         case(7)
+         case(8)
             Cat%MF606W = Cat_2D(iCols(Column_Index),:)
-         case(8) !-MagErr-!
+         case(9) !-MagErr-!
             Cat%MagErr = Cat_2D(iCols(Column_Index),:)
-         case(9) !-Flux-!
+         case(10) !-Flux-!
             Cat%Flux = Cat_2D(iCols(Column_Index),:)
-         case(10) !-FluxErr-!
+         case(11) !-FluxErr-!
             Cat%FluxErr = Cat_2D(iCols(Column_Index),:)
-         case(11) !-Size-!
+         case(12) !-Size-!
             Cat%Sizes_Label= Size_Label
             Cat%Sizes = Cat_2D(iCols(Column_Index),:)
-         case(12) !-g1-!
+         case(13) !-g1-!
             Cat%g1 = Cat_2D(iCols(Column_Index),:)
-         case(13) !-g2-!
+         case(14) !-g2-!
             Cat%g2 = Cat_2D(iCols(Column_Index),:)
-         case(14)
+         case(15)
             Cat%Redshift = Cat_2D(iCols(Column_Index),:)
          case default
             STOP 'iCols constructed to a size which I cannot deal with yet'
@@ -1054,6 +1077,7 @@ module Catalogues
 
       Cat%Name = ' '
 
+      if(allocated(Cat%Galaxy_Number)) deallocate(Cat%Galaxy_Number)
       if(allocated(Cat%ntile)) deallocate(Cat%ntile)
       if(allocated(Cat%flux)) deallocate(Cat%flux)
       if(allocated(Cat%fluxerr)) deallocate(Cat%fluxerr)
@@ -1083,6 +1107,7 @@ module Catalogues
 
       Cat%Name = ' '
 
+      allocate(Cat%Galaxy_Number(nObj)); Cat%Galaxy_Number = 0
       allocate(Cat%flux(nObj)); Cat%flux = 0.e0_double
       Cat%Mag_Label = ' '
       allocate(Cat%MF606W(nObj)); Cat%MF606W = 0.e0_double
@@ -1112,6 +1137,7 @@ module Catalogues
       if(Cat%Name /= ' ') Catalogue_Constructed = .true.
 
       Catalogue_Constructed = .false.
+      if(allocated(Cat%Galaxy_Number)) Catalogue_Constructed = .true.
       if(allocated(Cat%flux)) Catalogue_Constructed = .true.
       if(allocated(Cat%MF606W)) Catalogue_Constructed = .true.
       if(allocated(Cat%Absolute_Magnitude)) Catalogue_Constructed = .true. 
@@ -1189,6 +1215,7 @@ module Catalogues
       elseif(Index_Ref <= 0) then; print *, 'Catalogue_Assign_byGalaxy - Index_Ref Entered not valid - Too Small'; iStatus = -1; return;
       end if
 
+      Cat%Galaxy_Number(Index) = Cat_Ref%Galaxy_Number(Index_Ref)
       Cat%flux(Index) = Cat_Ref%flux(Index_Ref)
       Cat%fluxerr(Index) = Cat_Ref%fluxerr(Index_Ref)
       Cat%Absolute_Magnitude(Index) = Cat_Ref%Absolute_Magnitude(Index_Ref)

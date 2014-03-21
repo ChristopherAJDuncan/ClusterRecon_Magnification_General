@@ -20,7 +20,7 @@ program Mass_Mapping_MagBins
   character(120)::Output_FilenameDir_AvSize, Output_FilenameDir_KappaEst, Output_FilenameDir_KappaError, Output_FilenameDir_SizeError, Output_FilenameDir_OccGrid, Output_FilenameDir_SmoothedOccGrid
   character(10)::bin_by_sIze_Type = 'Physical'
 
-  logical:: plot_Bin = .False.
+  logical:: plot_Bin = .true.
   logical:: get_Size_Histograms = .true.
   character(120)::Bin_Output_Directory
   character(120)::Size_Histogram_Filename
@@ -57,7 +57,7 @@ program Mass_Mapping_MagBins
 
   character(10):: Mass_String, Error_Mass_String !--Formatted Output--!
 
-  logical::do_Pixel_Based_Method = .false.
+  logical::do_Pixel_Based_Method = .true.
 
   integer::Bin_Loop_Z, Bin_Loop_M, i, j
   integer::Occupation_limit = 100.0
@@ -77,7 +77,7 @@ program Mass_Mapping_MagBins
  
   !--Read in the Catalogue with reshifts--!                                                                                                     
   !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks STAGES, 5:Mock COMBO !
-  call common_Catalogue_directories(4, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+  call common_Catalogue_directories(5, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
   print *, 'Using COls:', Catalogue_Cols
   call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
 
@@ -203,13 +203,20 @@ program Mass_Mapping_MagBins
             
             
             !-----Mass Estimation---!                                                                            
-            !        call Mass_Estimate_CircularAperture_byPixel(Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses, Cluster_Masses_Error, Source_Redshift = Mean_Discrete(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), Convergence_Map_Occupation = nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:))
-            
-            
-            
-!!$            PRINT *, 'Reading:'
-!!$            READ(*,*)
-            !        
+            allocate(Cluster_Masses_Pixel(nRedBIn,nMagBin,size(Cluster_Pos,1))); Cluster_Masses_Pixel = 0.e0_double
+            allocate(Cluster_Masses_Error_Pixel(nRedBIn,nMagBin,size(Cluster_Pos,1))); Cluster_Masses_Error_Pixel = 0.e0_double
+
+
+            call Mass_Estimate_CircularAperture_byPixel(Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), Error_Kappa_Bin(Bin_Loop_Z,Bin_Loop_M,:,:), RAGrid, DecGrid, Cluster_Pos, (/1.e0_double/60.e0_double/), Cluster_Masses_Pixel(Bin_Loop_Z,Bin_Loop_M,:), Cluster_Masses_Error_Pixel(Bin_Loop_Z,Bin_Loop_M,:), Source_Redshift = Mean_Discrete(BBCat(Bin_Loop_Z)%Cat(Bin_Loop_M)%Redshift), Convergence_Map_Occupation = nGrid_Bin(Bin_Loop_Z,Bin_Loop_M, :,:))
+
+            print *, '---------------------------------------------------------------------------------------------------------------------'
+            print *, 'Cluster Masses (using Smoothed Pixel) are (in M_Sun/h):'
+            do j = 1, size(Cluster_Masses_Pixel,3)
+               write(Mass_String, '(e8.2)') Cluster_Masses_Pixel(Bin_Loop_Z,Bin_Loop_M,j); write(Error_Mass_String, '(e8.2)') Cluster_Masses_Error_Pixel(Bin_Loop_Z,Bin_Loop_M,j)
+               print *, 'Cluster:', j, ' has mass: ', trim(Mass_String), ' +- ', trim(Error_Mass_String)
+            end do
+            print *, '---------------------------------------------------------------------------------------------------------------------'
+
             
 !!$        
             !--Output and Plotting--!

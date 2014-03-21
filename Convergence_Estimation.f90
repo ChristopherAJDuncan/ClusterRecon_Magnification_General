@@ -158,16 +158,17 @@ contains
           if(callcount ==1) print *, 'I AM NOT CORRECTING FOR BETA'
           !call correct_for_beta(KappaEst, beta_correction)
        end if
-       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_Size = AverageSize, Kappa = KappaEst)
+       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_Size = AverageSize, Kappa = KappaEst, OccGrid = OccupationGrid)
     else
-       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_size = AverageSize)
+       
+       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, Av_size = AverageSize, OccGrid = OccupationGrid)
     end if
 
 !    if(callcount == 1) print *, 'I AM NOT SMOOTHING'
 
     if(present(Smoothed_OccupationGrid)) then
        allocate(Smoothed_OccupationGrid(size(OccupationGrid,1), size(OccupationGrid, 2))); Smoothed_OccupationGrid = 1.e0_double*OccupationGrid
-       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, OccGrid = Smoothed_OccupationGrid)
+       call do_Smoothing(Smoothing_Scale, RAGrid, DecGrid, SOccGrid = Smoothed_OccupationGrid)
     end if
  
     if(any(isNaN(AverageSize))) STOP 'Average_Size_in_RA_Dec_Grid - FATAL ERROR - average size constains NaNs'
@@ -175,30 +176,51 @@ contains
    
   end subroutine Average_Size_in_RA_Dec_Grid
 
-  subroutine do_Smoothing(ArcMinScale,RA_In,Dec_In,Av_Size,Kappa, OccGrid)
+  subroutine do_Smoothing(ArcMinScale,RA_In,Dec_In,Av_Size,Kappa, OccGrid, SOccGrid)
+    use Smoothing, only: Smooth_GaussianWeight_ConfigurationSpace_2D
     real(double),intent(in)::ArcMinScale
     real(double),intent(in)::RA_In(:),Dec_In(:)
     real(double),dimension(:,:),optional::Av_Size
     real(double),dimension(:,:),optional:: Kappa
-    real(double), dimension(:,:),optional::OccGrid !-Needs to be a real if smoothing-!
+    integer, dimension(:,:),optional::OccGrid
+    real(double), dimension(:,:),optional::SOccGrid !-Needs to be a real if smoothing-!
+
+    real(double)::Pixel_Scale, Degree_Scale
+
+    real(double),allocatable,dimension(:,:):: S_Av_Size, S_Kappa
 
     INTERFACE
-       subroutine do_Smoothing(ArcMinScale,RA_In,Dec_In,Av_Size,Kappa, OccGrid)
+       subroutine do_Smoothing(ArcMinScale,RA_In,Dec_In,Av_Size,Kappa, OccGrid, SOccGrid)
          use Param_Types
          real(double),intent(in)::ArcMinScale
          real(double),intent(in)::RA_In(:),Dec_In(:)
          
          real(double),dimension(:,:),optional::Av_Size
          real(double),dimension(:,:),optional:: Kappa
-         real(double), dimension(:,:),optional::OccGrid
+         integer, dimension(:,:),optional::OccGrid
+         real(double), dimension(:,:),optional::SOccGrid
        end subroutine do_Smoothing
     END INTERFACE
 
-    if(present(Av_Size)) call smooth_gaussiankernal(Av_Size, Sigma = (/ArcMinScale/60.e0_double, ArcMinScale/60.e0_double/), Box_Length = (/RA_In(size(RA_In,1))-RA_In(1), Dec_In(size(Dec_In,1))-Dec_In(1)/))
+    Degree_Scale = ArcMinScale/60.e0_double
 
-    if(present(Kappa)) call smooth_gaussiankernal(Kappa, Sigma = (/ArcMinScale/60.e0_double, ArcMinScale/60.e0_double/), Box_Length = (/RA_In(size(RA_In,1))-RA_In(1), Dec_In(size(Dec_In,1))-Dec_In(1)/))
-
-    if(present(OccGrid)) call smooth_gaussiankernal(OccGrid, Sigma = (/ArcMinScale/60.e0_double, ArcMinScale/60.e0_double/), Box_Length = (/RA_In(size(RA_In,1))-RA_In(1), Dec_In(size(Dec_In,1))-Dec_In(1)/))
+    if(present(Av_Size)) then
+!       call smooth_gaussiankernal(Av_Size, Sigma = (/ArcMinScale/60.e0_double, ArcMinScale/60.e0_double/), Box_Length = (/RA_In(size(RA_In,1))-RA_In(1), Dec_In(size(Dec_In,1))-Dec_In(1)/))
+       if((present(OccGrid) == .false.)) STOP 'do_Smoothing - Occ Grid not passed'
+       call Smooth_GaussianWeight_ConfigurationSpace_2D(Av_Size, RA_In, Dec_In, Degree_Scale, S_Av_Size, OccGrid)
+       Av_Size = S_Av_Size
+       deallocate(S_Av_Size)
+    end if
+    if(present(Kappa)) then
+!       call smooth_gaussiankernal(Kappa, Sigma = (/ArcMinScale/60.e0_double, ArcMinScale/60.e0_double/), Box_Length = (/RA_In(size(RA_In,1))-RA_In(1), Dec_In(size(Dec_In,1))-Dec_In(1)/))
+       if((present(OccGrid) == .false.)) STOP 'do_Smoothing - Occ Grid not passed'
+       call Smooth_GaussianWeight_ConfigurationSpace_2D(Kappa, RA_In, Dec_In, Degree_Scale, S_Kappa, OccGrid)
+       Kappa = S_Kappa
+       deallocate(S_Kappa)
+    end if
+    if(present(Av_Size) == .false. .and. present(Kappa) == .false. .and. present(SOccGrid)) then
+       call smooth_gaussiankernal(SOccGrid, Sigma = (/ArcMinScale/60.e0_double, ArcMinScale/60.e0_double/), Box_Length = (/RA_In(size(RA_In,1))-RA_In(1), Dec_In(size(Dec_In,1))-Dec_In(1)/))
+    end if
 
   end subroutine do_Smoothing
 

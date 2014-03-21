@@ -404,7 +404,7 @@ contains
     real(double),intent(in)::Convergence_Map(:,:), Error_Convergence(:,:), x(:), y(:) !-x is 1st dimension, y is 2nd dimension-!
     real(double), intent(in)::Aperture_Positions(:,:) !-Labels centers of apertures, D1: Center Label, D2: 1: x, 2:y--!
     real(double), intent(in)::Aperture_Radiuses(:) !-Must have same size of D1 as Positions or 1, if 1 then same radius is applied for all apertures-!
-    real(double), intent(out),allocatable::Masses(:), Error_Masses(:)
+    real(double), intent(out)::Masses(:), Error_Masses(:)
     real(double),intent(in),optional::Source_Redshift
     integer, intent(in),optional::Convergence_Map_Occupation(:,:)
 
@@ -489,8 +489,11 @@ contains
 !!$    print *, 'Dl = ', D_l
 !!$read(*,*)
 
-    allocate(Masses(size(Aperture_Positions,1))); Masses = 0.e0_double
-    allocate(Error_Masses(size(Aperture_Positions,1))); Error_Masses = 0.e0_double
+
+!    allocate(Masses(size(Aperture_Positions,1))); Masses = 0.e0_double
+!    allocate(Error_Masses(size(Aperture_Positions,1))); Error_Masses = 0.e0_double
+
+    Masses = 0.e0_double; Error_Masses = 0.e0_double
 
     Sum_Convergence_in_Aperture = 0.e0_double; NPix_in_Aperture = 0.e0_double; Total_Area_Enclosed = 0.e0_double
     do i =1, size(Masses)

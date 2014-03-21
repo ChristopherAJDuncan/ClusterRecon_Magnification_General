@@ -57,6 +57,8 @@ A901b = [148.9889,-9.9841]
 A902 = [149.1424,-10.1666]
 SW = [148.9101,-10.1719]
 
+xticksrot = 45
+
 def Smooth(Data, x, y):
     #Smooths on A Gaussian with width (sigma) = Guass_Width
     #xgrid is assumed to be on ROWS (or 1st index), y on COLS (or 2nd index)
@@ -137,6 +139,18 @@ if KappaSize.shape[0] != RA.shape[0]:
 if KappaSize.shape[1] != Dec.shape[0]:
     print 'WARNING - Kappa entered not conformal with Dec', KappaSize.shape[1], Dec.shape[0]
 
+
+### Set plot_xrange and yRange ###
+plot_xRange = [np.amin(RA), np.amax(RA)]
+plot_yRange = [np.amin(Dec), np.amax(Dec)]
+
+#Overwrite plot range
+
+#plot_xRange = [149.0, 149.2]
+#plot_yRange = [-10.05,-9.85]
+
+####################
+
 '''
 if(True):
     print 'WARNING: Smoothing in python!!!!'
@@ -169,24 +183,38 @@ if(plot_Kappa_Size_Map):
 
 #Use transpose as we want RA as x coord, but input file has it as increasing by row.
 #CS = ax.contourf(RA,Dec,np.transpose(Av_Size), levels = contour_levels, cmap = pl.cm.bone, origin = None) #100 after av_size
-    CS = ax.contourf(RA,Dec,np.transpose(Av_Size), 25, cmap = pl.cm.bone, origin = None) #100 after av_size
-    cbar = pl.colorbar(CS)
-    cbar.ax.set_ylabel('Average Size')
+
+
+    ax.set_xlim(plot_xRange)
+    ax.set_ylim(plot_yRange)
     ax.invert_xaxis()
 
 #im = ax.imshow(np.transpose(Av_Size), interpolation = None)
-    if(plot_Size_Contours):
-        CS2 = ax.contour(RA,Dec,np.transpose(Av_Size),levels = contour_levels[-3:],origin = None, hold = 'on', colors = ('r'))
     if(plot_KappaSize_Contours):
         CS_Kappa = ax.contour(RA,Dec,np.transpose(KappaSize), origin = None, hold = 'on', colors = 'k')
+        CSf_Kappa = ax.contourf(RA,Dec,np.transpose(KappaSize), 25, cmap = pl.cm.bone, origin = None)
+
+        cbar = pl.colorbar(CSf_Kappa)
+        cbar.ax.set_ylabel(r'$\kappa_{\rm Size}$')
+        cbar.add_lines(CS_Kappa)
+        
+    if(plot_Size_Contours):
+        CS2 = ax.contour(RA,Dec,np.transpose(Av_Size),levels = contour_levels[-3:],origin = None, hold = 'on', colors = ('r'))
+        #CS = ax.contourf(RA,Dec,np.transpose(Av_Size), 25, cmap = pl.cm.bone, origin = None) #100 after av_size
+        #cbar = pl.colorbar(CS)
+        #cbar.ax.set_ylabel('Average Size')
+        #cbar.add_lines(CS2)
+
+
+        
 #pl.clabel(CS2, fmt = '%2.1f', colors = 'k', fontsize=3)
-    cbar.add_lines(CS2)
+
 
     pl.xlabel('RA')
     pl.ylabel('Dec')
-    ax.set_title('Red(&Filled): Av Size. Black: Kappa_Size. White: Kappa_Shape')
+    ax.set_title('Red: Av Size. Black(&Filled): Kappa_Size. White: Kappa_Shape')
 
-    ax.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.1f'))
+    ax.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.2f'))
 
     if(plotSTAGES_DM_Map):
         DM_Map_Plot = ax.contour(RA_DM_Map,Dec_DM_Map,DM_Map,origin = None, hold = 'on', colors = 'w')
@@ -288,6 +316,8 @@ if(plot_Occupation_Grid):
     cbar = pl.colorbar(CS, ax = axes)
     cbar.ax.set_ylabel('Occupation')
 
+    axes.set_xlim(plot_xRange)
+    axes.set_ylim(plot_yRange)
     axes.invert_xaxis()
 
     '''
@@ -301,10 +331,14 @@ if(plot_Occupation_Grid):
     axes.set_xlabel('RA')
     axes.set_ylabel('Dec')
     
-    axes.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.1f'))
+    axes.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.2f'))
     
     axes = fig.add_subplot(2,1,2, aspect = 'equal')
     CS = axes.contourf(RA,Dec,np.transpose(SmOccGrid), 25, cmap = pl.cm.bone)
+
+    axes.set_xlim(plot_xRange)
+    axes.set_ylim(plot_yRange)
+            
     axes.invert_xaxis()
 
     CS2 = axes.contour(RA,Dec,np.transpose(SmOccGrid), hold = 'on', colors = 'k')
@@ -315,7 +349,7 @@ if(plot_Occupation_Grid):
     axes.set_xlabel('RA')
     axes.set_ylabel('Dec')
 
-    axes.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.1f'))
+    axes.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.2f'))
 
     if(labelStructures):
         axes.plot(A901a[0], A901a[1], marker='o', markerfacecolor='red', markersize=3.5)
@@ -342,6 +376,9 @@ if(plot_Noise_Maps):
 
     
     CS = axes.contourf(RA,Dec,np.transpose(KappaSize_Noise), 25, cmap = pl.cm.bone)
+    axes.set_xlim(plot_xRange)
+    axes.set_ylim(plot_yRange)
+            
     axes.invert_xaxis()
 
     CS2 = axes.contour(RA,Dec,np.transpose(KappaSize_Noise), hold = 'on', colors = 'k')
@@ -354,7 +391,7 @@ if(plot_Noise_Maps):
 
     #CS_Shape = axes.contourf(RA_DM_Map,Dec_DM_Map,np.transpose(DM_Noise_Map), hold = 'on', cmap = pl.cm.bone)# colors = 'r')
 
-    axes.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.1f'))
+    axes.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.2f'))
 
 
     pl.savefig(Output_Filename_Noise_Map,format = 'pdf',bbox_inches = 'tight')
@@ -381,7 +418,14 @@ if(plot_Signal_to_Noise):
     CS = ax.contourf(RA,Dec,np.absolute(np.transpose(Kappa_Size_SN)), 25, cmap = pl.cm.bone, origin = None) #100 after av_size
     cbar = pl.colorbar(CS)
     cbar.ax.set_ylabel('(Absolute) Signal to Noise')
+    ax.set_xlim(plot_xRange)
+    ax.set_ylim(plot_yRange)
+            
     ax.invert_xaxis()
+
+    labels = ax.get_xticklabels()
+    for label in labels:
+        label.set_rotation(xticksrot)
 
     CS_Kappa = ax.contour(RA,Dec,np.absolute(np.transpose(Kappa_Size_SN)), origin = None, hold = 'on', colors = 'k')
 #pl.clabel(CS2, fmt = '%2.1f', colors = 'k', fontsize=3)
@@ -390,7 +434,7 @@ if(plot_Signal_to_Noise):
     ax.set_ylabel('Dec')
     ax.set_title('White: Shape. Black (and filled): Size')
 
-    ax.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.1f'))
+    ax.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.2f'))
 
     if(plotSTAGES_DM_Map):
         DM_Map_Plot = ax.contour(RA_DM_Map,Dec_DM_Map,np.absolute(DM_SN_Map),origin = None, hold = 'on', colors = 'w')

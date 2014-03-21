@@ -75,7 +75,7 @@ contains
   end function luminosity_distance_scalar
 
   function angular_diameter_distance_fromRedshift_array(z1,z2, Cos)
-       !-Returned in units of Mpc/h                                                                                     
+       !-Returned in units of Mpc/h                                         
     type(Cosmology_Parameters),optional::cos
     real(double),intent(in)::z1
     real(double),intent(in)::z2(:)
@@ -131,6 +131,29 @@ contains
 
   end function angular_diameter_distance_fromRedshift_scalar
 
+  real(double) function Normalised_Hubble_Parameter(z, Cos)
+    !-Returns Omega = rho(z)/pcrit(z = 0), which enters the Friedmann Equation, equivalent to the Hubbel parameter renomrlised to it's presetn day value-!
+    real(double), intent(in)::z
+    type(cosmology_parameters),intent(in),optional:: Cos
+
+    type(Cosmology_Parameters):: Internal_Cos
+
+    real(double)::Omega_l(1)
+
+    integer::callcount = 0
+
+    callcount = callcount + 1
+    if(present(cos)) then
+       Internal_Cos = Cos
+    else
+       if(Verbose .and. callcount == 1) print *, 'Using LCDM to get Normalised Hubble Parameter'
+       Internal_Cos = LCDM()
+    end if
+    
+    Omega_l = Omega_lambda((/z/), Internal_Cos)
+    Normalised_Hubble_Parameter = Omega_l(1) +(Internal_Cos%Om_CDM+Internal_Cos%Om_B)*((1+z)**3.e0_double) + (1-Internal_Cos%Om_tot)*((1+z)**2.e0_double)
+
+  end function Normalised_Hubble_Parameter
 
   function zradiusintegrand(z)
     use nrtype;
@@ -155,7 +178,7 @@ contains
     END if
     
     !does this need generalised to account for omega_neutrinos
-    zradiusintegrand = 3000.e0_SP/(Global_Cosmology_Params%h_100*dsqrt(Omega_lambda(z) +(Global_Cosmology_Params%Om_CDM+Global_Cosmology_Params%Om_B)*((1+z)**3.e0_SP) + (1-Global_Cosmology_Params%Om_tot)*((1+z)**2.e0_SP)))
+    zradiusintegrand = 3000.e0_SP/(Global_Cosmology_Params%h_100*dsqrt(Omega_lambda(z, Global_Cosmology_Params) +(Global_Cosmology_Params%Om_CDM+Global_Cosmology_Params%Om_B)*((1+z)**3.e0_SP) + (1-Global_Cosmology_Params%Om_tot)*((1+z)**2.e0_SP)))
 
     if(any(zradiusintegrand .lt. 0)) then
        print *, 'zradiusintegrand - less than zero'
@@ -166,9 +189,10 @@ contains
   end function zradiusintegrand 
 
 
-  function Omega_lambda(z)
+  function Omega_lambda(z, Cos)
     use nrtype;
     real(SP),dimension(:),intent(in)::z
+    type(Cosmology_parameters), intent(in):: Cos
     real(SP),dimension(size(z))::Omega_lambda
     real(SP), dimension(size(z))::w
     real(SP)::int
@@ -178,7 +202,7 @@ contains
 
     count = count + 1
 
-    Omega_lambda = Global_Cosmology_Params%Om_l*((1.e0_SP+z)**(3.e0_SP*(1+Global_Cosmology_Params%w)))
+    Omega_lambda = Cos%Om_l*((1.e0_SP+z)**(3.e0_SP*(1+Cos%w)))
     if(wa .ne. 0.e0_double) then !this section needs tested
        STOP 'USING WA /= 0!!!'
        do i = 1, size(z)
