@@ -149,7 +149,9 @@ contains
     integer:: Expected_Number_In_Aperture
 
     Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius)
-        
+
+    if(Expected_Number_in_Aperture == 0) STOP 'Identify_Galaxys_in_Circular_Aperture - There are no galaxies within the aperture, suggest increasing aperture size'
+
     call Catalogue_Construct(Ap_Cat, Expected_Number_in_Aperture)
 
     ac = 0
@@ -344,7 +346,7 @@ contains
     allocate(Cluster_Variance(size(Posteriors,1))); Cluster_Variance = 0.e0_double
 
     open(51, file = trim(Bayesian_Routines_Output_Directory)//'Mass_Estimates.dat')
-    write(51, '(A)') '# Aperture, Mode, Mode_Error, Mean, Mean_Error'
+    write(51, '(A)') '# Aperture, Mode, Mode_Error'
 
     print *, '!----------------------------------------------------------------------------------!'
     do Ap = 1, size(Posteriors,1)
@@ -370,7 +372,6 @@ contains
        if(Surface_Mass_Profile == 3) then
           Scale_Mass =  NFW_Mass_withinRadius(D_l*iAp_Radius(Ap)*(3.142e0_double/180.e0_double), Lens_Redshift, r_200 = Cluster_Mean(Ap))
           Scale_Mass_Error = Error_NFW_Mass_withinRadius(D_l*iAp_Radius(Ap)*(3.142e0_double/180.e0_double), Cluster_Mean(Ap), Cluster_Variance(Ap), Lens_Redshift)
-          !!Error?!!
        else       
           call  Integrated_Mass_Within_Radius(Surface_Mass_Profile, D_l*iAp_Radius(Ap)*(3.142e0_double/180.e0_double), Cluster_Mean(Ap), Cluster_Variance(Ap), Scale_Mass, Scale_Mass_Error)
        end if
@@ -386,7 +387,7 @@ contains
        print *, "Mass of Cluster within 1' is (Mode):", Mass_String, ' +- ', Error_Mass_String !-Error?-!
        print *, ' '
 
-       write(51, '(I2,4(e9.3,x))') Ap, Area*Cluster_Mode(Ap)*1.e18_double,  Area*1.e18_double*Cluster_Variance(Ap), Area*Cluster_Mean(Ap)*1.e18_double, Area*1.e18_double*Cluster_Variance(Ap)
+       write(51, '(I2,2(e9.3,x))') Ap, Scale_Mass,  Scale_Mass_Error
     end do
     print *, '!----------------------------------------------------------------------------------!'
 
@@ -481,6 +482,7 @@ contains
 
     Convergence_Per_Cluster = 0.e0_double
     print *, 'Getting Posterior for Cluster...'
+    n_Default_Source_Redshift_Used = 0
     do c = 1, size(Effective_Convergence,1) !-Loop over galaxies-!
        !--Ignore Galaxies with redshift less than the foreground-!
        if(Cat%Redshift(c) < Lens_Redshift) cycle
@@ -492,7 +494,6 @@ contains
              n_Default_Source_Redshift_Used = n_Default_Source_Redshift_Used + 1
              D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
              D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
-             !--Check number of times used--!
           end if
           Sigma_Crit(c) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
        end if

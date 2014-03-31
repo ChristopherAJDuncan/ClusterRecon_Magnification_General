@@ -427,9 +427,145 @@ contains
   end subroutine angular_Diameter_Distance_Distribution
   
   !----------------SIZE DISTRIBUTIONS-----------------------------------------------------------!
-  subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Sizes, PDF, RefCat, use_Physical_sizes,  Magnitude_Type, Output_Dir, ln_size_Distribution)
+  subroutine get_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution)
+    use Catalogues; use Statistics, only: variance_discrete
+    !--Essentially Wrapper routine - Does the same as get_Size_Distribution_MagnitudeBinning_byCatalogue, but binning type is set here, and output is slightly varied--!
+    !--Returns p(R,m)
+    !~~~~ Q: How does the result vary with Magnitude Binnning and Size Binning? I.e. if a magnitude bin has few galaxies, then the distribution will be noisy when taking 60 size bins!
+    !~~~To Do: 
+    !~~ Normalise across magnitudes
+    !~~ Smoothing - Inverse Variance?
+    real(double), intent(out),allocatable,dimension(:)::SizeGrid, MagGrid
+    real(double), intent(out),allocatable::pdf(:,:) !-Magnitude, Size-!
+    type(Catalogue),intent(in)::RefCat
+    logical,intent(in)::use_Physical_Sizes
+    integer, intent(in)::Magnitude_Type
+    character(*), intent(in), optional:: Output_Dir
+    logical,intent(in),optional::ln_size_Distribution
+    
+    !----Binning Decalarations-----!
+    integer,parameter::nSizes = 60, nMags = 10
+    real(double):: Lower, Higher, dParam
+    real(double),allocatable,dimension(:,:):: SizeBins, MagBins
+
+    integer:: I,J
+    character(20)::fmtstring
+
+    character(200):: iOutput_Dir
+    logical:: iln_size_Distribution
+
+    real(double)::Renormalisation
+
+    iOutput_Dir = 'Distributions/'
+    if(present(Output_Dir)) iOutput_Dir = Output_Dir
+    iln_size_Distribution = .false.
+    if(present(ln_size_Distribution)) iln_size_Distribution = ln_size_Distribution
+
+    !--Set up SizeGrid--!
+    if(use_Physical_Sizes) then
+       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+          Higher = dlog(maxval(RefCat%Physical_Sizes)); Lower = dlog(minval(RefCat%Physical_Sizes))
+       else
+          Higher = maxval(RefCat%Physical_Sizes); Lower = 0.e0_double
+       end if
+    else
+       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+          Higher = dlog(maxval(RefCat%Sizes)); Lower = dlog(minval(RefCat%Sizes))
+          print *, 'lnSize Dist: Limits:', Lower, Higher
+       else
+          Higher = maxval(RefCat%Sizes); Lower = 0.e0_double
+          print *, 'Size Dist: Limits:', Lower, Higher
+       end if
+    end if
+    
+!    allocate(SizeGrid(nSizes)); Sizes = 0.e0_double
+    allocate(SizeBins(nSizes,2)); SizeBins = 0.e0_double
+    dParam = (( Higher- Lower )/(1.e0_double*(nSizes-1)) )
+    if(dParam == 0.e0_double) STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Error setting up Size Grid, dSize = 0'
+    do i = 1, nSizes
+       !--Use i-2 so that no galaxies fall into the first bin--!                                                                                                                                             
+       SizeBins(i,1) = Lower + (i-2)*dParam
+       SizeBins(i,2) = SizeBins(i,1) + dParam
+       if(i==nSizes) SizeBins(i,2) = SizeBins(i,2) + 1.e-3_double*dParam
+!       Sizes(i) = 0.5e0_double*(SizeBins(i,1)+SizeBins(i,2))
+    end do
+!    Sizes(1) = iSizeBins(1,2)
+   
+    
+    !--Set up Magnitude Binning--!
+    if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
+!       call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMags, MagBins)
+       Higher = maxval(RefCat%Absolute_Magnitude); Lower = minval(RefCat%Absolute_Magnitude)
+    elseif(Magnitude_Type == 2) then
+!       call Calculate_Bin_Limits_by_equalNumber(Cat%MF606W, nMags, MagBins)
+       Higher =maxval(RefCat%MF606W); Lower = minval(RefCat%MF606W)
+    else
+       STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Invalid Magnitude Type entered'
+    end if
+    dParam = (( Higher- Lower )/(1.e0_double*(nSizes-1)) )
+    allocate(MagBins(nMags,2)); MagBins = 0.e0_double
+    do i = 1, nMags
+       !--Use i-2 so that no galaxies fall into the first bin--!
+       MagBins(i,1) = Lower + (i-2)*dParam
+       MagBins(i,2) = MagBins(i,1) + dParam
+       if(i==nSizes) MagBins(i,2) = MagBins(i,2) + 1.e-3_double*dParam
+       MagGrid(i) = 0.5e0_double*(sum(MagBins(i,:)))
+    end do
+    
+
+    !--Get the Histogram--!
+    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, PDF, RefCat, use_Physical_sizes,  Magnitude_Type, iOutput_Dir, iln_size_Distribution, SizeBins, Renormalise = .false.)
+
+    !--Renormalise across magnitudes??-!
+    Renormalisation = 0.e0_double
+    do i= 1, size(PDF,1) !--Mags--!
+       do j =1, size(PDF,2) !-- Size--!
+          Renormalisation = Renormalisation + (MagBins(i,2)-MagBins(i,1))*(SizeBins(j,2)-SizeBins(j,1))*PDF(i,j)
+       end do
+    end do
+    if(Renormalisation <= 0.e0_double) STOP 'get_Joint_Size_Magnitude_Distribution - Renormalisation is invalid, <=0. Stopping'
+    PDF = PDF/Renormalisation
+
+    !--Output--!
+    if(iln_size_Distribution) then
+       open(unit = 37, file = trim(iOutput_Dir)//'Joint_lnSize_Magnitude_Distribution.dat')
+    else
+       open(unit = 37, file = trim(iOutput_Dir)//'Joint_Size_Magnitude_Distribution.dat')
+    end if
+    !--Header--!
+    write(37, '(A)', advance = 'no') '#'
+    do i =1, size(SizeBins,1)-1
+       write(37, '(e14.7,x)', advance = 'no') SizeBins(i,1)
+    end do
+    write(37, '(e14.7,x)') SizeBins(size(SizeBins),2)
+
+    write(37, '(A)', advance = 'no') '#'
+    do i =1, size(MagBins,1)-1
+       write(37, '(e14.7,x)', advance = 'no') MagBins(i,1)
+    end do
+    write(37, '(e14.7,x)') MagBins(size(MagBins),2)
+
+    write(37, *)
+    
+    !--First line has Magnitude Binning Information--!
+    write(fmtstring, '(I3)') size(MagGrid) + 1
+    write(37, '('//trim(fmtstring)//'(e14.7,x))') 0.0e0_double, MagGrid
+    do i= 1, size(SizeGrid)
+       write(37, '('//trim(fmtstring)//'(e14.7,x))') SizeGrid(i), PDF(:,i)
+    end do
+    close(37)
+
+  end subroutine get_Joint_Size_Magnitude_Distribution
+
+  subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Sizes, PDF, RefCat, use_Physical_sizes,  Magnitude_Type, Output_Dir, ln_size_Distribution, SizeBins, Renormalise)
     !--Returns the size distribution according to the magnitude binning of MagBins, of Magnitude_Type (1:Abs, 2:App)
     !---If ln_size_Distribution present and true, then a ln size distribution is returned, in which case sizes is really ln(Sizes)
+    !-- If magbins allocated, then distribution produced for the magnitude bins set out in magbins.
+    !-- If SizeBin entered, then histrogram produced for the Size Binning used in SizeBins
+    !-- Distribution in sizes assumed unless ln_Size_Distribution is present and true
+    !-- Renormalisation is done by default, and is only not done if Renormalise is present and false. If Renormalised, returns p(R|m)
+    !~~Edits:
+    !~~~~~ Takes in a Size Bin and returns a SizeGrid - This is unneccessary - instead the Sizes part should be deleted and *only* a size bins and Mag bins returned.
     use Catalogues; use Statistics, only: variance_discrete
        real(double), intent(out),allocatable:: Sizes(:)
        real(double), intent(out),allocatable::pdf(:,:) !-Mag Bin, GridValue-!
@@ -439,23 +575,26 @@ contains
        logical,intent(in)::use_Physical_Sizes
        integer, intent(in)::Magnitude_Type
        logical,intent(in),optional::ln_size_Distribution
+       real(double), intent(in),optional::SizeBins(:,:)
+       logical,intent(in),optional::Renormalise
 
        character(200)::Catalogue_Filename
        integer::Catalogue_Columns(13)
 
        type(Catalogue)::Cat
        
-       integer::nMags = 5
+       integer::nMags
+       logical:: iRenormalise
        real(double)::Renormalisation
        
        !--Cuts--!  May not be implemented as want the result to resemble the catalogue as much as possible                                                                                                                                  
-       integer,parameter::nSizes = 120
+       integer::nSizes 
        logical::Apply_Size_Cuts = .false.
        real(double):: Size_Cuts(2) = (/0.,20./)
        real(double)::Size_lower, Size_Higher
        !    integer:: Catalogue_Size_Column = 14 !!!!!                                                                                                                                                                                               
        real(double)::dSize
-       real(double),dimension(:,:),allocatable::SizeBins
+       real(double),dimension(:,:),allocatable::iSizeBins
        
        integer::i,j,c
        
@@ -467,7 +606,7 @@ contains
        logical::here
 
        INTERFACE
-          subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Sizes, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution)
+          subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Sizes, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, SizeBins, Renormalisation)
             use Param_Types; use Catalogues
             real(double), intent(out),allocatable:: Sizes(:)
             real(double), intent(out),allocatable::pdf(:,:) !-Mag Bin, GridValue-!      
@@ -478,6 +617,8 @@ contains
 
             character(*), intent(in), optional:: Output_Dir
             logical,intent(in),optional::ln_size_Distribution
+            real(double), intent(in),optional::SizeBins(:,:)
+            logical, intent(in),optional:: Renormalisation
           end subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue
        END INTERFACE
 
@@ -490,47 +631,52 @@ contains
        print *, 'Reconstructing size-magnitude distribution from the reference catalogue'
        Cat = RefCat
 
-       !-Use the MC redshift sampling to assign physical sizes-!
-!       call Monte_Carlo_Redshift_Sampling(RefCat)
-!!$       call convert_Size_from_Pixel_to_Physical(Cat)
-       
-       if(use_Physical_Sizes) then
-          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-             Size_Higher = dlog(maxval(Cat%Physical_Sizes)); Size_Lower = dlog(minval(Cat%Physical_Sizes))
-          else
-             Size_Higher = maxval(Cat%Physical_Sizes); Size_Lower = 0.e0_double!minval(Cat%Physical_Sizes)
-          end if
+       if(present(SizeBins)) then
+          !--Assumed that SizeBins is set up to be the right range etc.. i.e. if using ln sizes then size bins should already be set up deal with this
+          !--Testing? i.e shold only be negative if using lnSizes etc?
+          nSizes = size(SizeBins,1)
+          Size_Higher = maxval(SizeBins); Size_Lower = minval(SizeBins)
+          allocate(Sizes(nSizes)); Sizes = 0.e0_double
+          allocate(iSizeBins(size(SizeBins,1), size(SizeBins,2))); iSizeBins = SizeBins
+          
+          Sizes(1) = iSizeBins(1,2)
+          do i = 2, nSizes
+             Sizes(i) = 0.5e0_double*(iSizeBins(i,1)+iSizeBins(i,2))
+          end do
        else
-          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-             Size_Higher = dlog(maxval(Cat%Sizes)); Size_Lower = dlog(minval(Cat%Sizes))
-             print *, 'lnSize Dist: Limits:', Size_Lower, Size_Higher
+          nSizes = 120
+          if(use_Physical_Sizes) then
+             if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+                Size_Higher = dlog(maxval(Cat%Physical_Sizes)); Size_Lower = dlog(minval(Cat%Physical_Sizes))
+             else
+                Size_Higher = maxval(Cat%Physical_Sizes); Size_Lower = 0.e0_double!minval(Cat%Physical_Sizes)
+             end if
           else
-             Size_Higher = maxval(Cat%Sizes); Size_Lower = 0.e0_double!minval(Cat%Sizes);
-             print *, 'Size Dist: Limits:', Size_Lower, Size_Higher
+             if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+                Size_Higher = dlog(maxval(Cat%Sizes)); Size_Lower = dlog(minval(Cat%Sizes))
+                print *, 'lnSize Dist: Limits:', Size_Lower, Size_Higher
+             else
+                Size_Higher = maxval(Cat%Sizes); Size_Lower = 0.e0_double!minval(Cat%Sizes);
+                print *, 'Size Dist: Limits:', Size_Lower, Size_Higher
+             end if
           end if
+          
+          allocate(Sizes(nSizes)); Sizes = 0.e0_double
+          allocate(ISizeBins(nSizes,2)); ISizeBins = 0.e0_double
+          dSize = (( Size_Higher- Size_Lower )/(1.e0_double*(nSizes-1)) )
+          if(dSize == 0.e0_double) STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Error setting up Size Grid, dSize = 0'
+          do i = 1, nSizes
+             !--Use i-2 so that no galaxies fall into the first bin--!  
+             iSizeBins(i,1) = Size_Lower + (i-2)*dSize
+             iSizeBins(i,2) = iSizeBins(i,1) + dSize
+             if(i==nSizes) iSizeBins(i,2) = iSizeBins(i,2) + 1.e-3_double*dSize
+             Sizes(i) = 0.5e0_double*(iSizeBins(i,1)+iSizeBins(i,2))
+          end do
+          Sizes(1) = iSizeBins(1,2)       
        end if
-!!$       if(Apply_Size_Cuts) then
-!!$          Size_Lower = maxval((/Size_Cuts(1), Size_Lower/)); Size_Higher = minval( (/Size_Cuts(2), Size_Higher /) )
-!!$          print *, 'Applying Size Cuts of:', Size_Lower, Size_Higher
-!!$       end if
-
-
-
-       allocate(Sizes(nSizes)); Sizes = 0.e0_double
-       allocate(SizeBins(nSizes,2)); SizeBins = 0.e0_double
-       dSize = (( Size_Higher- Size_Lower )/(1.e0_double*(nSizes-1)) )
-       if(dSize == 0.e0_double) STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Error setting up Size Grid, dSize = 0'
-       do i = 1, nSizes
-          !--Use i-2 so that no galaxies fall into the first bin--!                                                                                                                                                                         
-          SizeBins(i,1) = Size_Lower + (i-2)*dSize
-          SizeBins(i,2) = SizeBins(i,1) + dSize
-          if(i==nSizes) SizeBins(i,2) = SizeBins(i,2) + 1.e-3_double*dSize
-          Sizes(i) = 0.5e0_double*(SizeBins(i,1)+SizeBins(i,2))
-       end do
-       Sizes(1) = SizeBins(1,2)       
-
        !--Bin by equal number density in magnitude bins--!                                                                                                                                                                
        if(allocated(MagBins) == .false.) then
+          nMags = 5
           print *, 'Size Distribution, Getting Mag Limits', nMags
           if(all(Cat%Absolute_Magnitude >= 0.e0_double)) STOP 'size_Disribution by magnitude:, Absolute magnitude not set'
           if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
@@ -558,7 +704,7 @@ contains
           end if
        end do
 
-           allocate(PDF(nMags, nSizes)); PDF = 0.e0_double
+       allocate(PDF(nMags, nSizes)); PDF = 0.e0_double
            
        if(any(Cat%Sizes <= 0.e0_double)) then
           print *, 'ERROR - Some of the reference catalogue sizes are negative or zero:', count(Cat%Sizes<= 0.e0_double)
@@ -588,7 +734,7 @@ contains
 
        do c = 1, size(Temporary_Sizes_Array)
           do j = 1, nSizes
-             if( (Temporary_Sizes_Array(c) > SizeBins(j,1)) .and. (Temporary_Sizes_Array(c) <= SizeBins(j,2)) ) then
+             if( (Temporary_Sizes_Array(c) > ISizeBins(j,1)) .and. (Temporary_Sizes_Array(c) <= ISizeBins(j,2)) ) then
                 PDF(i,j) = PDF(i,j) + 1
                 exit
              end if
@@ -597,15 +743,23 @@ contains
        deallocate(Temporary_Sizes_Array)
     end do
 
-    !--Renormalise for each Magnitude Bin--!                                                                                                                                                                                                 
-    do i =1, nMags
-       Renormalisation = 0.e0_double
-       do j = 1, size(PDF,2)
-          Renormalisation = Renormalisation + PDF(i,j)*(SizeBins(i,2)-SizeBins(i,1))
+    !--Renormalise for each Magnitude Bin--!
+    print *, 'Attempting Renormalisation'
+    if(present(Renormalise)) then
+       iRenormalise = Renormalise
+    else
+       iRenormalise = .True.
+    end if
+    if(iRenormalise) then
+       do i =1, nMags
+          Renormalisation = 0.e0_double
+          do j = 1, size(PDF,2)
+             Renormalisation = Renormalisation + PDF(i,j)*(ISizeBins(i,2)-ISizeBins(i,1))
+          end do
+          if(Renormalisation> 0.e0_double) PDF(i,:) = PDF(i,:)/Renormalisation
        end do
-       if(Renormalisation> 0.e0_double) PDF(i,:) = PDF(i,:)/Renormalisation
-    end do
-
+    end if
+    print *, 'Renormalisation passed'
     !--Output Size PDFS--!                                                                                                                                                                                                                   
     if(present(output_dir)) then
 
@@ -639,6 +793,8 @@ contains
        write(49, '('//trim(fmtstring)//'(e14.7,x))') Sizes(j), PDF(:,j)
     end do
     close(49)
+
+    deallocate(iSizeBins)
 
   end subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue
 

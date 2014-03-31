@@ -1,0 +1,44 @@
+import numpy as np
+import pylab as pl
+import math
+import sys
+
+Cluster_Colour = ['b','g','r','c','m','y','k']
+STAGES_Cluster_Label = ['A901a', 'A901b', 'A902', 'SW']
+
+######READ in PARAMETER FILE#######
+
+STAGES_Bias_File = sys.argv[1]
+
+#Standard output is "Input, Output, Variance, Input_Ap_Mass, Output_Ap_Mass, Variance" with a space between Clusters.#
+STAGES_Bias = np.genfromtxt(STAGES_Bias_File)
+nCluster = 4
+
+if( ((1.*STAGES_Bias.shape[0]/nCluster).is_integer() == False) \
+    or (1.*STAGES_Bias.shape[0]/nCluster) != 1):
+    print 'STAGES input file is not of the expected shape, exiting'
+    exit()
+
+f = pl.figure(1)
+ax = f.add_subplot(111)
+
+#Plot 1-to-1 line#
+for i in range(nCluster):
+    ax.errorbar(STAGES_Bias[i,0], STAGES_Bias[i,1], yerr = STAGES_Bias[i,2], color = Cluster_Colour[i], label = STAGES_Cluster_Label[i], linewidth = 3., marker = 'x')
+
+x = np.linspace(ax.get_xlim()[0], ax.get_xlim()[1], 100)
+ax.plot(x,x, linestyle = '--')
+
+ax.set_xlabel(r'Input Virial Radius ($r_{200}\; \left[\frac{\rm Mpc}{h}\right]$)'); ax.set_ylabel(r'Output Virial Radius ($r_{200}\; \left[\frac{\rm Mpc}{h}\right]$)')
+ax.legend(loc = 2)
+pl.show()
+
+if(len(sys.argv) == 2):
+    nCluster = 1
+    R200_Bias_File = sys.argv[2]
+
+    R200_Bias = np.genfromtxt(R200_Bias_File)
+
+    if( ((1.*R200_Bias.shape[0]/nCluster).is_integer() == False) ):
+        print 'R200 input file is not of the expected shape, exiting'
+        exit()

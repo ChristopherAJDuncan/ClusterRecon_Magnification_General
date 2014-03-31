@@ -109,6 +109,7 @@ module Catalogues
          Filename = 'Mock_COMBO_Unlensed.cat'
          Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
       case default
+         print *, 'Catalogue Identifier:', Index
          STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
       end select
 
