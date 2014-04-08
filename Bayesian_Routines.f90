@@ -63,6 +63,10 @@ contains
 
           if(all(Combined_Posterior == 0.e0_double)) then
              print *, 'Invalid CPosterior for galaxy:', c, ' press (==0) [ENTER] to output an stop..'; READ(*,*)
+             print *, Combination_Normalisation
+             read(*,*)
+             print *, Combined_Posterior(:)
+             read(*,*)
              print *, Posteriors(c,:)
              STOP
           end if
@@ -214,6 +218,8 @@ contains
     character(200):: Output_File_Prefix
 
     logical::use_lnSize_Prior = .false.
+    logical:: use_KDE_Smoothed_Distributions = .true.
+    real(double),allocatable::MagGrid(:) !--Discardable for now as marginalised over--!
 
     INTERFACE
          subroutine DM_Profile_Variable_Posteriors_CircularAperture(Cat, Ap_Pos, Ap_Radius, Posteriors, Blank_Field_Catalogue)
@@ -246,6 +252,8 @@ contains
 !!$       SizeGrid(i) = SizeGrid_Lower + i*dSizeGrid
 !!$    end do
 
+    print *, count(Cat%Redshift >= 0.e0_double), ' of ',size(Cat%Redshift), ' galaxies have redshift information'
+
     if(Magnitude_Binning_Type == 1) then
        call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMag, MagBins)
     elseif(Magnitude_Binning_Type == 2) then
@@ -256,10 +264,22 @@ contains
 
     !--If a catalogue for the blank field is passed in, then use this catalogue to get the intrinsic distributions--!
     if(present(Blank_Field_Catalogue)) then
-       call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Blank_Field_Catalogue, use_Physical_sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 1, ln_size_Distribution = use_lnSize_Prior)
+       call get_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, SizePrior_byMag, Blank_Field_Catalogue, use_Physical_sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = use_KDE_Smoothed_Distributions)
+!       call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Blank_Field_Catalogue, use_Physical_sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 1, ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = use_KDE_Smoothed_Distributions)
     else
-       call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Cat, use_Physical_sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 1, ln_size_Distribution = use_lnSize_Prior)
+       call get_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, SizePrior_byMag, Cat, use_Physical_sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = use_KDE_Smoothed_Distributions)
+!       call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, SizeGrid, SizePrior_byMag, Cat, use_Physical_sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 1, ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = use_KDE_Smoothed_Distributions)
     end if
+
+    STOP 'Get that joint mag size distributiON coded up you prick!'
+
+    !---eXAMPLE--!
+!!$    allocate(Histogram_MagOnly_PDF(size(Histogram_MagGrid))); Histogram_MagOnly_PDF = 0.e0_double
+!!$    do i =1, size(Histogram_MagOnly_PDF)
+!!$       Histogram_MagOnly_PDF(i) = RectangularIntegration(Histogram_SizeGrid, Histogram_PDF(i,:))
+!!$    end do
+!!$    Histogram_MagOnly_PDF = Histogram_MagOnly_PDF/TrapInt(Histogram_MagGrid, Histogram_MagOnly_PDF)
+
 
     !--Get Prior by getting refernce for each bin, and binning each reduced cat using the same definition (mag)--!
     !--Produce Posterior for each mag bin--!
@@ -396,7 +416,8 @@ contains
 
 
   subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Prior, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior)
-    use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles, only:SMD_SIS, SMD_NFW
+    use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles, only:SMD_SIS, SMD_NFW; use Distributions, only: ch08_redshift_distribution
+    use Integration, only:TrapInt
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
     !-For Mass_Profile = 1 (Flat): Sigma_0
     !-                   2 (SIS) : Velocity_Dispersion**2
@@ -416,17 +437,19 @@ contains
     character(*), intent(in)::Output_Prefix
     logical,intent(in)::lnSize_Prior
 
-    integer::i, c, j
+    integer::i, c, j, z
 
     !--Variable Grid Declarations-!
     integer::nGrid = 1000
     real(double)::VGrid_Lower, VGrid_Higher
     
-    real(double),allocatable::Posterior_perGalaxy(:,:) !-Galaxy, Value-! - Uses Same Grid as overall Posterior -
-    real(double),allocatable:: Effective_Convergence(:,:) !-Galaxy, Value-! -Same Size as Posterior Grid, may need reevaluated per galaxy
+    real(double),allocatable::Posterior_perGalaxy(:,:) !-Galaxy, Posterior-! - Uses Same Grid as overall Posterior -
+    real(double),allocatable:: Effective_Convergence(:,:) !-Galaxy, Posterior-! -Same Size as Posterior Grid, may need reevaluated per galaxy
 
     logical:: MC_Sigma_Critical = .false.
-    real(double),allocatable::Sigma_Crit(:)
+    logical:: Marginalise_Redshift_Distribution = .true.
+
+    real(double),allocatable::Sigma_Crit(:,:), Sigma_Crit_MC(:)
     real(double)::D_l, D_s, D_ls
     real(double)::Distance_from_Mass_Center
 
@@ -437,9 +460,18 @@ contains
     character(200)::Filename
     logical::here
 
+    !--Redshift Distribution Declarations--!
+    integer,parameter:: nRedshift_Sampling = 50
+    real(double),parameter::Redshift_Lower = 0.156e0_double, Redshift_Higher = 3.e0_double !!!Edit to Lens_Redshift
+    real(double), dimension(nRedshift_Sampling):: RedshiftGrid
+    real(double),allocatable::RedshiftPDF(:)
+    real(double),allocatable:: Posterior_perGalaxy_Redshift(:,:,:) !-Galaxy, Posterior, Redshift-!
+
     !--Testing Declarations--!
     real(double),dimension(3,size(Cat%RA)):: Convergence_per_Cluster
     integer:: n_Default_Source_Redshift_Used
+
+    if(Analyse_with_Physical_Sizes) STOP 'DM_Profile_Variable_Posterior - I HAVE DISABLED THE ABILITY TO USE PHYISCAL SIZES AS UNNECESSARY, code still to be edited'
 
     !--Renomralise the Priors her to ensure that they are renormalised and to avoid issues later:--!
     Renorm = 0.e0_double
@@ -470,13 +502,14 @@ contains
     end do
     !----------------------!
 
-    if(MC_Sigma_Critical) then
-       call Monte_Carlo_Redshift_Sampling_SigmaCritical(Cat, Lens_Redshift, Sigma_Crit)
-    else
-       D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
-       allocate(Sigma_Crit(size(Cat%RA))); Sigma_Crit = -1.e0_double
+    D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
+    !--SET UP REDSHIFT GRID--!
+    if(Marginalise_Redshift_Distribution) then
+       do z = 1, nRedshift_Sampling
+          RedshiftGrid(z) = Redshift_Lower + (z-1)*((Redshift_Higher-Redshift_Lower)/(nRedshift_Sampling-1))
+       end do
     end if
-    !--
+
     allocate(Posterior_perGalaxy(size(Cat%RA), size(Posterior,2))); Posterior_perGalaxy = 1.e-100_double
     allocate(Effective_Convergence(size(Cat%RA), size(Posterior,2))); Effective_Convergence = 0.e0_double
 
@@ -484,52 +517,108 @@ contains
     print *, 'Getting Posterior for Cluster...'
     n_Default_Source_Redshift_Used = 0
     do c = 1, size(Effective_Convergence,1) !-Loop over galaxies-!
-       !--Ignore Galaxies with redshift less than the foreground-!
-       if(Cat%Redshift(c) < Lens_Redshift) cycle
-       if(MC_Sigma_Critical == .false.) then
-          if(Cat%Redshift(c) >= 0.e0_double) then
-             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
-             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
-          else
-             n_Default_Source_Redshift_Used = n_Default_Source_Redshift_Used + 1
-             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
-             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
-          end if
-          Sigma_Crit(c) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
+       
+       if(Cat%Redshift(c) >= 0.e0_double) then
+          !--Ignore Galaxies with redshift less than the foreground-!
+          if(Cat%Redshift(c) < Lens_Redshift) cycle
+          !--Use Galaxy Redshift if available--!
+
+          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), 1)); Posterior_perGalaxy_Redshift = 0.e0_double
+          allocate(Sigma_Crit(size(Cat%RA),1)); Sigma_Crit = -1.e0_double
+
+          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
+          D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
+
+          Sigma_Crit(c,1) = 1.66492e0_double*(D_s/(D_l*D_ls))
+
+          allocate(RedshiftPDF(1)); RedshiftPDF = -1.
+       elseif(MC_Sigma_Critical == .false. .and. Marginalise_Redshift_Distribution == .false.) then
+          !--Use Default Redshift if everything else fails--!
+          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), 1)); Posterior_perGalaxy_Redshift = 0.e0_double
+          allocate(Sigma_Crit(size(Cat%RA),1)); Sigma_Crit = -1.e0_double
+
+          n_Default_Source_Redshift_Used = n_Default_Source_Redshift_Used + 1
+          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
+          D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
+          
+          Sigma_Crit(c,1) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
+
+          allocate(RedshiftPDF(1)); RedshiftPDF= -1.
+       elseif(MC_Sigma_Critical .and. Marginalise_Redshift_Distribution == .false.) then
+          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), 1)); Posterior_perGalaxy_Redshift = 0.e0_double
+          allocate(Sigma_Crit(size(Cat%RA),1)); Sigma_Crit = -1.e0_double
+
+          call Monte_Carlo_Redshift_Sampling_SigmaCritical(Cat, Lens_Redshift, Sigma_Crit_MC)
+          Sigma_Crit(:,1) = Sigma_Crit_MC
+          deallocate(Sigma_Crit)
+
+       elseif(Marginalise_Redshift_Distribution .and. MC_Sigma_Critical == .false.) then
+          !--Marginalising over the redshift distribution for that galaxy--!
+          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), nRedshift_Sampling)); Posterior_perGalaxy_Redshift = 0.e0_double
+          allocate(Sigma_Crit(size(Cat%RA),nRedshift_Sampling)); Sigma_Crit = -1.e0_double
+
+          !--Get Sigma_Critical for each point on the Redshift PDF grid--!
+          do z = 1, nRedshift_Sampling
+             D_s = angular_diameter_distance_fromRedshift(0.e0_double, RedshiftGrid(z))
+             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, RedshiftGrid(z))
+             Sigma_Crit(c,z) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
+          end do
+
+          !--Get Redshift PDF for this galaxy--!
+          call CH08_redshift_distribution(Cat%MF606W(c), RedshiftGrid, RedshiftPDF)
+
+       else
+          STOP 'DM_Profile_Variable_Posterior - Both MC and Redshift Distribution methods set - this cannot be'
        end if
-       if(Sigma_Crit(c) < 0.e0_double) STOP 'DM_Profile_Variable_Posterior - Invalid Sigma Critical Entered, negative'
+       if(any(Sigma_Crit(c,:) < 0.e0_double)) STOP 'DM_Profile_Variable_Posterior - Invalid Sigma Critical Entered, negative'
 
        Distance_from_Mass_Center = dsqrt( (Cat%RA(c)-Lens_Position(1))**2.e0_double + (Cat%Dec(c)-Lens_Position(2))**2.e0_double ) !-in Degrees-!
        Distance_from_Mass_Center = (D_l*Distance_from_Mass_Center*(3.142e0_double/(180.e0_double))) !-in Mpc/h-! 
 
 
        do i = 1, size(Effective_Convergence,2) !--Loop over posterior values--!
-          select case(Mass_Profile)
-          case(1) !-Flat-!
-             Effective_Convergence(c,i) = Posterior(1,i)/Sigma_Crit(c)
-          case(2) !-SIS-!
-             Effective_Convergence(c,i) = SMD_SIS(Posterior(1,i), Distance_From_Mass_Center)/(Sigma_Crit(c)*1.e18_double)
-             Convergence_Per_Cluster(:,c)  = (/Distance_From_Mass_Center,  SMD_SIS(1073.e0_double*1073.e0_double, Distance_From_Mass_Center), Sigma_Crit(c)/) !---TESTING--!
-          case(3)
-             Effective_Convergence(c,i) = SMD_NFW(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i))/(Sigma_Crit(c)*1.e18_double)
-          case default
-             STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
-          end select
-          !--Linearly Interpolate--!
-          if(lnSize_Prior) then
-             if(Analyse_with_Physical_Sizes) then
-                Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), dlog(Cat%Physical_Sizes(c))-Effective_Convergence(c,i))
+          do z = 1, size(RedshiftPDF)
+             select case(Mass_Profile)
+             case(1) !-Flat-!
+                Effective_Convergence(c,i) = Posterior(1,i)/Sigma_Crit(c,z)
+             case(2) !-SIS-!
+                Effective_Convergence(c,i) = SMD_SIS(Posterior(1,i), Distance_From_Mass_Center)/(Sigma_Crit(c,z)*1.e18_double)
+                Convergence_Per_Cluster(:,c)  = (/Distance_From_Mass_Center,  SMD_SIS(1073.e0_double*1073.e0_double, Distance_From_Mass_Center), Sigma_Crit(c,z)/) !---TESTING--!
+             case(3)
+                Effective_Convergence(c,i) = SMD_NFW(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i))/(Sigma_Crit(c,z)*1.e18_double)
+             case default
+                STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
+             end select
+             !--Linearly Interpolate--!
+             if(lnSize_Prior) then
+                if(Analyse_with_Physical_Sizes) then
+!DELETE                   Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), dlog(Cat%Physical_Sizes(c))-Effective_Convergence(c,i))
+                else
+                   Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), dlog(Cat%Sizes(c))-Effective_Convergence(c,i))
+                end if
              else
-                Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), dlog(Cat%Sizes(c))-Effective_Convergence(c,i))
+                if(Analyse_with_Physical_Sizes) then
+!DELETE                   Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), Cat%Physical_Sizes(c)/(1.e0_double+Effective_Convergence(c,i)))*(1.e0_double/(1+Effective_Convergence(c,i)))
+                else
+                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interpolation(Prior(1,:), Prior(2,:), Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)))*(1.e0_double/(1+Effective_Convergence(c,i)))
+                end if
              end if
-          else
-             if(Analyse_with_Physical_Sizes) then
-                Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), Cat%Physical_Sizes(c)/(1.e0_double+Effective_Convergence(c,i)))*(1.e0_double/(1+Effective_Convergence(c,i)))
-             else
-                Posterior_perGalaxy(c,i) = Linear_Interpolation(Prior(1,:), Prior(2,:), Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)))*(1.e0_double/(1+Effective_Convergence(c,i)))
-             end if
-          end if
+          end do
        end do
+
+       !--Get Posterior on Size for each galaxy by marginalising over the redshift distribution--!
+       if(size(RedshiftPDF) == 1) then
+          Posterior_perGalaxy(c,:) = Posterior_perGalaxy_Redshift(c,:,1)
+       else
+          !--Integrate over the redshift Information--!
+          do i = 1, size(Posterior_perGalaxy,2)
+!             if(all(Posterior_perGalaxy_Redshift(c,i,:)*RedshiftPDF(:) == 0.e0_double)) STOP 'Product of redshift dependent posterior and PDF is zero'
+             Posterior_perGalaxy(c,i) = TrapInt(RedshiftGrid, Posterior_perGalaxy_Redshift(c,i,:)*RedshiftPDF(:))
+          end do
+          if(all(Posterior_perGalaxy == 0.e0_double)) STOP 'Posterior per galxy is zero!'
+       end if
+       deallocate(Posterior_perGalaxy_Redshift, RedshiftPDF, Sigma_Crit)
+
        !--Renomralised to the posterior per galaxy
        Renorm = 0.e0_double
        do j = 1, size(Posterior_perGalaxy,2)-1

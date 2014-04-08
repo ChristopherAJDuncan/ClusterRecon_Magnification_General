@@ -29,7 +29,7 @@ program Bayesian_DM_Profile_Constraints
    !##############################################################################################################!                                         
    allocate(Catalogue_Identifier(1)); Catalogue_Identifier = 5
    allocate(Blank_Field_Catalogue_Identifier(1)); Blank_Field_Catalogue_Identifier = -5
-   Analyse_with_Physical_Sizes = .true.
+   Analyse_with_Physical_Sizes = .false.
    narg = iargc()
    if(narg == 0) then
       !-Defaults-!                                                                                                                                          
@@ -257,8 +257,6 @@ contains
     end do
     close(36)
 
-    !--Plot Result--!
-    
     deallocate(Param_Bias_Mode, Param_Mode_Variance, Position, ParameterValues, iCluster_Aperture_Radius)
     print *, 'Finished Mock Cluster Bias Run STAGES normally'
 
