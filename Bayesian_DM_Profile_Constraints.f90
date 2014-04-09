@@ -5,7 +5,7 @@ program Bayesian_DM_Profile_Constraints
 
   character(200), parameter::Output_Directory_Default = 'Bayesian_DM_Profile_Constraints_Output/'
    character(200):: Output_Directory = Output_Directory_Default
-   character(200)::Cluster_Filename = 'Cluster_Parameters/STAGES.ini'
+   character(200)::Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini'
    integer,allocatable:: Catalogue_Identifier(:)
    integer,allocatable::Blank_Field_Catalogue_Identifier(:)
    character(200),allocatable:: Bias_Output_Directory(:)
@@ -175,7 +175,7 @@ contains
     real(double),allocatable:: Bias_Mode(:,:), Mode_Variance(:,:) !-Catalogue, Aperture-!
     real(double),allocatable:: Param_Bias_Mode(:,:,:), Param_Mode_Variance(:,:,:) !-Parameter, Catalogue, Aperture-!
 
-    real(double)::Aperture_Mass, eAperture_Mass, Aperture_Mass_Input, Discardable
+    real(double)::Aperture_Mass, eAperture_Mass(1), Aperture_Mass_Input, Discardable(1)
 
     type(Foreground)::Cluster
     character(4)::Profile_String
@@ -247,8 +247,8 @@ contains
      
        do Ap = 1, nClusters
           do j =1, nParam
-             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), ParameterValues(j,Ap), 0.e0_double, Aperture_Mass_Input, Discardable, Redshift)
-             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Variance(j,cid,Ap), Aperture_Mass, eAperture_Mass, Redshift)
+             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), ParameterValues(j,Ap), (/0.e0_double/), Aperture_Mass_Input, Discardable, Redshift)
+             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), (/Param_Mode_Variance(j,cid,Ap)/), Aperture_Mass, eAperture_Mass, Redshift)
 
              write(36, '(6(e12.5,x))') ParameterValues(j,Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Variance(j,cid,Ap), Aperture_Mass_Input, Aperture_Mass,  eAperture_Mass 
           end do
@@ -298,8 +298,8 @@ contains
      
        do Ap = 1, nClusters
           do j =1, nParam
-             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), ParameterValues(j,Ap), 0.e0_double, Aperture_Mass_Input, Discardable, Redshift)
-             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Variance(j,cid,Ap), Aperture_Mass, eAperture_Mass, Redshift)
+             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), ParameterValues(j,Ap), (/0.e0_double/), Aperture_Mass_Input, Discardable, Redshift)
+             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), (/Param_Mode_Variance(j,cid,Ap)/), Aperture_Mass, eAperture_Mass, Redshift)
 
              write(36, '(6(e12.5,x))') ParameterValues(j,Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Variance(j,cid,Ap), Aperture_Mass_Input, Aperture_Mass,  eAperture_Mass 
           end do
@@ -407,8 +407,6 @@ contains
           end if
           Run_Output_Directory = trim(Run_Parent_Directory)//trim(Run_Output_Directory)//'/'
           
-
-          if(Cat_Ident(ID)==5) Analyse_with_Physical_Sizes = .true. !-Ensure Redshift Information used at Data end if available for COMBO-!
           call Mass_Estimate_Single_Run(Cat_Ident(ID), Run_Output_Directory, Single_Run_Posterior, Blank_Field_Cat_Ident(ID), iClusters, Aperture_Radius)
           Analyse_with_Physical_Sizes = tPhysical_Size
 

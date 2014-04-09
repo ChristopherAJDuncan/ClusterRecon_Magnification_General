@@ -551,6 +551,17 @@ contains
           allocate(Smoothed_PDF(size(Smoothed_Grid_Mag), size(Smoothed_Grid_Size))); Smoothed_PDF = 0.e0_double
           call KDE_Bivariate_Gaussian(TCatMags, TCatSizes, Sig, Smoothed_Grid_Mag, Smoothed_Grid_Size, Smoothed_PDF)
 
+          !--Renormalise--!
+          allocate(Smoothed_sizeOnly_PDF(size(Smoothed_Grid_Size))); Smoothed_sizeOnly_PDF = 0.e0_double
+          do i =1, size(Smoothed_sizeOnly_PDF)
+             Smoothed_sizeOnly_PDF(i) = TrapInt(Smoothed_Grid_Mag, Smoothed_PDF(:,i))
+          end do
+          Renormalisation = TrapInt(Smoothed_Grid_Size, Smoothed_SizeOnly_PDF)
+          if(Renormalisation == 0.e0_double) STOP 'Joint_Size_Magnitude_Distribution - Renormalisation of smoothed PDF is zero, stopping...'
+          Smoothed_PDF = Smoothed_PDF/Renormalisation
+          deallocate(Smoothed_sizeOnly_PDF)
+
+
           !--Output--!
           open(unit = 45, file  = trim(iOUtput_Dir)//'Smoothed_Size_Mag_Dist.dat')
           write(fmtstring, '(I5)') size(Smoothed_Grid_Mag) + 1

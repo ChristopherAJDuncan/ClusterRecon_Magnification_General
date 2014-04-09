@@ -203,7 +203,7 @@ module Catalogues
          STOP 'bin_catalogue_by_magnitude - Invalid choice of magnitude type , stopping...'
       end select
       
-      if(all(Temporary_Magnitude == 0.e0_double)) then
+      if(all(Temporary_Magnitude == 0.e0_double) .or. (size(Limits,1) == 1 .and. (minval(Temporary_Magnitude)>= limits(1,1) .and. minval(Temporary_Magnitude)<= limits(1,2))) ) then
          print *, 'Bin_by_Magnitude, magnitude information empty, returning Binned Catalogue which contains all galaxies'
          call Binned_Catalogue_Construct(BCat, 'No Binning', 1)
          call Catalogue_Construct(BCat%Cat(1), size(Cat%RA))
@@ -219,10 +219,12 @@ module Catalogues
       call Binned_Catalogue_Construct(BCat, 'By Magnitude', size(Limits,1))
       BCat%Bin_Limits = Limits
       
-      !-Construct Expected Occupation-!                                                                                                                                                                                    
+      !-Construct Expected Occupation-!                                                                                                                                                                           
+      !--Set up the Binned Catalogue--!
       do i = 1, size(Limits,1)
          Expected_Occupation(i) = count(Temporary_Magnitude <= Limits(i,2)) - count(Temporary_Magnitude <= Limits(i,1))
-!         Expected_Occupation(i) = count(Temporary_Magnitude <= Limits(i,2)) - count(Temporary_Magnitude <= Limits(1,1)) - sum(Expected_Occupation(:i))
+
+         !--Add in galaxies at lower limit to the lowest bin
          if(i==1) Expected_Occupation(1) = Expected_Occupation(1) + count(Temporary_Magnitude==Limits(1,1))
          call Catalogue_Construct(BCat%Cat(i), Expected_Occupation(i))
          allocate(BCat%Index_Mapping(i)%Map(Expected_Occupation(i))); BCat%Index_Mapping(i)%Map = -1
@@ -235,22 +237,28 @@ module Catalogues
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
                BCat%Index_Mapping(i)%Map(Occupation(i)) = c
+               exit !-Exit bin loop on success-!
             end if
             if(i == 1 .and. Temporary_Magnitude(c) == Limits(i,1)) then
                counter = counter + 1
                Occupation(i) = Occupation(i) + 1
                call Catalogue_Assign_byGalaxy_byCatalogue(BCat%Cat(i), Occupation(i), Cat, c)
                BCat%Index_Mapping(i)%Map(Occupation(i))= c
+               exit !-Exit bin loop on success-!
             end if
          end do
       end do
 
-      do i =1, size(Limits,1)
-         if(any(BCat%Index_Mapping(i)%Map > size(Cat%Sizes)) .or. any(BCat%Index_Mapping(i)%Map < 0)) then
-            print *, 'Fatal Error - bin_catalogue_by_magnitude - Mapping to small or large:: Bin, Max/Min Mapping, nGal:', i, maxval(BCat%Index_Mapping(i)%Map), minval(BCat%Index_Mapping(i)%Map), size(Cat%Sizes)
-            STOP
-         end if
-      end do
+
+
+      
+!--This error can be ignored if some galaxies are expected to fall outside the bin limits-!
+!!$      do i =1, size(Limits,1)
+!!$         if(any(BCat%Index_Mapping(i)%Map > size(Cat%Sizes)) .or. any(BCat%Index_Mapping(i)%Map < 0)) then
+!!$            print *, 'Fatal Error - bin_catalogue_by_magnitude - Mapping to small or large:: Bin, Max/Min Mapping, nGal:', i, maxval(BCat%Index_Mapping(i)%Map), minval(BCat%Index_Mapping(i)%Map), size(Cat%Sizes)
+!!$            STOP
+!!$         end if
+!!$      end do
 
       !--Check for Duplication of Mapping - i.e. there should be a monotonic mapping between catalogues--!
       allocate(Sorted_Array(sum(Occupation))); Sorted_Array = -100.e0_double
@@ -262,7 +270,7 @@ module Catalogues
       call sort(Sorted_Array)
       do j = 2, size(Sorted_Array)-1
          if( (Sorted_Array(j-1) == Sorted_Array(j)) .or. (Sorted_Array(j+1) == Sorted_Array(j)) ) then
-            print *, 'Duplication of Mapping, value:', Sorted_Array(j)
+            print *, 'Duplication of Mapping, value:', Sorted_Array(j), j
             STOP_FLAG = .true.
          end if
       end do
@@ -684,7 +692,7 @@ module Catalogues
          end do
       end if
       if(nPass /= size(Cat%RA)) then
-         print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%RA)
+         print *, 'Error - Cut_By_PhotometricRedshift - Error in Assigning galxies that pass cuts', nPass, size(Cat%RA)
          STOP
       end if
 
@@ -742,7 +750,7 @@ module Catalogues
 !!$         if((Temp_Cat%MF606W(i) >= ilower) .and. (Temp_Cat%MF606W(i) <= iupper)) nPass = nPass + 1
 !!$      end do
 
-      nPass = count(Temp_cat%MF606W <= iupper) + count(Temp_Cat%MF606W >= ilower) - size(Temp_Cat%MF606W)
+      nPass = count(Temp_cat%MF606W <= iupper) - count(Temp_Cat%MF606W < ilower)!count(Temp_cat%MF606W <= iupper) + count(Temp_Cat%MF606W >= ilower) - size(Temp_Cat%MF606W)
 
 
       call Catalogue_Construct(Cat, nPass)
@@ -755,7 +763,7 @@ module Catalogues
          end if
       end do
       if(nPass /= size(Cat%MF606W)) then
-         print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%MF606W)
+         print *, 'Error - Cut_By_magnitude - Error in Assigning galxies that pass cuts', nPass, size(Cat%MF606W)
          STOP
       end if
 
