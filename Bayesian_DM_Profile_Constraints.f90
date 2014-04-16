@@ -512,6 +512,8 @@ contains
        call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
     end if
     call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
+
     if(Blank_Field_Cat_Ident == Cat_Ident) then
        BFCatt = Catt 
     else
@@ -523,6 +525,7 @@ contains
           call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
        end if
        call Cut_By_PhotoMetricRedshift(BFCatt, 0.21e0_double) !--Cut out foreground-
+       call Cut_By_PixelSize(BFCatt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!
     end if
 
     call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Blank_Field_Catalogue = BFCatt)

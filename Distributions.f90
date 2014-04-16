@@ -5,6 +5,10 @@ implicit none
 character(200),private::Reference_Catalogue = 'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
 integer::Reference_Catalogue_Columns(13) = (/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/)
 
+INTERFACE CH08_redshift_distribution
+   module procedure CH08_redshift_distribution_Scalar, CH08_redshift_distribution_Array
+END INTERFACE CH08_redshift_distribution
+
 contains
 
 
@@ -122,7 +126,7 @@ contains
 
 
   !---------------REDSHIFT DISTRIBUTIONS--------------------------------------------------------!
-  subroutine CH08_redshift_distribution(Apparent_Magnitude, Grid, PDF)
+  subroutine CH08_redshift_distribution_Array(Apparent_Magnitude, Grid, PDF)
     !--Returns a PDF for the redshift distribution, used in CH08, which is a Smail et al. distribution with apparent-magnitude-dependent median redshift--!
     real(double), intent(in)::Apparent_Magnitude
     real(double), intent(in)::Grid(:)
@@ -138,10 +142,34 @@ contains
 
     call Analytic_Source_Redshift_Distribution(alpha, beta, zmed, Grid, PDF)
 
-  end subroutine CH08_redshift_distribution
+  end subroutine CH08_redshift_distribution_Array
 
-  
+  real(double) function CH08_redshift_distribution_Scalar(Apparent_Magnitude, Redshift)
+    use nr, only: gammln
+    
+    real(double), intent(in)::Apparent_Magnitude, Redshift
+    
+    real(double):: zmed, alpha = 2.e0_double, beta = 1.5e0_double
+
+    real(double)::PDF
+
+    real(double):: z_0, Norm
+
+    zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    if(zmed < 0.e0_double) STOP 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
+
+    z_0 = zmed/1.412e0_double
+    Norm = (beta/(z_0*dexp(gammln( (alpha+1.e0_double)/(beta) ))))
+
+    PDF = Norm*((Redshift/z_0)**alpha)*dexp(-(Redshift/z_0)**beta)
+
+!!    call Analytic_Source_Redshift_Distribution(alpha, beta, zmed, (/Redshift/), PDF)
+    CH08_redshift_distribution_Scalar = PDF
+
+  end function CH08_redshift_distribution_Scalar
+
   subroutine Analytic_Source_Redshift_Distribution(alpha, beta, z_med, Redshift, pdf, Output_Directory)
+    use nr, only: gammln
     real(double), intent(in)::Redshift(:)
     real(double), intent(out),allocatable::pdf(:)
     real(double),intent(in):: alpha, beta, z_med
@@ -153,23 +181,29 @@ contains
     real(double)::AreaUnderCurve, dRedshift
 
     !--Smail-!      
-    real(double):: z_0
+    real(double):: z_0, Norm
 
     allocate(PDF(size(Redshift))); PDF = -1.e0_double
 
     if (z_med <= 0.e0_double) STOP 'Analytic_Source_Redshift_Distribution - MEDIAN REDSHIFT NEGATIVE OR ZERO, FATAL'
 
-    AreaUnderCurve = 0.e0_double; dRedshift = Redshift(2)-Redshift(1)
+
+
+    AreaUnderCurve = 0.e0_double
     select case(Method)
     case(1) !-Smail-!
        !print *, 'Producing a Smail et al source redshift distribution with alpha = ', alpha, '; beta = ', beta, '; z_med  = ', z_med 
        z_0 = z_med/1.412e0_double
+       Norm = (beta/(z_0*dexp(gammln( (alpha+1.e0_double)/(beta) ))))
+
+       if(Norm < 0) STOP 'Analytic_Source_Redshift_Distribution - Error in renormalising the Smail distribution'
+
        do i = 1, size(Redshift)
-          PDF(i) = (Redshift(i)/z_0)**2.e0_double*dexp(-(Redshift(i)/z_0)**1.5e0_double)
-          if(i>1) AreaUnderCurve = AreaUnderCurve + 0.5e0_double*(Redshift(i)-Redshift(i-1))*(PDF(i)+PDF(i-1))
+          PDF(i) = Norm*((Redshift(i)/z_0)**alpha)*dexp(-(Redshift(i)/z_0)**beta)
+!          if(i>1) AreaUnderCurve = AreaUnderCurve + 0.5e0_double*(Redshift(i)-Redshift(i-1))*(PDF(i)+PDF(i-1))
        end do
        !-Renormalise-!
-       PDF = PDF/AreaUnderCurve
+!       PDF = PDF/AreaUnderCurve
     end select
 
     if(any(PDF < 0.e0_double)) STOP 'Source_Redshift_Distribution - FALTAL ERROR - PDF contains negatives'
@@ -427,7 +461,7 @@ contains
   
   !----------------SIZE DISTRIBUTIONS-----------------------------------------------------------!
   subroutine get_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth)
-    use Catalogues; use Statistics, only: variance_discrete; use Smoothing, only:KDE_Bivariate_Gaussian; use Integration, only: Integrate, TrapInt, RectangularIntegration
+    use Catalogues; use Statistics, only: variance_discrete, Discrete_Covariance; use Smoothing, only:KDE_Bivariate_Gaussian; use Integration, only: Integrate, TrapInt, RectangularIntegration
     !--Essentially Wrapper routine - Does the same as get_Size_Distribution_MagnitudeBinning_byCatalogue, but binning type is set here, and output is slightly varied--!
     !--Returns p(R,m)
     !~~~~ Q: How does the result vary with Magnitude Binnning and Size Binning? I.e. if a magnitude bin has few galaxies, then the distribution will be noisy when taking 60 size bins!
@@ -443,7 +477,7 @@ contains
     logical,intent(in),optional::ln_size_Distribution, KDE_Smooth
     
     !----Binning Decalarations-----!
-    integer,parameter::nSizes = 60, nMags = 10
+    integer,parameter::nSizes = 60, nMags = 60
     real(double):: Lower, Higher, dParam
     real(double),allocatable,dimension(:,:):: SizeBins, MagBins
 
@@ -458,9 +492,12 @@ contains
     !--Smoothed Version--!
     real(double),allocatable::Smoothed_Grid_Size(:), Smoothed_Grid_Mag(:), Smoothed_PDF(:,:)
     real(double):: Sig = 0.5e0_double !-Want a different width for magnitude and size?
-    integer:: nSmoothed_Sampling = 100, nSmoothed_Sampling_Mag = 50
+    integer:: nSmoothed_Sampling = 100, nSmoothed_Sampling_Mag = 100
     real(double),allocatable::TCatMags(:), TCatSizes(:) !-Temprary storage for Magnitude and sizes-!
     real(double),allocatable:: Smoothed_SizeOnly_PDF(:), Smoothed_MagOnly_PDF(:) !--Used for Testing-!
+    real(double),allocatable:: KDE_Gaussian_Covariance(:,:), Data_Vectors(:,:)
+    real(double):: KDE_Gaussian_Covariance_Reduction = 0.01e0_double !-How much is sig^2 which give KDE width reduced from measured covariance?--!
+    
 
     real(double),allocatable:: Histogram_PDF(:,:)
     real(double),allocatable:: Histogram_SizeOnly_PDF(:), Histogram_MagOnly_PDF(:)
@@ -548,8 +585,13 @@ contains
     !--Get KDE Smoothed Version--!
     if(present(KDE_Smooth)) then
        if(KDE_Smooth) then
+          allocate(Data_Vectors(2,size(TCatMags))); Data_Vectors(1,:) = TCatMags; Data_Vectors(2,:) = TCatSizes
+          call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
+          KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
+          deallocate(Data_Vectors)
+
           allocate(Smoothed_PDF(size(Smoothed_Grid_Mag), size(Smoothed_Grid_Size))); Smoothed_PDF = 0.e0_double
-          call KDE_Bivariate_Gaussian(TCatMags, TCatSizes, Sig, Smoothed_Grid_Mag, Smoothed_Grid_Size, Smoothed_PDF)
+          call KDE_Bivariate_Gaussian(TCatMags, TCatSizes, Smoothed_Grid_Mag, Smoothed_Grid_Size, Smoothed_PDF, Covar = KDE_Gaussian_Covariance)
 
           !--Renormalise--!
           allocate(Smoothed_sizeOnly_PDF(size(Smoothed_Grid_Size))); Smoothed_sizeOnly_PDF = 0.e0_double
@@ -644,9 +686,9 @@ contains
 
     !--Output--!
     if(iln_size_Distribution) then
-       open(unit = 37, file = trim(iOutput_Dir)//'Joint_lnSize_Magnitude_Distribution.dat')
+       open(unit = 37, file = trim(iOutput_Dir)//'Joint_lnSize_Magnitude_Distribution_Histogram.dat')
     else
-       open(unit = 37, file = trim(iOutput_Dir)//'Joint_Size_Magnitude_Distribution.dat')
+       open(unit = 37, file = trim(iOutput_Dir)//'Joint_Size_Magnitude_Distribution_Histogram.dat')
     end if
     !--Header--!
     write(37, '(A)', advance = 'no') '#'
@@ -654,16 +696,12 @@ contains
        write(37, '(e14.7,x)', advance = 'no') SizeBins(i,1)
     end do
     write(37, '(e14.7,x)') SizeBins(size(SizeBins,1),2)
-    
-
     write(37, '(A)', advance = 'no') '#'
     do i =1, size(MagBins,1)-1
        write(37, '(e14.7,x)', advance = 'no') MagBins(i,1)
     end do
     write(37, '(e14.7,x)') MagBins(size(MagBins,1),2)
-
-    write(37, *)
-    
+    write(37, *)    
     !--First line has Magnitude Binning Information--!
     write(fmtstring, '(I3)') size(MagGrid) + 1
     write(37, '('//trim(fmtstring)//'(e14.7,x))') 0.0e0_double, MagGrid
