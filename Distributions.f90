@@ -148,11 +148,8 @@ contains
     use nr, only: gammln
     
     real(double), intent(in)::Apparent_Magnitude, Redshift
-    
     real(double):: zmed, alpha = 2.e0_double, beta = 1.5e0_double
-
     real(double)::PDF
-
     real(double):: z_0, Norm
 
     zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
@@ -460,7 +457,7 @@ contains
   end subroutine angular_Diameter_Distance_Distribution
   
   !----------------SIZE DISTRIBUTIONS-----------------------------------------------------------!
-  subroutine get_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth)
+  subroutine produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth)
     use Catalogues; use Statistics, only: variance_discrete, Discrete_Covariance; use Smoothing, only:KDE_Bivariate_Gaussian; use Integration, only: Integrate, TrapInt, RectangularIntegration
     !--Essentially Wrapper routine - Does the same as get_Size_Distribution_MagnitudeBinning_byCatalogue, but binning type is set here, and output is slightly varied--!
     !--Returns p(R,m)
@@ -592,6 +589,7 @@ contains
 
           allocate(Smoothed_PDF(size(Smoothed_Grid_Mag), size(Smoothed_Grid_Size))); Smoothed_PDF = 0.e0_double
           call KDE_Bivariate_Gaussian(TCatMags, TCatSizes, Smoothed_Grid_Mag, Smoothed_Grid_Size, Smoothed_PDF, Covar = KDE_Gaussian_Covariance)
+          deallocate(KDE_Gaussian_Covariance)
 
           !--Renormalise--!
           allocate(Smoothed_sizeOnly_PDF(size(Smoothed_Grid_Size))); Smoothed_sizeOnly_PDF = 0.e0_double
@@ -627,7 +625,8 @@ contains
           end do
           print *, 'Sucessfully output to: ', trim(iOUtput_Dir), ' Smoothed_SizeDist_From_BivariateKDE.dat'
           close(4)
-          
+          deallocate(Smoothed_sizeOnly_PDF)
+
           allocate(Smoothed_MagOnly_PDF(size(Smoothed_Grid_Mag))); Smoothed_MagOnly_PDF = 0.e0_double
           do i =1, size(Smoothed_MagOnly_PDF)
              Smoothed_MagOnly_PDF(i) = TrapInt(Smoothed_Grid_Size, Smoothed_PDF(i,:))
@@ -640,6 +639,7 @@ contains
           end do
           print *, 'Sucessfully output to: ', trim(iOUtput_Dir), ' Smoothed_MagDist_From_BivariateKDE.dat'
           close(4)
+          deallocate(Smoothed_MagOnly_PDF)
        end if
     end if
 
@@ -660,6 +660,7 @@ contains
     end do
     print *, 'Sucessfully output to: ', trim(iOUtput_Dir),'Histogram_SizeDist.dat'
     close(4)
+    deallocate(Histogram_sizeOnly_PDF)
 
     allocate(Histogram_MagOnly_PDF(size(Histogram_MagGrid))); Histogram_MagOnly_PDF = 0.e0_double       
     do i =1, size(Histogram_MagOnly_PDF)
@@ -673,6 +674,7 @@ contains
     end do
     print *, 'Sucessfully output to: ',trim(iOutput_Dir),' Histogram_MagDist.dat'
     close(4)
+    deallocate(Histogram_MagOnly_PDF)
 
     !--Renormalise across magnitudes??-!
     Renormalisation = 0.e0_double
@@ -708,6 +710,7 @@ contains
     do i= 1, size(Histogram_SizeGrid)
        write(37, '('//trim(fmtstring)//'(e14.7,x))') Histogram_SizeGrid(i), HISTOGRAM_PDF(:,i)
     end do
+    deallocate(SizeBins, MagBins)
     close(37)
 
     !--Set return values--!
@@ -729,7 +732,7 @@ contains
     deallocate(TCatMags, TCatSizes)
 
 
-  end subroutine get_Joint_Size_Magnitude_Distribution
+  end subroutine produce_Joint_Size_Magnitude_Distribution
 
   subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Sizes, PDF, RefCat, use_Physical_sizes,  Magnitude_Type, Output_Dir, ln_size_Distribution, SizeBins, Renormalise, KDE_Smooth)
     use Smoothing, only: KDE_Univariate_Gaussian
@@ -873,8 +876,6 @@ contains
        call bin_catalogue_by_magnitude(Cat,MagBins,BCat, Magnitude_Type)
 
        print *, 'Contructing from total of:', size(Cat%RA), ' galaxies, binned according to:', BCat%Occupation
-
-       if(any(BCat%Occupation == 0)) STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Binning FATAL ERROR - Some bins contain no galaxies, check bin limits and type, stopping..'
 
        print *, 'In producing Histogram of Size-Magnitude Distribution:'
        do i =1 , nMags

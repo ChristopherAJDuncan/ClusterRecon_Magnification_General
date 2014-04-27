@@ -274,6 +274,7 @@ module Catalogues
             STOP_FLAG = .true.
          end if
       end do
+      deallocate(Sorted_Array)
       if(STOP_FLAG) STOP
       !---------------------end duplication check-------------------------------------------------------!
 
@@ -322,7 +323,7 @@ module Catalogues
 
       BCat%Occupation = Occupation
       
-      deallocate(Temporary_Magnitude)
+      deallocate(Temporary_Magnitude, Occupation, Expected_Occupation)
       if(Verbose) print *, 'Done.'
       
     end subroutine bin_catalogue_by_magnitude
@@ -921,7 +922,7 @@ module Catalogues
       integer::Cols_Length = 15
       integer, allocatable::iCols(:)
       integer::Column_Index
-      character(200)::header_Filename
+      character(500)::header_Filename
       logical::here
 
       character(*)::Size_Label

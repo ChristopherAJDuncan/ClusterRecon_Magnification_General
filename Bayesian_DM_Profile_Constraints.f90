@@ -3,7 +3,7 @@ program Bayesian_DM_Profile_Constraints
   use Param_Types; use Catalogues; use Bayesian_Routines; use Foreground_Clusters
   implicit none
 
-  character(200), parameter::Output_Directory_Default = 'Bayesian_DM_Profile_Constraints_Output/'
+  character(200), parameter::Output_Directory_Default = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/DELETE/'
    character(200):: Output_Directory = Output_Directory_Default
    character(200)::Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini'
    integer,allocatable:: Catalogue_Identifier(:)
@@ -15,9 +15,14 @@ program Bayesian_DM_Profile_Constraints
    type(Foreground):: Clusters
 !   real(double)::Lens_Redshift = 0.165e0_double
 
+    !----Mock Parameters-------!
+    integer:: nSources = 70000
+    real(double)::frac_z = 0.1e0_double
+
    !--Command Line Argument Entry--!                
    integer::narg, i
    character(120)::arg
+   character(200):: Input_Filename
 
    real(double),allocatable::Cluster_Posteriors(:,:,:)
 
@@ -34,9 +39,9 @@ program Bayesian_DM_Profile_Constraints
    if(narg == 0) then
       !-Defaults-!                                                                                                                                          
       Output_Directory = trim(Output_Directory_Default)
-      write(*,'(A)') 'No arguments entered, enter "Catalogue_Identifier"; "Output_Directory"; "Use Physical Sizes"; "Run_Type"; "Blank_Field_Catalogue_Identifier", "Cluster Parameter FileName (longhand!)" in that order'
+      write(*,'(A)') 'No arguments entered, enter "Catalogue_Identifier"; "Output_Directory"; "Use Physical Sizes"; "Run_Type"; "Blank_Field_Catalogue_Identifier", "Cluster Parameter FileName (longhand!)" in that order, or an Input File ONLY'
       write(*,'(A)') 'Note:: Catalogue_Identifier:: 1:STAGES_shear, 2: COMBO matched, 3:RRG, 4:STAGES-Mock, 5:COMBO-Mock; -1:Mock_COMBO and Mock_STAGES (only for Run_Type = 2)'
-      write(*,'(A)') '    :: Run_Type:: 1: Single_Run, 2:Bias and Error (MultipleRun), 3: Bias and Error (STAGES Clusters), 4: Bias and Error (1 Cluster, Varying Mass)'
+      write(*,'(A)') '    :: Run_Type:: 1: Single_Run, 2:Bias and Error (MultipleRun), 3: Bias and Error (STAGES Clusters, Single Cluster w Varying Mass)'
       write(*,'(A)') ' '
       write(*,'(A)') 'Press <ENTER> to use defaults:'
       print *, 'Catalogue Identifier:', Catalogue_Identifier, ';'
@@ -45,7 +50,12 @@ program Bayesian_DM_Profile_Constraints
       print *, 'Run Type: ', Run_Type
       print *, 'Blank Field Identifier:', Blank_Field_Catalogue_Identifier
       print *, 'Cluster Filename:', Cluster_Filename
+      write(*,'(A)') ' all other declarations will use their hardwired defaults'
       read(*,*)
+   elseif(narg == 1) then !-Input File-!
+      call get_command_argument(1,arg)
+      Input_Filename = trim(adjustl(arg))
+      call Parameter_Input(Input_Filename)
    else
       print *, 'Number of arguements:', narg
       do i =1, narg
@@ -54,10 +64,6 @@ program Bayesian_DM_Profile_Constraints
          case(1) !-Catalogue_Identifier-!                                                                                                                
             read(arg, *) Catalogue_Identifier(1)
             Catalogue_Identifier = Catalogue_Identifier(1)
-            if(Catalogue_Identifier(1) == 0) then
-               deallocate(Catalogue_Identifier); allocate(Catalogue_Identifier(2));
-               Catalogue_Identifier = (/4,5/)
-            end if
         case(2)
            Output_Directory = trim(adjustl(arg))
         case(3)
@@ -67,10 +73,6 @@ program Bayesian_DM_Profile_Constraints
         case(5)
             read(arg, '(I3)') Blank_Field_Catalogue_Identifier(1)
             Blank_Field_Catalogue_Identifier = Blank_Field_Catalogue_Identifier(1)
-            if(Blank_Field_Catalogue_Identifier(1) == 0) then
-               deallocate(Blank_Field_Catalogue_Identifier); allocate(Blank_Field_Catalogue_Identifier(2));
-               Blank_Field_Catalogue_Identifier = (/-4,-5/)
-            end if
          case(6)
             Cluster_Filename = trim(adjustl(arg))
         case default
@@ -78,12 +80,22 @@ program Bayesian_DM_Profile_Constraints
         end select
      end do
      if(Cluster_Filename(1:1) /= '/') STOP 'Input Cluster Filename MUST be referenced using an absolute address, stopping...'
+     if(Output_Directory(1:1) /= '/') STOP 'Output Directory MUST be referenced using an absolute address, stopping...'
+  end if
+  
+  !--Set double Identifier if zero--!
+  if(Catalogue_Identifier(1) == 0) then
+     deallocate(Catalogue_Identifier); allocate(Catalogue_Identifier(2));
+     Catalogue_Identifier = (/4,5/)
+  end if
+  if(Blank_Field_Catalogue_Identifier(1) == 0) then
+     deallocate(Blank_Field_Catalogue_Identifier); allocate(Blank_Field_Catalogue_Identifier(2));
+     Blank_Field_Catalogue_Identifier = (/-4,-5/)
   end if
 
 
-
    call get_Clusters(Clusters, Cluster_Filename)
-   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-! Default - 1/60
+   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
    call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
 
 
@@ -96,7 +108,7 @@ program Bayesian_DM_Profile_Constraints
   if(Run_Type ==3) then
      !--Set Defaults for this Run Type--!
      Blank_Field_Catalogue_Identifier = Catalogue_Identifier
-     !--This routine tests the affect of not having a blank feild (i.e. knowledge of the iontrinsic distributions, only taken from lensed fields.) Therefore the intrinsic distributions should come from the lensed data--!
+     !--This routine tests the effect of not having a blank feild (i.e. knowledge of the iontrinsic distributions, only taken from lensed fields.) Therefore the intrinsic distributions should come from the lensed data--!
   end if
 
   if(Run_Type == 1) then
@@ -117,7 +129,7 @@ program Bayesian_DM_Profile_Constraints
   select case(Run_Type)
   case(1)
      print *, '!---- Producing a single Mass Estimate:'
-     call Mass_Estimate_Single_Run(Catalogue_Identifier(1), Output_Directory, Cluster_Posteriors, Blank_Field_Catalogue_Identifier(1),Clusters, Cluster_Aperture_Radius)
+     call Mass_Estimate_Single_Run(Output_Directory, Cluster_Posteriors, Clusters, Cluster_Aperture_Radius, Dist_Directory = Output_Directory, Cat_Ident = Catalogue_Identifier(1), Blank_Field_Cat_Ident = Blank_Field_Catalogue_Identifier(1))
   case(2)
      !--Set Output Directory Names--!
      allocate(Bias_Output_Directory(size(Catalogue_Identifier))); Bias_Output_Directory = ' '
@@ -137,6 +149,37 @@ program Bayesian_DM_Profile_Constraints
   end select
 
 contains
+
+  subroutine Parameter_Input(Input_File)
+    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions
+    character(*), intent(in):: Input_File
+
+    !Global Declarations! (see above)
+    !--Cluster_Filename, Run_Type, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier--!
+
+    logical:: here
+
+    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier
+    namelist/Mocks/ nSources, frac_z
+
+    !--Check for existence of Input File
+    inquire(file = Input_File, exist = Here)
+    if(here == .false.) then 
+       print *, 'Input_File:', Input_File
+       STOP 'Cluster Input File not present'
+    end if
+
+    open(unit = 92, file = Input_File)
+
+    read(92, nml = Run)
+    read(92, nml = Mocks)
+
+    close(92)
+
+    !--Copy Input File to output directory--!
+    call system('cp '//trim(Input_File)//' '//trim(Output_Directory)//'Input_File.ini')
+
+  end subroutine Parameter_Input
 
   subroutine Cluster_Bias_Outputs(Cat_Ident, Directory, Blank_Field_Cat_Ident)
     !----- Description:
@@ -165,15 +208,15 @@ contains
 
     !--Free Parameter Loop--!
     !--Used only in the Single Cluster Multiple Run Case--!
-    integer::nParam = 5
-    real(double):: Param_Min = 1.0, Param_Max = 4.0
+    integer::nParam = 6
+    real(double):: Param_Min = 0.5, Param_Max = 2.5
 
     integer:: nRun
 
     character(120):: Run_Directory(size(Directory))
 
-    real(double),allocatable:: Bias_Mode(:,:), Mode_Variance(:,:) !-Catalogue, Aperture-!
-    real(double),allocatable:: Param_Bias_Mode(:,:,:), Param_Mode_Variance(:,:,:) !-Parameter, Catalogue, Aperture-!
+    real(double),allocatable:: Bias_Mode(:,:), Mode_Error(:,:) !-Catalogue, Aperture-!
+    real(double),allocatable:: Param_Bias_Mode(:,:,:), Param_Mode_Error(:,:,:) !-Parameter, Catalogue, Aperture-!
 
     real(double)::Aperture_Mass, eAperture_Mass(1), Aperture_Mass_Input, Discardable(1)
 
@@ -205,20 +248,6 @@ contains
     print *, 'For catalogues:', Cat_Ident
     print *, 'And Blank Field Catalogues:', Blank_Field_Cat_Ident
 
-    !--Get The STAGES Clsuters Biases--!
-    call get_Clusters(Cluster, '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini')
-    nParam = 1; nClusters = size(Cluster%Position,1)
-    allocate(Position(2*nClusters))
-    do i =1, size(Clusters%Position,1)
-       Position(2*i-1) = Clusters%Position(i,1); Position(2*i) = Clusters%Position(i,2)
-    end do
-!    Position = (/ 149.1099,-9.9561, 148.9889,-9.9841, 149.1424,-10.1666, 148.9101,-10.1719 /)
-    allocate(Param_Bias_Mode(nParam, size(Cat_Ident), nClusters)); Param_Bias_Mode =0.e0_double
-    allocate(Param_Mode_Variance(nParam, size(Cat_Ident), nClusters)); Param_Mode_Variance =0.e0_double
-    allocate(ParameterValues(nParam,nClusters)); ParameterValues = 0.e0_double
-    !---Create the Parameter File----!
-    ParameterValues(1,:) = Clusters%DM_Profile_Parameter
-    call create_ClusterFile(Mock_Cluster_Filename, nClusters, SMD_Type, Position, ParameterValues(1,:), (/Redshift/))
 
     !--Read in Cluster--!
     call get_Clusters(Cluster, Mock_Cluster_Filename)
@@ -227,12 +256,12 @@ contains
     !--Run the Bias Routine---!
     !--Bias_Mode and Mode_Variacne contain the variance in the DM model free parameter--!
 
-    call Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Run_Directory, Blank_Field_Cat_Ident, Mock_Cluster_Filename, iCluster_Aperture_Radius, Bias_Mode, Mode_Variance)
+    call Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Run_Directory, Blank_Field_Cat_Ident, Mock_Cluster_Filename, iCluster_Aperture_Radius, Bias_Mode, Mode_Error)
     
     if( (size(Param_Bias_Mode(1,:,:)) /= size(Bias_Mode)) ) STOP 'Cluster_Bias_Outputs - Error in Bias Mode size'
-    if( (size(Param_Mode_Variance(1,:,:)) /= size(Mode_Variance)) ) STOP 'Cluster_Bias_Outputs - Error in Mode_Variance size'
-    Param_Bias_Mode(1,:,:) = Bias_Mode; Param_Mode_Variance(1,:,:) = Mode_Variance
-    deallocate(Bias_Mode, Mode_Variance)
+    if( (size(Param_Mode_Error(1,:,:)) /= size(Mode_Error)) ) STOP 'Cluster_Bias_Outputs - Error in Mode_Error size'
+    Param_Bias_Mode(1,:,:) = Bias_Mode; Param_Mode_Error(1,:,:) = Mode_Error
+    deallocate(Bias_Mode, Mode_Error)
        
     !---Output Result (Input, Output, Variance)---!
     !--Input Parameter, Output Parameter, Variance, Input Ap_Mass, Output Ap_Mass, Variance--! 
@@ -248,16 +277,16 @@ contains
        do Ap = 1, nClusters
           do j =1, nParam
              call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), ParameterValues(j,Ap), (/0.e0_double/), Aperture_Mass_Input, Discardable, Redshift)
-             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), (/Param_Mode_Variance(j,cid,Ap)/), Aperture_Mass, eAperture_Mass, Redshift)
+             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), (/Param_Mode_Error(j,cid,Ap)/), Aperture_Mass, eAperture_Mass, Redshift)
 
-             write(36, '(6(e12.5,x))') ParameterValues(j,Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Variance(j,cid,Ap), Aperture_Mass_Input, Aperture_Mass,  eAperture_Mass 
+             write(36, '(6(e12.5,x))') ParameterValues(j,Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Error(j,cid,Ap), Aperture_Mass_Input, Aperture_Mass,  eAperture_Mass 
           end do
           write(36,*)
        end do
     end do
     close(36)
 
-    deallocate(Param_Bias_Mode, Param_Mode_Variance, Position, ParameterValues, iCluster_Aperture_Radius)
+    deallocate(Param_Bias_Mode, Param_Mode_Error, Position, ParameterValues, iCluster_Aperture_Radius)
     print *, 'Finished Mock Cluster Bias Run STAGES normally'
 
     !--nClusters of equal mass, varying r200--!
@@ -265,7 +294,7 @@ contains
     allocate(Position(2*nClusters))
     Position = (/ 149.1099,-9.9561 /)
     allocate(Param_Bias_Mode(nParam, size(Cat_Ident), nClusters)); Param_Bias_Mode =0.e0_double
-    allocate(Param_Mode_Variance(nParam, size(Cat_Ident), nClusters)); Param_Mode_Variance =0.e0_double
+    allocate(Param_Mode_Error(nParam, size(Cat_Ident), nClusters)); Param_Mode_Error =0.e0_double
 
     allocate(ParameterValues(nParam,nClusters)); ParameterValues = 0.e0_double
     allocate(ICluster_Aperture_Radius(nClusters)); ICluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-! Default - 1/60
@@ -273,16 +302,15 @@ contains
        !---Create the Parameter File----!
        ParameterValues(i,:) = Param_Min + (i-1)*((Param_Max-Param_min)/(nParam-1))
        call create_ClusterFile(Mock_Cluster_Filename, nClusters, SMD_Type, Position, ParameterValues(i,:), (/Redshift/))
+       print *, 'Cluster File Created'
        !--Run the Bias Routine---!
        !--Bias_Mode and Mode_Variacne contain the variance in the DM model free parameter--!
-       print *, 'Calling Bias routine'
-       call Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Run_Directory, Blank_Field_Cat_Ident, Mock_Cluster_Filename, iCluster_Aperture_Radius, Bias_Mode, Mode_Variance)
-       print *, 'Called Bias Routine'
+       call Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Run_Directory, Blank_Field_Cat_Ident, Mock_Cluster_Filename, iCluster_Aperture_Radius, Bias_Mode, Mode_Error)
 
        if( (size(Param_Bias_Mode(1,:,:)) /= size(Bias_Mode)) ) STOP 'Cluster_Bias_Outputs - Error in Bias Mode size'
-       if( (size(Param_Mode_Variance(1,:,:)) /= size(Mode_Variance)) ) STOP 'Cluster_Bias_Outputs - Error in Mode_Variance size'
-       Param_Bias_Mode(i,:,:) = Bias_Mode; Param_Mode_Variance(i,:,:) = Mode_Variance
-       deallocate(Bias_Mode, Mode_Variance)
+       if( (size(Param_Mode_Error(1,:,:)) /= size(Mode_Error)) ) STOP 'Cluster_Bias_Outputs - Error in Mode_Error size'
+       Param_Bias_Mode(i,:,:) = Bias_Mode; Param_Mode_Error(i,:,:) = Mode_Error
+       deallocate(Bias_Mode, Mode_Error)
     end do
        
     !---Output Result (Input, Output, Variance)---!
@@ -291,7 +319,7 @@ contains
     do cid = 1, size(Run_Directory)!size(Cat_Ident)
        open(36, file = trim(Run_Directory(cid))//'Mass_Bias_duetoForeground.dat')
        !-Header-!
-       write(36, '(A)') '## Input_Parameter, Output_Parameter, Variance, Input Aperture Mass, Output Aperture Mass, Varaince'
+       write(36, '(A)') '## Input_Parameter, Output_Parameter, Error (s.d.), Input Aperture Mass, Output Aperture Mass, Error (s.d)'
        write(36, '(A)') '## Space between apertures'
        write(fmtString, '(I1)') size(ICluster_Aperture_Radius); write(36, '(A,'//trim(fmtString)//'(e12.5,x))') '## Aperture (Degrees):', ICluster_Aperture_Radius !--Edit fmt to array
        write(36, '(A,A)') '## Mass Profile:', Profile_String !--Edit fmt to array  
@@ -299,36 +327,53 @@ contains
        do Ap = 1, nClusters
           do j =1, nParam
              call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), ParameterValues(j,Ap), (/0.e0_double/), Aperture_Mass_Input, Discardable, Redshift)
-             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), (/Param_Mode_Variance(j,cid,Ap)/), Aperture_Mass, eAperture_Mass, Redshift)
+             call Integrated_Mass_Within_Radius(SMD_Type, ICluster_Aperture_Radius(Ap), Param_Bias_Mode(j,cid,Ap), (/Param_Mode_Error(j,cid,Ap)/), Aperture_Mass, eAperture_Mass, Redshift)
 
-             write(36, '(6(e12.5,x))') ParameterValues(j,Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Variance(j,cid,Ap), Aperture_Mass_Input, Aperture_Mass,  eAperture_Mass 
+             write(36, '(6(e12.5,x))') ParameterValues(j,Ap), Param_Bias_Mode(j,cid,Ap), Param_Mode_Error(j,cid,Ap), Aperture_Mass_Input, Aperture_Mass,  eAperture_Mass 
           end do
           write(36,*)
        end do
     end do
     close(36)
     
-    deallocate(Param_Bias_Mode, Param_Mode_Variance, Position, ICluster_Aperture_Radius)
+    deallocate(Param_Bias_Mode, Param_Mode_Error, Position, ICluster_Aperture_Radius)
     print *, 'Finished Mock Cluster Bias Run'
+
+    !--Get The STAGES Clsuters Biases--!
+    call get_Clusters(Cluster, '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini')
+    nParam = 1; nClusters = size(Cluster%Position,1)
+    allocate(Position(2*nClusters))
+    do i =1, size(Clusters%Position,1)
+       Position(2*i-1) = Clusters%Position(i,1); Position(2*i) = Clusters%Position(i,2)
+    end do
+!    Position = (/ 149.1099,-9.9561, 148.9889,-9.9841, 149.1424,-10.1666, 148.9101,-10.1719 /)
+    allocate(Param_Bias_Mode(nParam, size(Cat_Ident), nClusters)); Param_Bias_Mode =0.e0_double
+    allocate(Param_Mode_Error(nParam, size(Cat_Ident), nClusters)); Param_Mode_Error =0.e0_double
+    allocate(ParameterValues(nParam,nClusters)); ParameterValues = 0.e0_double
+    !---Create the Parameter File----!
+    ParameterValues(1,:) = Clusters%DM_Profile_Parameter
+    call create_ClusterFile(Mock_Cluster_Filename, nClusters, SMD_Type, Position, ParameterValues(1,:), (/Redshift/))
+
 
     !--Plot Result--!
     do cid = 1, size(Run_Directory)
-       call system('python Cluster_Bias_Plotter.py '//trim(Run_Directory(cid))//'Mass_Bias_duetoForeground_STAGES.dat'//' '//trim(Run_Directory(cid))//'Mass_Bias_duetoForeground.dat')
+!       call system('python Cluster_Bias_Plotter.py '//trim(Run_Directory(cid))//'Mass_Bias_duetoForeground_STAGES.dat'//' '//trim(Run_Directory(cid))//'Mass_Bias_duetoForeground.dat')
     end do
 
   end subroutine Cluster_Bias_Outputs
 
-  subroutine Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Directory, Blank_Field_Cat_Ident, Input_Clusters_Filename, Aperture_Radius, Bias_Mode_Out, Mode_Variance_Out)
+  subroutine Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Directory, Blank_Field_Cat_Ident, Input_Clusters_Filename, Aperture_Radius, Bias_Mode_Out, Mode_Error_Out)
     use Cosmology; use Statistics, only:variance_discrete; use Matrix_methods, only:Subset
     !--Produces multiple Posteriors for many different mock catalogue realisations, to calculate the ML-point bias and variance--!
+    !--Unlensed distribution is calculated from the Blank_Field_Catlaogue for the first run, and then read in on consecutive runs--!
     integer, intent(in)::Cat_Ident(:)
     character(*), intent(in)::Directory(:)
     integer, intent(in)::Blank_Field_Cat_Ident(:)
     character(*),intent(in):: Input_Clusters_Filename
     real(double), intent(in)::Aperture_Radius(:)
-    real(double),allocatable,optional::Bias_Mode_Out(:,:), Mode_Variance_Out(:,:) !-Catalogue, Ap-!
+    real(double),allocatable,optional::Bias_Mode_Out(:,:), Mode_Error_Out(:,:) !-Catalogue, Ap-!
 
-    real(double),allocatable::Bias_Mode(:), Mode_Variance(:)
+    real(double),allocatable::Bias_Mode(:), Mode_Error(:)
 
     character(200)::Run_Output_Directory, Run_Parent_Directory
     integer::nR
@@ -352,10 +397,12 @@ contains
 
     logical::tPhysical_Size
 
+    type(Catalogue)::Cat, BFCat
+    character(500)::Catalogue_Directory, Catalogue_Filename
+    integer,dimension(:),allocatable::Catalogue_Cols
+
     !----Mock Parameters-------!
-    integer:: nSources = 70000
-    real(double)::frac_z = 1.e0_double
-    character(120)::Mock_Output = 'Output/' !-Generalise?-!
+    character(500)::Mock_Output = 'Output/' !-Generalise?-!
 
 
     !--Temporary Storage of User-entered variable--!
@@ -366,7 +413,12 @@ contains
 
     if(size(Directory) /= size(Cat_Ident)) STOP' Posterior_Maximum_Likelihood_Bias_Error - Directory and Cat Identifier not of the same size, exiting'
 
-    
+    !--Create Mock Output Directory, which is just used to Temporarily store the mock output--!
+    Mock_Output = trim(Directory(1))//'Mock_Catalogues/'
+    write(*,'(2(A))') 'Mock catalogues stored at:', trim(Mock_Output)
+    inquire(directory = Mock_Output, exist = here)
+    if(here == .false.) call system('mkdir '//trim(Mock_Output))
+
 
     do nR = 1, nRun
        write(*,'(A)') '!##################################################################!'
@@ -380,9 +432,9 @@ contains
 
        !--Initialise Output--!
        if(nR==1) then
-          if(present(Mode_Variance_Out)) then
-             if(allocated(Mode_Variance_Out)) deallocate(Mode_Variance_Out)
-             allocate(Mode_Variance_Out(size(Cat_Ident), nAp)); Mode_Variance_Out = 0.e0_double
+          if(present(Mode_Error_Out)) then
+             if(allocated(Mode_Error_Out)) deallocate(Mode_Error_Out)
+             allocate(Mode_Error_Out(size(Cat_Ident), nAp)); Mode_Error_Out = 0.e0_double
           end if
           if(present(Bias_Mode_Out)) then
              if(allocated(Bias_Mode_Out)) deallocate(Bias_Mode_Out)
@@ -406,8 +458,29 @@ contains
              write(Run_Output_Directory, '(I2)') nR
           end if
           Run_Output_Directory = trim(Run_Parent_Directory)//trim(Run_Output_Directory)//'/'
-          
-          call Mass_Estimate_Single_Run(Cat_Ident(ID), Run_Output_Directory, Single_Run_Posterior, Blank_Field_Cat_Ident(ID), iClusters, Aperture_Radius)
+
+          !--Read in Mocks--!
+          call common_Catalogue_directories(Cat_Ident(ID), Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+          Catalogue_Directory = Mock_Output
+          call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+          if(Blank_Field_Cat_Ident(ID) == Cat_Ident(ID)) then
+             BFCat = Cat
+          else
+             call common_Catalogue_directories(Blank_Field_Cat_Ident(ID), Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+             Catalogue_Directory = Mock_Output
+             call catalogue_readin(BFCat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+          end if
+
+          if(nR==1) then
+             !--Create Distribution--!
+             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat, inBFCat = BFCat)
+          else
+             !--Distribution read in--!
+             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat)
+          end if
+!          call Mass_Estimate_Single_Run(Cat_Ident(ID), Run_Output_Directory, Single_Run_Posterior, Blank_Field_Cat_Ident(ID), iClusters, Aperture_Radius)
+          call Catalogue_Destruct(Cat); call Catalogue_Destruct(BFCat)
+
           Analyse_with_Physical_Sizes = tPhysical_Size
 
           if(nR ==1 .and. ID == 1) then
@@ -442,11 +515,12 @@ contains
        print *, 'Output Combined Posterior for Bias to: ', trim(Directory(ID))//'Bias_Combined_Posterior.dat' 
 
        allocate(Bias_Mode(nAp)); Bias_Mode = 0.e0_double
-       allocate(Mode_Variance(nAp)); Mode_Variance = 0.e0_double
+       allocate(Mode_Error(nAp)); Mode_Error = 0.e0_double
        open(unit = 51, file = trim(Directory(ID))//'BiasesAndErrorVariance.dat')
-       write(51, '(A)') '#Following is Mode of Combined Posterior and Variance of ML points of each run'
+       write(51, '(A)') '#Following is Mode of Combined Posterior and s.d. (error) of ML points of each run'
        write(51, '(A)') '#Difference between mode of Combined to known True Value gives indication of Bias'
-       write(51, '(A)') '#Variance of ML points gives indication on the relyability of the Errors from a single-run Bayesian Analysis'
+       write(51, '(A)') '#Error on ML points gives indication on the relyability of the Errors from a single-run Bayesian Analysis'
+       write(51, '(A)') '# Combined ML Point, Bias, S.D. (error) of ML points'
        
        write(*,'(A)') '!##################################################################!'
        write(*,'(A)') '!##################################################################!'
@@ -456,25 +530,28 @@ contains
           Area = 3.142e0_double*(D_l*((3.142e0_double*Cluster_Aperture_Radius(Ap))/180.e0_double))**2.e0_double
        
           call Posterior_Statistics(Combined_Posterior(Ap,1,:), Combined_Posterior(Ap,2,:), ModeVal = Bias_Mode(Ap))
-          Mode_Variance(Ap) = variance_discrete(ML_Point(Ap,:), ML_Point(Ap,:))
+          Mode_Error(Ap) = dsqrt(variance_discrete(ML_Point(Ap,:), ML_Point(Ap,:)))
 
           write(Bias_String, '(e10.4)') Bias_Mode(Ap)
-          write(Error_String, '(e10.4)') Mode_Variance(Ap)
+          write(Error_String, '(e10.4)') Mode_Error(Ap)
 
-          print *, 'Setting Bias Mode Out'
           if(present(Bias_Mode_Out)) Bias_Mode_Out(ID, Ap) = Bias_Mode(Ap)
-          if(present(Mode_Variance_Out)) Mode_Variance_Out(ID, Ap) = Mode_Variance(Ap)
+          if(present(Mode_Error_Out)) Mode_Error_Out(ID, Ap) = Mode_Error(Ap)
 
-          write(51,*) 'Cluster ', Ap, ' has Mode:', Bias_String
-          write(51,*) '     and variance:', Error_String
-          
+          write(51,'(I2,x,3(e10.4,x))') Ap, Bias_Mode(Ap), Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap), Mode_Error(Ap)
+
           write(*,*) 'Cluster ', Ap, ' has Mode:', Bias_String
           write(*,*) '     and variance:', Error_String
+
+          !--Calculate and output the parameter bias--!
+          write(Bias_String, '(e10.4)') Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap)
+          write(*,*) '     giving Bias:', Bias_String
+
        end do
        write(*,'(A)') '!##################################################################!'
        write(*,'(A)') '!##################################################################!'
        close(51)
-       deallocate(Bias_mode, Combined_Posterior, ML_Point, Mode_Variance)
+       deallocate(Bias_mode, Combined_Posterior, ML_Point, Mode_Error)
     end do
     deallocate(Posteriors)
     call Foreground_Destruct(iClusters)
@@ -482,13 +559,16 @@ contains
   end subroutine Posterior_Maximum_Likelihood_Bias_Error
 
 
-  subroutine Mass_Estimate_Single_Run(Cat_Ident, run_Output_Dir, returned_Cluster_Posteriors, Blank_Field_Cat_Ident, Clusters_In, Aperture_Radius)
-    use MC_Redshift_Sampling; use Bayesian_Routines
-    integer,intent(in)::Cat_Ident
+  subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
+    !--inBFCat or Blank_Field_Cat_Ident should contain/point ot catalogues from which the intrinsic size-magnitude distribution can be obtained. If neither of these are entered, then the code will attempt to read in the distribution from the run_Output_Dir--!
+    use MC_Redshift_Sampling; use Bayesian_Routines 
     real(double),allocatable,intent(out):: returned_Cluster_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-!
-    integer,intent(in)::Blank_Field_Cat_Ident
     type(Foreground):: Clusters_In
     real(double),intent(in):: Aperture_Radius(:)
+    character(*), intent(in):: Dist_Directory
+
+    integer,intent(in),optional::Cat_Ident, Blank_Field_Cat_Ident
+    type(Catalogue), intent(in),optional:: inCat, inBFCat
 
     character(*), intent(in):: run_Output_Dir
 
@@ -497,15 +577,33 @@ contains
     integer,dimension(:),allocatable::Catalogue_Cols
     logical::here
 
+    INTERFACE
+       subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
+         use Param_Types; use Foreground_Clusters; use Catalogues
+         real(double),allocatable,intent(out):: returned_Cluster_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-!
+         type(Foreground):: Clusters_In
+         real(double),intent(in):: Aperture_Radius(:)
+         character(*), intent(in):: run_Output_Dir
+         character(*), intent(in):: Dist_Directory
+
+         integer,intent(in),optional::Cat_Ident, Blank_Field_Cat_Ident
+         type(Catalogue), intent(in),optional:: inCat, inBFCat
+       END subroutine Mass_Estimate_Single_Run
+    END INTERFACE
+
     inquire(directory = trim(run_Output_Dir), exist = here)
     if(here == .false.) call system('mkdir '//trim(adjustl(run_Output_Dir)))
     Bayesian_Routines_Output_Directory = trim(run_Output_Dir)
 
-
-
     !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks_STAGES; 5:Mocks_COMBO!          
-    call common_Catalogue_directories(Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-    call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+    If(present(inCat)) then
+       Catt = inCat
+    elseif(present(Cat_Ident)) then 
+       call common_Catalogue_directories(Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+       call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+    else
+       STOP 'Single_Run - Either Cat_Ident of inCat must be specified'
+    end If
 
     call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
     if(Analyse_with_Physical_Sizes) then
@@ -514,21 +612,37 @@ contains
     call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
     call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
 
-    if(Blank_Field_Cat_Ident == Cat_Ident) then
-       BFCatt = Catt 
-    else
-       call common_Catalogue_directories(Blank_Field_Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-       call catalogue_readin(BFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
 
+    if(present(inBFCat) .or. present(Blank_Field_Cat_Ident)) then
+
+       !--Readin--!
+       if(present(inBFCat)) then
+          BFCatt = inBFCat
+       elseif(present(Blank_Field_Cat_Ident)) then
+          if(Blank_Field_Cat_Ident == Cat_Ident) then
+             BFCatt = Catt
+          else
+             call common_Catalogue_directories(Blank_Field_Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+             call catalogue_readin(BFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+          end if
+       else
+          STOP 'Error - Single_Run'
+       end if
+       
+       !--Cuts on Catalogue--!
        call Cut_by_Magnitude(BFCatt, 23.e0_double)
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
        end if
        call Cut_By_PhotoMetricRedshift(BFCatt, 0.21e0_double) !--Cut out foreground-
        call Cut_By_PixelSize(BFCatt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!
-    end if
 
-    call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Blank_Field_Catalogue = BFCatt)
+       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, Blank_Field_Catalogue = BFCatt)
+    else
+       !--If no Blank Field Information, then attempt a read in--!
+       print *, 'Bayesian_Routines_Output_Directory'
+       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory)
+    end if
 
     call catalogue_destruct(Catt); call catalogue_destruct(BFCatt)
     print *, 'Finished Single Run Normally'
