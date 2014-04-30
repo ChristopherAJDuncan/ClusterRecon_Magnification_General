@@ -248,13 +248,29 @@ contains
     print *, 'For catalogues:', Cat_Ident
     print *, 'And Blank Field Catalogues:', Blank_Field_Cat_Ident
 
+    !--Get The STAGES Clusters Biases--!
+    !--Read in STAGES lcuster file to get positions an ddefault parameter values--!
+    call get_Clusters(Cluster, '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini')
+    nParam = 1; nClusters = size(Cluster%Position,1)
+    allocate(Param_Bias_Mode(nParam, size(Cat_Ident), nClusters)); Param_Bias_Mode =0.e0_double
+    allocate(Param_Mode_Error(nParam, size(Cat_Ident), nClusters)); Param_Mode_Error =0.e0_double
+    allocate(ParameterValues(nParam,nClusters)); ParameterValues = 0.e0_double
+
+    allocate(Position(2*nClusters))
+    do i =1, size(Cluster%Position,1)
+       Position(2*i-1) = Cluster%Position(i,1); Position(2*i) = Cluster%Position(i,2)
+    end do
+    ParameterValues(1,:) = Cluster%DM_Profile_Parameter
+
+    !---Create the Parameter File----!
+    call create_ClusterFile(Mock_Cluster_Filename, nClusters, SMD_Type, Position, ParameterValues(1,:), (/Redshift/))
 
     !--Read in Cluster--!
     call get_Clusters(Cluster, Mock_Cluster_Filename)
-    allocate(ICluster_Aperture_Radius(size(Cluster%Position,1))); ICluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-! Default - 1/60
+    allocate(ICluster_Aperture_Radius(size(Cluster%Position,1))); ICluster_Aperture_Radius = Cluster_Aperture_Radius(1) !-Degrees-! Default - 1/60
 
     !--Run the Bias Routine---!
-    !--Bias_Mode and Mode_Variacne contain the variance in the DM model free parameter--!
+    !--Bias_Mode and Mode_Variacne contain the ML point and s.d. (error) in the DM model free parameter--!
 
     call Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Run_Directory, Blank_Field_Cat_Ident, Mock_Cluster_Filename, iCluster_Aperture_Radius, Bias_Mode, Mode_Error)
     
@@ -338,22 +354,6 @@ contains
     
     deallocate(Param_Bias_Mode, Param_Mode_Error, Position, ICluster_Aperture_Radius)
     print *, 'Finished Mock Cluster Bias Run'
-
-    !--Get The STAGES Clsuters Biases--!
-    call get_Clusters(Cluster, '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini')
-    nParam = 1; nClusters = size(Cluster%Position,1)
-    allocate(Position(2*nClusters))
-    do i =1, size(Clusters%Position,1)
-       Position(2*i-1) = Clusters%Position(i,1); Position(2*i) = Clusters%Position(i,2)
-    end do
-!    Position = (/ 149.1099,-9.9561, 148.9889,-9.9841, 149.1424,-10.1666, 148.9101,-10.1719 /)
-    allocate(Param_Bias_Mode(nParam, size(Cat_Ident), nClusters)); Param_Bias_Mode =0.e0_double
-    allocate(Param_Mode_Error(nParam, size(Cat_Ident), nClusters)); Param_Mode_Error =0.e0_double
-    allocate(ParameterValues(nParam,nClusters)); ParameterValues = 0.e0_double
-    !---Create the Parameter File----!
-    ParameterValues(1,:) = Clusters%DM_Profile_Parameter
-    call create_ClusterFile(Mock_Cluster_Filename, nClusters, SMD_Type, Position, ParameterValues(1,:), (/Redshift/))
-
 
     !--Plot Result--!
     do cid = 1, size(Run_Directory)

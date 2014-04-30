@@ -542,7 +542,7 @@ contains
 !    Survey_Magnitude_Limits = (/minval(PriorMagGrid), maxval(PriorMagGrid)/)
     Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/) !27.5
 !    Survey_Size_Limits = (/minval(PriorSizeGrid), maxval(PriorSizeGrid)/)
-    Survey_Size_Limits = (/3.e0_double, 100.e0_double/) 
+    Survey_Size_Limits = (/0.e0_double, 100.e0_double/) 
 
 
     !--Renormalise the prior within these size and magnitude limits--!
