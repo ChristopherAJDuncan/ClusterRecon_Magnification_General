@@ -19,7 +19,7 @@ module  Bayesian_Routines
   integer:: Posterior_Method = 2 !--Eventually pass in--!
   logical:: use_KDE_Smoothed_Distributions = .true.
   logical::use_lnSize_Prior = .false.
-    
+  real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
 
 contains
 
@@ -85,25 +85,27 @@ contains
        end do
     else
        print *, 'Combining using logs'
-       Combined_Posterior = 1.0e-100_double
-       Combined_Posterior = log(Combined_Posterior)
+       Combined_Posterior = -100_double
        do c = 1, size(Posteriors,1) !-Loop over galaxies-!
-          Combination_Normalisation = dlog(maxval(Posteriors(c,:)))!1.e0_double/size(Posteriors,1)
-          if(all(Posteriors(c,:) == 0.e0_double) .or. all(isNaN(Posteriors(c,:)))) then
+          !-Error Catching--!
+          if(all(Posteriors(c,:) == 1.e-75_double) .or. all(isNaN(Posteriors(c,:)))) then
              nPosteriorsSkipped = nPosteriorsSkipped + 1
              cycle
           end if
-!          where(Posteriors(c,:) /= 0.e0_double)
-             Combined_Posterior = Combined_Posterior + dlog(Posteriors(c,:)) - Combination_Normalisation
-!          end where
+          !--Sum log posteriors--!
+          where(Posteriors(c,:) == 0.e0_double)
+             Combined_Posterior = Combined_Posterior - 100.e0_double
+          elsewhere
+             Combined_Posterior = Combined_Posterior + dlog(Posteriors(c,:))
+          end where
+
              if(any(isNAN(Combined_Posterior(:)))) then
                 print *, 'Any NaNs in Combined Posterior?, galaxy:',c, any(isNAN(Combined_Posterior)), count(isNAN(Combined_Posterior) == .true.)
                 STOP
              end if
        end do
-       where(Combined_Posterior /= 0.e0_double)
-          Combined_Posterior = dexp(Combined_Posterior)
-       end where
+       !--Convert to PDF, not ln(PDF)--!
+       Combined_Posterior = dexp(Combined_Posterior - maxval(Combined_Posterior))
     end if
  
     if(any(isNAN(Combined_Posterior(:)))) then
@@ -493,7 +495,7 @@ contains
     real(double),allocatable:: Posterior_perGalaxy_Redshift(:,:,:) !-Galaxy, Posterior, Redshift-!
 
     !--Kappa dependant renormalisation--!
-    real(double),dimension(2):: Survey_Magnitude_Limits, Survey_Size_Limits !--User defined needs edit to below, these are set by default from distribution-!
+!!    real(double),dimension(2):: Survey_Magnitude_Limits, Survey_Size_Limits !--User defined needs edit to below, these are set by default from distribution-!
     real(double),dimension(2):: Renormalisation_Magnitude_Limits, Renormalisation_Size_Limits
     real(double),allocatable:: ConvergenceGrid(:), Renormalisation_by_Convergence(:), Convergence_Renorm_PerGalaxy(:,:)
     !vv Must be set here vv!
@@ -692,16 +694,16 @@ contains
              end select
              
              !--Construct Joint Size-Magnitde Prior which is renormalised according to the convergence value--!
-             Renormalisation_Size_Limits = Survey_Size_Limits/(1.e0_double+Effective_Convergence(c,i))
-             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.17e0_double*Effective_Convergence(c,i)
+             Renormalisation_Size_Limits = Survey_Size_Limits!/(1.e0_double+Effective_Convergence(c,i))
+             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits! + 2.17e0_double*Effective_Convergence(c,i)
 
-             Renorm = Linear_Interp(Effective_Convergence(c,i), ConvergenceGrid, Renormalisation_by_Convergence, ExValue = 1.e30_double)
-             if(Renorm == 0) then
-                Kappa_Renormalised_Prior = 0.e0_double
-             else
-                Kappa_Renormalised_Prior = Survey_Renormalised_Prior/Renorm
-             end if
-             Renorm = 0.e0_double
+!!$             Renorm = Linear_Interp(Effective_Convergence(c,i), ConvergenceGrid, Renormalisation_by_Convergence, ExValue = 1.e30_double)
+!!$             if(Renorm == 0) then
+!!$                Kappa_Renormalised_Prior = 0.e0_double
+!!$             else
+                Kappa_Renormalised_Prior = Survey_Renormalised_Prior!/Renorm
+!!$             end if
+!!$             Renorm = 0.e0_double
 
              
              select case (Posterior_Method)

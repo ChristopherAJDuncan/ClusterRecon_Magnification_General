@@ -92,6 +92,10 @@ module Catalogues
          Directory = 'Simulations/Output/'
          Filename = 'Mock_COMBO.cat'
          Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+      case(45) !--Combined STAGES and COMBO mock--!
+         Directory = 'Simulations/Output/'
+         Filename = 'Mock_STAGES+COMBO.cat'
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
       case(6) !--COMBO-17 RRG Sizes--!
          Directory = 'Catalogues/'
          Filename = 'RRG_COMBO-17_gsMag.pzcat'
@@ -108,6 +112,10 @@ module Catalogues
          Directory = 'Simulations/Output/'
          Filename = 'Mock_COMBO_Unlensed.cat'
          Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+      case(-45) !--Combined STAGES and COMBO mock--!
+         Directory = 'Simulations/Output/'
+         Filename = 'Mock_STAGES+COMBO.cat'
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
       case default
          print *, 'Catalogue Identifier:', Index
          STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
@@ -115,14 +123,24 @@ module Catalogues
 
       Directory = trim(Base_Directory)//trim(Directory)
 
-      inquire(file = trim(adjustl(Directory))//trim(adjustl(Filename)), exist = here)
-      if(here == .false.) then
-         print *, 'common_Catalogue_directories - Cannot find Catalogue, does it still exist?'
-         print *, trim(adjustl(Directory))//trim(adjustl(Filename))
-         STOP
-      END if
+!!$      inquire(file = trim(adjustl(Directory))//trim(adjustl(Filename)), exist = here)
+!!$      if(here == .false.) then
+!!$         print *, 'common_Catalogue_directories - Cannot find Catalogue, does it still exist?'
+!!$         print *, trim(adjustl(Directory))//trim(adjustl(Filename))
+!!$         STOP
+!!$      END if
 
     end subroutine common_Catalogue_directories
+
+    logical function check_Catalogue_Existence(Filename)
+      character(*)::Filename
+
+      logical::here
+
+      inquire(File = Filename, exist = here)
+      check_Catalogue_Existence = here
+    end function check_Catalogue_Existence
+      
 
     !---Catalogue Binning Routines----!
     subroutine Calculate_Bin_Limits_by_equalNumber(Array, nBin, Limits)
@@ -954,6 +972,11 @@ module Catalogues
          else
             allocate(iCols(size(Cols))); iCols = Cols
          end if
+      end if
+
+      if(check_Catalogue_Existence(trim(adjustl(Cat_Filename))) == .false.) then
+         print *, 'Catalogue:', trim(adjustl(Cat_Filename))
+         STOP 'Catalogue readin: Catalogue does not exist'
       end if
 
       !--Read into 2D format--!
