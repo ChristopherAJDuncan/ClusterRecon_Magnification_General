@@ -979,6 +979,8 @@ module Catalogues
          STOP 'Catalogue readin: Catalogue does not exist'
       end if
 
+      print *, 'Creating Catalogues with Cols:', iCols
+
       !--Read into 2D format--!
       call ReadIn(Cat_2D, filename  = trim(adjustl(Cat_Filename)), tabbed = .false., header_label = '#')
       !--This outputs as Cat2D(cols, rows), so 2nd dimension lists all galaxies in catalogue--!

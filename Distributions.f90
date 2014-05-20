@@ -588,7 +588,7 @@ contains
           deallocate(Data_Vectors)
 
           allocate(Smoothed_PDF(size(Smoothed_Grid_Mag), size(Smoothed_Grid_Size))); Smoothed_PDF = 0.e0_double
-          call KDE_Bivariate_Gaussian(TCatMags, TCatSizes, Smoothed_Grid_Mag, Smoothed_Grid_Size, Smoothed_PDF, Covar = KDE_Gaussian_Covariance)
+          call KDE_Bivariate_Gaussian(TCatMags, TCatSizes, Smoothed_Grid_Mag, Smoothed_Grid_Size, Smoothed_PDF, Covariance = KDE_Gaussian_Covariance)
           deallocate(KDE_Gaussian_Covariance)
 
           !--Renormalise--!

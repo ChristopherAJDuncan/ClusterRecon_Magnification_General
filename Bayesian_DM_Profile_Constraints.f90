@@ -96,7 +96,8 @@ program Bayesian_DM_Profile_Constraints
 
 
    call get_Clusters(Clusters, Cluster_Filename)
-   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
+   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-! Default - 1/60
+   write(*,'(A)') 'Aperture Radius HAS BEEN SET OT 1 ARCMINUTE'
    call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
 
 
@@ -500,13 +501,13 @@ contains
              call catalogue_readin(BFCat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
           end if
 
-          if(nR==1) then
-             !--Create Distribution--!
+!!$          if(nR==1) then
+!!$             !--Create Distribution--!
              call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat, inBFCat = BFCat)
-          else
+!!$          else
              !--Distribution read in--!
-             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat)
-          end if
+!!$             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat)
+!!$          end if
 !          call Mass_Estimate_Single_Run(Cat_Ident(ID), Run_Output_Directory, Single_Run_Posterior, Blank_Field_Cat_Ident(ID), iClusters, Aperture_Radius)
           call Catalogue_Destruct(Cat); call Catalogue_Destruct(BFCat)
 
