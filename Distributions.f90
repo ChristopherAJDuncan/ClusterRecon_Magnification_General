@@ -134,11 +134,17 @@ contains
     
     real(double):: zmed, alpha = 2.e0_double, beta = 1.5e0_double
 
+    integer:: j
+
     if(allocated(PDF)) deallocate(PDF)
     allocate(PDF(size(Grid))); PDF = 0.e0_double
 
     zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
-    if(zmed < 0.e0_double) STOP 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
+    if(zmed < 0.e0_double) then
+       print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
+       print *, 'zmed, m:', zmed, Apparent_Magnitude
+       STOP
+    end if
 
     call Analytic_Source_Redshift_Distribution(alpha, beta, zmed, Grid, PDF)
 
@@ -153,7 +159,11 @@ contains
     real(double):: z_0, Norm
 
     zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
-    if(zmed < 0.e0_double) STOP 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
+    if(zmed < 0.e0_double) then
+       print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
+       print *, 'zmed, m:', zmed, Apparent_Magnitude
+       STOP
+    end if
 
     z_0 = zmed/1.412e0_double
     Norm = (beta/(z_0*dexp(gammln( (alpha+1.e0_double)/(beta) ))))
@@ -500,9 +510,14 @@ contains
     real(double),allocatable:: Histogram_SizeOnly_PDF(:), Histogram_MagOnly_PDF(:)
     real(double),allocatable:: Histogram_MagGrid(:), Histogram_SizeGrid(:)
     
+    logical:: here
 
     iOutput_Dir = 'Distributions/'
     if(present(Output_Dir)) iOutput_Dir = Output_Dir
+
+    inquire(Directory = trim(iOutput_Dir), exist = here)
+    if(here == .false.) call system('mkdir '//trim(iOutput_Dir))
+
     iln_size_Distribution = .false.
     if(present(ln_size_Distribution)) iln_size_Distribution = ln_size_Distribution
 
@@ -645,7 +660,7 @@ contains
 
 
     !--Get the Histogram--!
-    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Histogram_SizeGrid, Histogram_PDF, RefCat, use_Physical_sizes,  Magnitude_Type, iOutput_Dir, iln_size_Distribution, SizeBins, Renormalise = .false.)
+    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Histogram_SizeGrid, Histogram_PDF, RefCat, use_Physical_sizes,  Magnitude_Type, iOutput_Dir, iln_size_Distribution, SizeBins, Renormalise = .false., KDE_Smooth = .false.)
 
     !--Output--!
     allocate(Histogram_sizeOnly_PDF(size(Histogram_SizeGrid))); Histogram_sizeOnly_PDF = 0.e0_double

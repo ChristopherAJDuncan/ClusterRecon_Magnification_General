@@ -8,15 +8,15 @@ CWD = os.getcwd()
 Program_Pathway = '/disk1/cajd/Size_Magnification/'
 
 # Where Do Run == 0, this run is ignored #
-Do_Run = [1,1,0,0,0,0]
+Do_Run = [0,0,0,0,1,0]
 
 ## THERE MUST NOT BE A TRAILING '/' IN THESE DIRECTORY DECLARATIONS
 Output_Paths = [Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleA901a_Bias/STAGES+COMBO/Bias', \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeOnly/SingleA901a_Bias/STAGES+COMBO/Bias', \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeOnly/SingleA901a_Bias/COMBO/Prior_Redshift_Sensitivity/Bias', \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeOnly/SingleA901a_Bias/STAGES/Prior_Redshift_Sensitivity/Bias', \
-                Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleA901a_Bias/COMBO/Prior_Redshift_Sensitivity/Bias', \
-                Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleA901a_Bias/STAGES/Prior_Redshift_Sensitivity/Bias']
+                Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleA901a_Bias/COMBO//Revert_6_KappaRenormON_6Mock_fracz1/Bias', \
+                Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleA901a_Bias/STAGES/Revert_6_KappaRenormON_6Mock/Bias']
 
 Cluster_Pathway = Program_Pathway+'Cluster_Parameters'
 Cluster_Filename = 'STAGES_A901a.ini'

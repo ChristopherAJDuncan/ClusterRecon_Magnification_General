@@ -17,7 +17,7 @@ module  Bayesian_Routines
 
   !--Method: 1: Size-Only, 2: Size-Magnitude--!
   integer:: Posterior_Method = 2 !--Eventually pass in--!
-  logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .true.
+  logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false.
   logical::use_lnSize_Prior = .false.
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
 
@@ -277,18 +277,11 @@ contains
        call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i))
     end do
 
-    !--Get Prior Distributions--!
-    print *, count(Cat%Redshift >= 0.e0_double), ' of ',size(Cat%Redshift), ' galaxies have redshift information'
+    do i =1, size(Ap_Cats)
+       print *, 'Aperture:', i, ' contains:', size(Ap_Cats(I)%RA), ' galaxies'
+    end do
 
-    !--Not used anymore---!
-!!$    if(Magnitude_Binning_Type == 1) then
-!!$       call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMag, MagBins)
-!!$    elseif(Magnitude_Binning_Type == 2) then
-!!$       call Calculate_Bin_Limits_by_equalNumber(Cat%MF606W, nMag, MagBins)
-!!$    else
-!!$       STOP 'DM_Profile_Variable_Posteriors_CircularAperture - Invalid Magnitude Type Specified stopping...'
-!!$    END if
-    !^^^^^^^^^^^^^^^^^^^!
+    print *, count(Cat%Redshift >= 0.e0_double), ' of ',size(Cat%Redshift), ' galaxies have redshift information'
 
     !--If a catalogue for the blank field is passed in, then use this catalogue to get the intrinsic distributions--!
 
@@ -299,6 +292,7 @@ contains
        else
           write(*,'(A)') 'Reading in distribution from:', Distribution_Directory
           call return_Size_Magnitude_Distribution(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Distribution_Directory)
+          print *, 'Success:', Distribution_Directory
        end if
     else
        print *, ' '
@@ -315,7 +309,7 @@ contains
        if(KDE_OnTheFly) then
           call DM_Profile_Variable_Posterior_Catalogue(Ap_Cats(Ap), Surface_Mass_Profile, Blank_Field_Catalogue, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior) 
        else
-          call DM_Profile_Variable_Posterior(BCat%Cat(m), Surface_Mass_Profile, MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior)  
+          call DM_Profile_Variable_Posterior(Ap_Cats(Ap), Surface_Mass_Profile, MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior)  
        end if
 
        if(Ap == 1) allocate(Posteriors(size(Ap_Cats), 2, size(Posterior_Single,2)))
@@ -658,16 +652,18 @@ contains
              end select
              
              !--Construct Joint Size-Magnitde Prior which is renormalised according to the convergence value--!
-             Renormalisation_Size_Limits = Survey_Size_Limits!/(1.e0_double+Effective_Convergence(c,i))
-             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits! + 2.17e0_double*Effective_Convergence(c,i)
+             !-if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED OFF'
+             if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED ON'
+             Renormalisation_Size_Limits = Survey_Size_Limits/(1.e0_double+Effective_Convergence(c,i))
+             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.17e0_double*Effective_Convergence(c,i)
 
-!!$             Renorm = Linear_Interp(Effective_Convergence(c,i), ConvergenceGrid, Renormalisation_by_Convergence, ExValue = 1.e30_double)
-!!$             if(Renorm == 0) then
-!!$                Kappa_Renormalised_Prior = 0.e0_double
-!!$             else
-                Kappa_Renormalised_Prior = Survey_Renormalised_Prior!/Renorm
-!!$             end if
-!!$             Renorm = 0.e0_double
+             Renorm = Linear_Interp(Effective_Convergence(c,i), ConvergenceGrid, Renormalisation_by_Convergence, ExValue = 1.e30_double)
+             if(Renorm == 0) then
+                Kappa_Renormalised_Prior = 0.e0_double
+             else
+                Kappa_Renormalised_Prior = Survey_Renormalised_Prior/Renorm
+             end if
+             Renorm = 0.e0_double
 
              
              select case (Posterior_Method)
@@ -675,10 +671,15 @@ contains
                 !--Evaluate p_{theta_0, m_0}*p_{z|m_0} for the whole magnitude grid
                 do m =  1, size(PriorMagGrid)
                    !--m_0, theta_0--!
-                   if(Known_Redshift) then
-                      Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)
+                   if((PriorMagGrid(m) < Renormalisation_Magnitude_Limits(1)) .or. (PriorMagGrid(m) > Renormalisation_Magnitude_Limits(2))) then
+                      !-Since Integrand does not extend over this region anyway-!
+                      Size_Only_Mag_Prior(m,:) = 1.e-100_double
                    else
-                      Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*CH08_Redshift_Distribution_Scalar(PriorMagGrid(m), RedshiftGrid(z))
+                      if(Known_Redshift) then
+                         Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)
+                      else
+                         Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*CH08_Redshift_Distribution_Scalar(PriorMagGrid(m), RedshiftGrid(z))
+                      end if
                    end if
                 end do
 
@@ -1412,7 +1413,7 @@ contains
     if(present(BFCat)) then
        print *, 'Producing Joint Size Magnitude Distribution from Catalogue'
 
-       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, BFCat, use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = ido_KDE)
+       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, BFCat, use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = ido_KDE)
        !--Output (matches the method of output used above)--!
        Output_Filename = trim(Dir)//trim(Filename)
        open(unit = 45, file = Output_Filename)

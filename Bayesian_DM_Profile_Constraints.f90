@@ -12,6 +12,9 @@ program Bayesian_DM_Profile_Constraints
    integer:: Bin_By_Magnitude_Type = 2 !-1:Absolute Magnitude, 2: Apparent Magnitude-!
    integer:: Run_Type = 1 !-1:SingleRun, 2:Bias And Error-!
    logical:: ReRun_Mocks = .false.
+   character(500):: Distribution_Input = ' '
+   logical::ReEvaluate_Distribution = .true.
+
 
    type(Foreground):: Clusters
 !   real(double)::Lens_Redshift = 0.165e0_double
@@ -96,7 +99,7 @@ program Bayesian_DM_Profile_Constraints
 
 
    call get_Clusters(Clusters, Cluster_Filename)
-   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 1.e0_double/60.e0_double !-Degrees-! Default - 1/60
+   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
    write(*,'(A)') 'Aperture Radius HAS BEEN SET OT 1 ARCMINUTE'
    call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
 
@@ -164,6 +167,8 @@ contains
     namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks
 
+    namelist/Distribution/Distribution_Input, ReEvaluate_Distribution
+
     !--Check for existence of Input File
     inquire(file = Input_File, exist = Here)
     if(here == .false.) then 
@@ -175,6 +180,7 @@ contains
 
     read(92, nml = Run)
     read(92, nml = Mocks)
+    read(92, nml = Distribution)
 
     close(92)
 
@@ -501,14 +507,30 @@ contains
              call catalogue_readin(BFCat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
           end if
 
+          !--Decide between reading in the distribution (only Directory can be specified) or reevaluating the distribution from the input catalogue--!
+          !--In future, would want to pull the reda in out so that it will only be done once, or at least at Single_Mass_Run level, rather than in Bayesian_Routines--!
+          if((nR==1 .and. ReEvaluate_Distribution) .or. (KDE_OnTheFly)) then
+             PRINT *, 'REEVALUATING DISTRIBUTION'
+             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat, inBFCat = BFCat)
+             Distribution_Input = Directory(ID)
+          else
+             PRINT *, 'READING IN DIST'
+             !--Read in--! - Filename is set by return_size..., with no freedom here to avoid inaccuracies in the input
+             if(trim(Distribution_Input) == ' ') STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) is empty'
+             inquire(Directory = trim(Distribution_Input), exist = here)
+             if(here==.false.) STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) does not exist'
+             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Distribution_Input, inCat = Cat)
+          end if
+!--OBSOLETE--
 !!$          if(nR==1) then
 !!$             !--Create Distribution--!
-             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat, inBFCat = BFCat)
+!             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat, inBFCat = BFCat)
 !!$          else
              !--Distribution read in--!
 !!$             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat)
 !!$          end if
 !          call Mass_Estimate_Single_Run(Cat_Ident(ID), Run_Output_Directory, Single_Run_Posterior, Blank_Field_Cat_Ident(ID), iClusters, Aperture_Radius)
+!-----------
           call Catalogue_Destruct(Cat); call Catalogue_Destruct(BFCat)
 
           Analyse_with_Physical_Sizes = tPhysical_Size
@@ -590,7 +612,12 @@ contains
 
           !--Calculate and output the parameter bias--!
           write(Bias_String, '(e10.4)') Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap)
-          write(*,'(3A,e9.3)') '     giving Bias:', Bias_String, ' B/N:', (Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap))/minval(eCombined_Posterior)
+          if(Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap) < 0.e0_double) then
+             write(*,'(3A,e9.3)') '     giving Bias:', Bias_String, ' B/N:', (Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap))/eCombined_Posterior(2)
+          else
+             write(*,'(3A,e9.3)') '     giving Bias:', Bias_String, ' B/N:', (Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap))/eCombined_Posterior(1)
+          end if
+
 
           write(*,'(A,e10.4,A,e10.4,A,e10.4)') 'and Virial Mass:', Virial_Mass, ' + ', eVirial_Mass(2), ' - ', eVirial_Mass(1)
           call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Bias_Mode(Ap), (/Mode_Error(Ap),Mode_Error(Ap)/), Virial_Mass, eVirial_Mass, iClusters%Redshift(Ap))
