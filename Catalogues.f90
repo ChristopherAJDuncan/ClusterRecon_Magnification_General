@@ -69,10 +69,11 @@ module Catalogues
       allocate(Columns(15)); Columns = 0
 
       select case(Index)
-      case(1) !-Full STAGES catalogue--!
+      case(1) !-Full STAGES+COMBO matched catalogue--!
+         !--Size Cases: 9(FR), 10(FWHM), 18(RRG_Tr), 19(RRG_det)
          Directory = 'Catalogues/'
-         Filename = 'STAGES_shear.cat'
-         Columns = (/-1,1,2,3,4,5,-1,6,7,8,9,11,19,20,-1/)
+         Filename = 'STAGES+COMBO_KSBf90_RRG.pzcat'
+         Columns = (/-1,-1,7,8,5,6,23,4,-1,3,-1,18,-1,-1,22/)
       case(2) !--COMBO17 redshift - Matched to STAGES--!
          Directory = 'Catalogues/'
          Filename = 'STAGES_COMBO-17_Matched_20140304.pzcat'
@@ -82,7 +83,7 @@ module Catalogues
 !!$         Columns = (/-1,10,11,-1,-1,8,12,-1,-1,-1,14,16,17,5/) !-12 (ST_Mag) could alos be 3 (ST_Mag_Best)
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
-         Filename =  'SExtractor_RRG.cat'
+         Filename =  'STAGES_KSBf90_RRG.cat'
          Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
@@ -114,7 +115,7 @@ module Catalogues
          Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
       case(-45) !--Combined STAGES and COMBO mock--!
          Directory = 'Simulations/Output/'
-         Filename = 'Mock_STAGES+COMBO.cat'
+         Filename = 'Mock_STAGES+COMBO_Unlensed.cat'
          Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
       case default
          print *, 'Catalogue Identifier:', Index

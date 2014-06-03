@@ -22,6 +22,7 @@ program Bayesian_DM_Profile_Constraints
     !----Mock Parameters-------!
     integer:: nSources = 70000
     real(double)::frac_z = 0.1e0_double
+    integer:: nRealisations = 20
 
    !--Command Line Argument Entry--!                
    integer::narg, i
@@ -134,7 +135,12 @@ program Bayesian_DM_Profile_Constraints
   select case(Run_Type)
   case(1)
      print *, '!---- Producing a single Mass Estimate:'
-     call Mass_Estimate_Single_Run(Output_Directory, Cluster_Posteriors, Clusters, Cluster_Aperture_Radius, Dist_Directory = Output_Directory, Cat_Ident = Catalogue_Identifier(1), Blank_Field_Cat_Ident = Blank_Field_Catalogue_Identifier(1))
+     if(ReEvaluate_Distribution) then
+        call Mass_Estimate_Single_Run(Output_Directory, Cluster_Posteriors, Clusters, Cluster_Aperture_Radius, Dist_Directory = Output_Directory, reconstruct_Prior = .true., Cat_Ident = Catalogue_Identifier(1), Blank_Field_Cat_Ident = Blank_Field_Catalogue_Identifier(1))
+     else
+        if(trim(Distribution_Input) == ' ') STOP 'Run 1: Distribution not entered'
+        call Mass_Estimate_Single_Run(Output_Directory, Cluster_Posteriors, Clusters, Cluster_Aperture_Radius, Dist_Directory = Distribution_Input, reconstruct_Prior = .false., Cat_Ident = Catalogue_Identifier(1), Blank_Field_Cat_Ident = Blank_Field_Catalogue_Identifier(1))
+     end if
   case(2)
      !--Set Output Directory Names--!
      allocate(Bias_Output_Directory(size(Catalogue_Identifier))); Bias_Output_Directory = ' '
@@ -165,7 +171,7 @@ contains
     logical:: here
 
     namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits
-    namelist/Mocks/ nSources, frac_z, ReRun_Mocks
+    namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations
 
     namelist/Distribution/Distribution_Input, ReEvaluate_Distribution
 
@@ -219,7 +225,6 @@ contains
     integer::nParam = 6
     real(double):: Param_Min = 0.5, Param_Max = 2.5
 
-    integer:: nRun
 
     character(120):: Run_Directory(size(Directory))
 
@@ -386,7 +391,6 @@ contains
 
     character(200)::Run_Output_Directory, Run_Parent_Directory
     integer::nR
-    integer::nRun = 20
 
     integer::Ap, nAp, Id
 
@@ -437,7 +441,7 @@ contains
        write(*,'(2(A))') 'Mock catalogues read in from:', trim(Mock_Input_Parent)
     end if
 
-    do nR = 1, nRun
+    do nR = 1, nRealisations
        write(*,'(A)') '!##################################################################!'
        write(*,'(A, I3)') '!------------------------------------------------------Run', nR
 
@@ -511,7 +515,7 @@ contains
           !--In future, would want to pull the reda in out so that it will only be done once, or at least at Single_Mass_Run level, rather than in Bayesian_Routines--!
           if((nR==1 .and. ReEvaluate_Distribution) .or. (KDE_OnTheFly)) then
              PRINT *, 'REEVALUATING DISTRIBUTION'
-             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), inCat = Cat, inBFCat = BFCat)
+             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Directory(ID), reconstruct_Prior = .true., inCat = Cat, inBFCat = BFCat)
              Distribution_Input = Directory(ID)
           else
              PRINT *, 'READING IN DIST'
@@ -519,7 +523,7 @@ contains
              if(trim(Distribution_Input) == ' ') STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) is empty'
              inquire(Directory = trim(Distribution_Input), exist = here)
              if(here==.false.) STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) does not exist'
-             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Distribution_Input, inCat = Cat)
+             call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Distribution_Input, reconstruct_Prior = .false., inCat = Cat, inBFCat = BFCat)
           end if
 !--OBSOLETE--
 !!$          if(nR==1) then
@@ -536,7 +540,7 @@ contains
           Analyse_with_Physical_Sizes = tPhysical_Size
 
           if(nR ==1 .and. ID == 1) then
-             allocate(Posteriors(size(Cat_Ident),nRun, size(Single_Run_Posterior,1), size(Single_Run_Posterior,2), size(Single_Run_Posterior,3))); Posteriors = 0.e0_double
+             allocate(Posteriors(size(Cat_Ident),nRealisations, size(Single_Run_Posterior,1), size(Single_Run_Posterior,2), size(Single_Run_Posterior,3))); Posteriors = 0.e0_double
           end if
           Posteriors(ID,nR,:,:,:) = Single_Run_Posterior
           
@@ -546,12 +550,12 @@ contains
 
     !--Combine Posteriors and Get ML Point for Combined_Posteriors--!
     do ID = 1, size(Cat_Ident)
-       allocate(ML_Point(nAp, nRun)); ML_Point = 0.e0_double
+       allocate(ML_Point(nAp, nRealisations)); ML_Point = 0.e0_double
        allocate(Combined_Posterior(nAp, 2, size(Posteriors,5))); Combined_Posterior = 0.e0_double
 
        Combined_Posterior(:,1,:) = Posteriors(1,1,:,1,:)
        do Ap = 1, nAp
-          do nR = 1, nRun
+          do nR = 1, nRealisations
              call Posterior_Statistics(Posteriors(ID,nR,Ap,1,:), Posteriors(ID,nR,Ap,2,:), ModeVal = ML_Point(Ap,nR))
           end do
           call Combine_Posteriors(Posteriors(ID,1,Ap,1,:), Posteriors(ID,:,Ap,2,:), .true., Combined_Posterior(Ap,2,:))
@@ -571,7 +575,8 @@ contains
        open(unit = 51, file = trim(Directory(ID))//'BiasesAndErrorVariance.dat')
        write(*,'(2(A))') '!------ Details of Biases output to ', trim(Directory(ID))//'BiasesAndErrorVariance.dat'
        write(51, '(A)') '#Following is Mode and Error around Mode of Combined Posterior:'
-       write(51, '(A)') '#Aperture, Combined_Mode, Bias, Error(+ve/-ve), Input_Virial_Mass, Virial_Mass_Bias, Error_Virial_Mass(+ve/-ve)'
+       write(51, '(A)') '#Bias is Recovered-Input'
+       write(51, '(A)') '#Aperture, Recovered_Virial_Radius, Bias, Error(+ve/-ve), Recovered_Virial_Mass, Virial_Mass_Bias, Error_Virial_Mass(+ve/-ve)'
        write(51, '(A)') '#Difference between mode of Combined to known True Value gives indication of Bias'!       write(51, '(A)') '#Error on ML points gives indication on the relyability of the Errors from a single-run Bayesian Analysis'
 !       write(51, '(A)') '# Combined ML Point, Bias, S.D. (error) of ML points'
        
@@ -607,7 +612,7 @@ contains
 
           write(Bias_String, '(e10.4)') Bias_Mode(Ap)
           write(Error_String, '(e10.4)') Mode_Error(Ap)
-          write(*,'(A,I2,A,A,A,e10.4,A,e10.4)') 'Cluster ', Ap, ' has Mode:', Bias_String, ' + ',eCOmbined_Posterior(2), ' - ', eCombined_Posterior(1)
+          write(*,'(A,I2,A,A,A,e10.4,A,e10.4)') 'Cluster ', Ap, ' has Mode:', Bias_String, ' + ',eCombined_Posterior(2), ' - ', eCombined_Posterior(1)
           write(*,'(A,A)') ' and ML-Error:', Error_String
 
           !--Calculate and output the parameter bias--!
@@ -636,13 +641,14 @@ contains
   end subroutine Posterior_Maximum_Likelihood_Bias_Error
 
 
-  subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
+  subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, reconstruct_Prior, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
     !--inBFCat or Blank_Field_Cat_Ident should contain/point ot catalogues from which the intrinsic size-magnitude distribution can be obtained. If neither of these are entered, then the code will attempt to read in the distribution from the run_Output_Dir--!
-    use MC_Redshift_Sampling; use Bayesian_Routines 
+    use MC_Redshift_Sampling; use Bayesian_Routines; use Mass_Profiles
     real(double),allocatable,intent(out):: returned_Cluster_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-!
     type(Foreground):: Clusters_In
     real(double),intent(in):: Aperture_Radius(:)
     character(*), intent(in):: Dist_Directory
+    logical, intent(in):: reconstruct_Prior
 
     integer,intent(in),optional::Cat_Ident, Blank_Field_Cat_Ident
     type(Catalogue), intent(in),optional:: inCat, inBFCat
@@ -654,14 +660,22 @@ contains
     integer,dimension(:),allocatable::Catalogue_Cols
     logical::here
 
+    !--Output Declarations
+    real(double)::D_l, Area
+    real(double),allocatable::Cluster_Mean(:), Cluster_Variance(:), Cluster_Mode(:), AntiSymm_Variance(:,:)
+    real(double):: Virial_Mass_Input, Virial_Mass, Virial_Mass_Error(2), Discardable(2)
+    character(10):: Mass_String, Error_Mass_String_Positive, Error_Mass_String_Negative
+    integer::Ap
+
     INTERFACE
-       subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
+       subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, reconstruct_Prior, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
          use Param_Types; use Foreground_Clusters; use Catalogues
          real(double),allocatable,intent(out):: returned_Cluster_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-!
          type(Foreground):: Clusters_In
          real(double),intent(in):: Aperture_Radius(:)
          character(*), intent(in):: run_Output_Dir
          character(*), intent(in):: Dist_Directory
+         logical, intent(in):: reconstruct_Prior
 
          integer,intent(in),optional::Cat_Ident, Blank_Field_Cat_Ident
          type(Catalogue), intent(in),optional:: inCat, inBFCat
@@ -699,7 +713,7 @@ contains
        end if
 
        !--Cuts on data catalogue--!
-       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+!       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
        end if
@@ -715,14 +729,69 @@ contains
 !!$       call Cut_By_PhotoMetricRedshift(BFCatt, 0.21e0_double) !--Cut out foreground-
 !!$       call Cut_By_PixelSize(BFCatt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!
 
-       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, Blank_Field_Catalogue = BFCatt)
+       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
     else
+
+       !--Cuts on data catalogue--!
+       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+       if(Analyse_with_Physical_Sizes) then
+          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
+       end if
+       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
+
        !--If no Blank Field Information, then attempt a read in--!
-       print *, 'Bayesian_Routines_Output_Directory'
-       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory)
+       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
     end if
 
     call catalogue_destruct(Catt); call catalogue_destruct(BFCatt)
+
+    !--Output--!
+!!$
+    allocate(Cluster_Mean(size(Returned_Cluster_Posteriors,1))); Cluster_Mean = 0.e0_double
+    allocate(Cluster_Mode(size(Returned_Cluster_Posteriors,1))); Cluster_Mode = 0.e0_double
+    allocate(Cluster_Variance(size(Returned_Cluster_Posteriors,1))); Cluster_Variance = 0.e0_double
+    allocate(AntiSymm_Variance(size(Returned_Cluster_Posteriors,1),2)); AntiSymm_Variance = 0.e0_double
+    
+    open(51, file = trim(Bayesian_Routines_Output_Directory)//'Mass_Estimates.dat')
+    write(51, '(A)') '# Cluster, Input_Alpha, Mode Alpha(DM free parameter), Alpha Error (+/-), Input Virial Mass, Virial_Mass (Mode), Mode Mass Error (+/-)'
+    
+    print *, '!----------------------------------------------------------------------------------!'
+    do Ap = 1, size(Returned_Cluster_Posteriors,1)
+       !--Get Mean, Mode, Variance--!                                                                                                                                                                              
+       call Posterior_Statistics(Returned_Cluster_Posteriors(Ap,1,:), Returned_Cluster_Posteriors(Ap,2,:), Cluster_Mean(Ap), Cluster_Mode(Ap), Cluster_Variance(Ap), AntiSymm_Variance(Ap,:))
+       if(Surface_Mass_Profile == 1) then
+          !--Convert into the correct units (i.e. Msun/h)--!                                                                                                                                                       
+          Cluster_Mean(Ap) = 1.e18_double*Cluster_Mean(Ap); Cluster_Mode(Ap) =  1.e18_double*Cluster_Mode(Ap); Cluster_Variance(Ap) = 1.e18_double*Cluster_Variance(Ap); AntiSymm_Variance(Ap,:) = 1.e18_double*AntiSymm_Variance(Ap,:)
+       end if
+
+       D_l =  angular_diameter_distance_fromRedshift(0.e0_double, Clusters_In%Redshift(Ap))
+!       Area = 3.142e0_double*(D_l*((3.142e0_double*Ap_Radius(Ap))/180.e0_double))**2.e0_double
+       !       print *, 'Typical Conversion from Sigma to Mass (x10^18 Msun/h):', Area                                                                                                                                    
+       write(Error_Mass_String_Positive, '(e8.2)') AntiSymm_Variance(Ap,2); write(Error_Mass_String_Negative, '(e8.2)') AntiSymm_Variance(Ap,1)
+       write(Mass_String, '(e9.3)') Cluster_Mean(Ap)
+       if(Surface_Mass_Profile == 1) write(*,'(A,I2,6(A))') 'Sigma_0 of Cluster :', Ap, ', is (Mean): ', trim(Mass_String), '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative
+       if(Surface_Mass_Profile == 2) write(*,'(A,I2,6(A))') 'Velocity Dispersion of Cluster :', Ap, ', is (Mean): ', trim(Mass_String), '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative
+       if(Surface_Mass_Profile == 3) write(*,'(A,I2,6(A))') 'Virial Radius of Cluster :', Ap, ', is (Mean): ', trim(Mass_String), '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative
+       
+       write(Mass_String, '(e9.3)') Cluster_Mode(Ap)
+       write(*,'(7(A),e9.3)') '                                   and (Mode): ', trim(Mass_String), '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative, ' S/N:', Cluster_Mode(Ap)/AntiSymm_Variance(Ap,1)
+
+       !--Get Mode Virial Mass--!                                                                                                                                                                               
+       call  Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Cluster_Mode(Ap), AntiSymm_Variance(Ap,:), Virial_Mass, Virial_Mass_Error, Redshift = Clusters_In%Redshift(Ap))
+       write(Mass_String, '(e9.3)') Virial_Mass; write(Error_Mass_String_Positive, '(e8.2)') Virial_Mass_Error(2); write(Error_Mass_String_Negative, '(e8.2)') Virial_Mass_Error(1)
+       write(*,'(7A, e9.3)') "Virial Mass of Cluster (Mode):", Mass_String, '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative, ' S/N:', Virial_Mass/Virial_Mass_Error(1)
+       print *, ' '
+
+       !--Mass of Input--!                                                                                                                                                                                     
+       call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Clusters%DM_Profile_Parameter(Ap), (/0.e0_double, 0.e0_double/), Virial_Mass_Input, Discardable, Clusters_In%Redshift(Ap))
+       
+       write(51, '(I2,x,8(e9.3,x))') Ap, Clusters%DM_Profile_Parameter(Ap),  Cluster_Mode(Ap), AntiSymm_Variance(Ap,2), AntiSymm_Variance(Ap,1), Virial_Mass_Input, Virial_Mass,  Virial_Mass_Error(2), Virial_Mass_Error(1) 
+    end do
+    print *, '!----------------------------------------------------------------------------------!'
+    close(51)
+!!$
+
 
     print *, 'Finished Single Run Normally'
 

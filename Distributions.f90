@@ -486,6 +486,7 @@ contains
     !----Binning Decalarations-----!
     integer,parameter::nSizes = 60, nMags = 60
     real(double):: Lower, Higher, dParam
+    real(double):: Mag_Limit_Convergence_Buffer = 0.3e0_double
     real(double),allocatable,dimension(:,:):: SizeBins, MagBins
 
     integer:: I,J
@@ -499,7 +500,7 @@ contains
     !--Smoothed Version--!
     real(double),allocatable::Smoothed_Grid_Size(:), Smoothed_Grid_Mag(:), Smoothed_PDF(:,:)
     real(double):: Sig = 0.5e0_double !-Want a different width for magnitude and size?
-    integer:: nSmoothed_Sampling = 100, nSmoothed_Sampling_Mag = 100
+    integer:: nSmoothed_Sampling = 100, nSmoothed_Sampling_Mag = 110
     real(double),allocatable::TCatMags(:), TCatSizes(:) !-Temprary storage for Magnitude and sizes-!
     real(double),allocatable:: Smoothed_SizeOnly_PDF(:), Smoothed_MagOnly_PDF(:) !--Used for Testing-!
     real(double),allocatable:: KDE_Gaussian_Covariance(:,:), Data_Vectors(:,:)
@@ -563,13 +564,14 @@ contains
    
     
     !--Set up Magnitude Binning--!
+    !-Set Higher by + 2.17e0_double*Mag_Limit_Convergence_Buffer as will be going along a +2.17Kappa de-lensing line - Ensures at least kappa = 0.3 is acheivable for *every* galaxy in sample
     if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
 !       call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMags, MagBins)
-       Higher = maxval(RefCat%Absolute_Magnitude); Lower = minval(RefCat%Absolute_Magnitude)
+       Higher = maxval(RefCat%Absolute_Magnitude)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%Absolute_Magnitude)
        TCatMags = RefCat%Absolute_Magnitude
     elseif(Magnitude_Type == 2) then
 !       call Calculate_Bin_Limits_by_equalNumber(Cat%MF606W, nMags, MagBins)
-       Higher =maxval(RefCat%MF606W); Lower = minval(RefCat%MF606W)
+       Higher =maxval(RefCat%MF606W)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%MF606W)
        TCatMags = RefCat%MF606W
     else
        STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Invalid Magnitude Type entered'
@@ -660,7 +662,7 @@ contains
 
 
     !--Get the Histogram--!
-    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Histogram_SizeGrid, Histogram_PDF, RefCat, use_Physical_sizes,  Magnitude_Type, iOutput_Dir, iln_size_Distribution, SizeBins, Renormalise = .false., KDE_Smooth = .false.)
+    call get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Histogram_SizeGrid, Histogram_PDF, RefCat, use_Physical_sizes,  Magnitude_Type, ln_size_Distribution = iln_size_Distribution, SizeBins = SizeBins, Renormalise = .false., KDE_Smooth = .false.)
 
     !--Output--!
     allocate(Histogram_sizeOnly_PDF(size(Histogram_SizeGrid))); Histogram_sizeOnly_PDF = 0.e0_double
