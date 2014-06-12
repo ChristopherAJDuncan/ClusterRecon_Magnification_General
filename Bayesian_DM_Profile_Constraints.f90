@@ -100,8 +100,8 @@ program Bayesian_DM_Profile_Constraints
 
 
    call get_Clusters(Clusters, Cluster_Filename)
-   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
-   write(*,'(A)') 'Aperture Radius HAS BEEN SET OT 1 ARCMINUTE'
+   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 3.e0_double/60.e0_double !-Degrees-! Default - 1/60
+   write(*,'(A)') 'Aperture Radius HAS BEEN SET TO 3 ARCMINUTE'
    call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
 
 
@@ -179,7 +179,7 @@ contains
     inquire(file = Input_File, exist = Here)
     if(here == .false.) then 
        print *, 'Input_File:', Input_File
-       STOP 'Cluster Input File not present'
+       STOP 'Input File not present'
     end if
 
     open(unit = 92, file = Input_File)
@@ -192,6 +192,7 @@ contains
 
     !--Copy Input File to output directory--!
     call system('cp '//trim(Input_File)//' '//trim(Output_Directory)//'Input_File.ini')
+    call system('cp '//trim(Cluster_Filename)//' '//trim(Output_Directory)//'Input_Cluster.clus')
 
   end subroutine Parameter_Input
 
@@ -712,8 +713,10 @@ contains
           STOP 'Error - Single_Run'
        end if
 
+       !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
        !--Cuts on data catalogue--!
-!       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+       print *, '** Cutting Catalogue:'
+       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
        end if
@@ -722,17 +725,19 @@ contains
 
        
        !--Cuts on Catalogue--!
-!!$       call Cut_by_Magnitude(BFCatt, 23.e0_double)
-!!$       if(Analyse_with_Physical_Sizes) then
-!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
-!!$       end if
-!!$       call Cut_By_PhotoMetricRedshift(BFCatt, 0.21e0_double) !--Cut out foreground-
-!!$       call Cut_By_PixelSize(BFCatt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!
+       print *, '** Cutting Prior Catalogue:'
+       call Cut_by_Magnitude(BFCatt, 23.e0_double)
+       if(Analyse_with_Physical_Sizes) then
+          call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
+       end if
+       call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
+       call Cut_By_PixelSize(BFCatt, 3.3e0_double, 100.e0_double) !!!!!!!!!!!!!!!!!!!!!
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
     else
 
        !--Cuts on data catalogue--!
+       print *, '** Cutting Catalogue:'
        call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
@@ -743,6 +748,12 @@ contains
        !--If no Blank Field Information, then attempt a read in--!
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
     end if
+
+    print *, 'Catalogue Check:'
+    print *, 'RA:', minval(Catt%RA), maxval(Catt%RA)
+    print *, 'Dec:', minval(Catt%Dec), maxval(Catt%Dec)
+    print *, 'MF606W:', minval(Catt%MF606W), maxval(Catt%MF606W)
+    print *, 'Sizes:', minval(Catt%Sizes), maxval(Catt%Sizes)
 
     call catalogue_destruct(Catt); call catalogue_destruct(BFCatt)
 

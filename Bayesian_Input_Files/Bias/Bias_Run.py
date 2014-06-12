@@ -1,3 +1,5 @@
+#Produces the Bias for STAGES clusters, including overlap, and intrinsic bias in the method (e.g. CHo8 redsift distribution), but not the bias that results from using a lensed distribution
+
 import os
 import subprocess
 
@@ -8,11 +10,11 @@ CWD = os.getcwd()
 Program_Pathway = '/disk1/cajd/Size_Magnification/'
 
 # Where Do Run == 0, this run is ignored #
-Do_Run = [1,1,0,0,1,0]
+Do_Run = [0,1,0,0,0,0]
 
 ## THERE MUST NOT BE A TRAILING '/' IN THESE DIRECTORY DECLARATIONS
-Output_Paths = [Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES+COMBO", \
-                Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeOnly/STAGES+COMBO", \
+Output_Paths = [Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES+COMBO_OverlapCheck", \
+                Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeOnly/STAGES+COMBO_OverlapCheck", \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/COMBO', \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES', \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeOnly/COMBO', \

@@ -168,6 +168,63 @@ contains
 
   end subroutine Posterior_Statistics
 
+  subroutine Maximise_Convergence_byShifts_inAperture(Cat, BFCat, Ap_Pos, Ap_Radius, Core_Radius)
+    use Statistics, only: mean_discrete
+    type(Catalogue), intent(in)::Cat, BFCat
+    real(double),intent(in)::Ap_Pos(:), Ap_Radius
+    real(double), intent(in), Optional:: Core_Radius
+    
+    type(Catalogue)::Ap_Cat
+    integer:: i,j
+    integer,parameter:: nSide = 2500
+    real(double)::Start_Pos(2)
+    real(double):: Try_Pos(2), dTheta
+    real(double):: Global_Mean_Size, Aperture_Mean_Size, Global_Mean_Mag, Aperture_Mean_Mag
+    real(double), dimension(nSide, nSide, 2):: Convergence
+
+    integer:: Maximum_Position(2)
+
+    !--Cuts on Prior--!
+
+    Global_Mean_Size = mean_discrete(BFCat%Sizes)
+    Global_Mean_Mag =  mean_discrete(BFCat%MF606W)
+
+    Start_Pos = Ap_Pos - Ap_Radius
+
+    dTheta = Ap_Radius/(nSide-1)
+
+    do i = 1, nSide
+       Try_Pos(1) = Start_Pos(1) + (i-1)*dTheta
+       do j = 1, nSide
+          Try_Pos(2) = Start_Pos(2) + (j-1)*dTheta
+
+          call Identify_Galaxys_in_Circular_Aperture(Cat, Try_Pos, Ap_Radius, Ap_Cat)
+
+          Aperture_Mean_Size = mean_discrete(Ap_Cat%Sizes)
+          Aperture_Mean_Mag = mean_discrete(Ap_Cat%MF606W)
+
+          call Catalogue_Destruct(Ap_Cat)
+
+          Convergence(i,j,1) = (Aperture_Mean_Size/Global_Mean_Size) - 1.e0_double !-Size-!
+          Convergence(i,j,2) = (Global_Mean_Mag-Aperture_Mean_Mag)/2.17e0_double !-Magnitude-!
+       end do
+    end do
+    !--In below, if not dabs, then maximum positive convergence is returned--!
+    print *, 'Start Pos for Aperture:', Ap_Pos
+    !--Output Maximum Pos for Mag--!
+    Maximum_Position = maxloc(Convergence(:,:,2))
+    print *, '** Maximum convergence for magnitude at:', Start_Pos(1)+(Maximum_Position(1)-1)*dTheta, Start_Pos(2)+(Maximum_Position(2)-1)*dTheta
+    print *, '   which has value:', Convergence(Maximum_Position(1), Maximum_Position(2), 2)
+
+    !--Output Maximum Position for Size--!
+    Maximum_Position = maxloc(Convergence(:,:,1))
+    print *, '** Maximum convergence for magnitude at:', Start_Pos(1)+(Maximum_Position(1)-1)*dTheta, Start_Pos(2)+(Maximum_Position(2)-1)*dTheta
+    print *, '   which has value:', Convergence(Maximum_Position(1), Maximum_Position(2), 1)
+
+    !--Output Maximum Position for both--!
+
+  end subroutine Maximise_Convergence_byShifts_inAperture
+
   subroutine Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos, Ap_Radius, Ap_Cat, Core_Radius)
     !--Returns a reduced catalogue containing only the galaxies in the aperture
     !--Ap_Pos, Ap_Radius and Core_Radius should be in DEGREES
@@ -208,10 +265,11 @@ contains
 
   end subroutine Identify_Galaxys_in_Circular_Aperture
 
-  subroutine Convert_Alpha_Posteriors_to_VirialMass(Posteriors, Mass_Posteriors, Lens_Redshift, Output_Label)
+  subroutine Convert_Alpha_Posteriors_to_VirialMass(SMD_Profile, Posteriors, Mass_Posteriors, Lens_Redshift, Output_Label)
     !--Converts from posteriors on DM free parameter (alpha) to posteriors on virial mass using the conservation of probability
     use Mass_Profiles, only: Halo_Mass, virial_Radius_from_ProfileFreeParameter; use Integration, only: Integrate
     
+    integer,intent(in):: SMD_Profile
     real(double), intent(in):: Posteriors(:,:) !-Posteriors(1,:) assumed to be grid of DM Free parameters, (2,:) the actual posterior
     real(double), intent(out):: Mass_Posteriors(:,:)
     real(double):: Lens_Redshift !-Used only in NFW-!
@@ -219,24 +277,32 @@ contains
 
     integer:: i
     real(double):: Discardable(1)
+    character(20)::fmt
 
-    if(size(Posteriors,1) /= 2) STOP 'Convert_VirialRadius_Posteriors_to_VirialMass - Error in input posterior - no grid/value'
+    if(size(Posteriors,1) < 2) STOP 'Convert_VirialRadius_Posteriors_to_VirialMass - Error in input posterior - no grid/value'
     if(size(Mass_Posteriors) /= size(Posteriors)) STOP 'Convert_VirialRadius_Posteriors_to_VirialMass - Error in size of mass posterior, not equal to Original posterior' !Can be deleted in the case of interpolation
 
+
     do i = 1, size(Posteriors,2)
-       call Halo_Mass(Surface_Mass_Profile, Posteriors(1,i), (/0.e0_double/), Mass_Posteriors(1,i), Discardable, Lens_Redshift)
+       call Halo_Mass(SMD_Profile, Posteriors(1,i), (/0.e0_double/), Mass_Posteriors(1,i), Discardable, Lens_Redshift)
        
        !--p(M)dM = p(r)dr -> p(M) \propto p(r)/r^2 
-       Mass_Posteriors(2:,i) = Posteriors(2:,i)/virial_Radius_from_ProfileFreeParameter(Surface_Mass_Profile, Posteriors(1,i))
+       Mass_Posteriors(2:,i) = Posteriors(2:,i)/virial_Radius_from_ProfileFreeParameter(SMD_Profile, Posteriors(1,i))
     end do
 
+    print *, 'Mass Posterior output on grid of 10^13 Msun/h'
+    Mass_Posteriors(1,:) = Mass_Posteriors(1,:)/1.e14_double
+
     !--Renormalise
-    Mass_Posteriors(2,:) = Mass_Posteriors(2,:)/Integrate(Mass_Posteriors(1,:), Mass_Posteriors(2,:), 2, lim = (/minval(Mass_Posteriors(1,:)), maxval(Mass_Posteriors(1,:))/))
+    do i = 2, size(Posteriors,1)
+       Mass_Posteriors(i,:) = Mass_Posteriors(i,:)/Integrate(Mass_Posteriors(1,:), Mass_Posteriors(i,:), 2, lim = (/minval(Mass_Posteriors(1,:)), maxval(Mass_Posteriors(1,:))/))
+    end do
 
     if(present(Output_Label)) then
        open(unit = 78, file = trim(Output_Label)//'VirialMass_Posterior.dat')
+       write(fmt, *) size(Mass_Posteriors,1)
        do i = 1, size(Mass_Posteriors,2)
-          write(78, *) Mass_Posteriors(:,i)
+          write(78, '('//trim(fmt)//'(e9.3,x))') Mass_Posteriors(:,i)
        end do
        write(*,'(2A)') '* Output file to: ', trim(Output_Label)//'VirialMass_Posterior.dat'
        close(78)
@@ -245,7 +311,7 @@ contains
   end subroutine Convert_Alpha_Posteriors_to_VirialMass
 
   subroutine DM_Profile_Variable_Posteriors_CircularAperture(Cat, Ap_Pos, Ap_Radius, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
-    use Statistics, only: mean, mode_distribution, variance_distribution; use Mass_profiles
+    use Statistics, only: mean_discrete, mode_distribution, variance_distribution; use Mass_profiles
     use Distributions; use Cosmology, only: angular_diameter_distance_fromRedshift;
     !--Main routine that returns the Posteriors on DM free parameter (alpha) over all apertures.
     !--Ap_Radius in DEGREES
@@ -285,6 +351,8 @@ contains
     real(double)::Lens_Redshift = 0.165e0_double
     real(double)::Renorm
 
+    real(double)::Core_Cut_Radius(4)
+
     character(2)::fmtString, apString
 
     !--Conversion to Mass--!
@@ -323,10 +391,23 @@ contains
        iAp_Radius = Ap_Radius
     end if
 
+    print *, '**Global catalogue has mean (Size, Mag):', mean_discrete(Cat%Sizes), mean_discrete(Cat%MF606W)
+
+    !--Set up core cut--!
+    Core_Cut_Radius = (/0.03e0_double,0.03e0_double,0.014e0_double, 0.014e0_double/)
+
     !--Identify Reduced Catalogue for each aperture--!
     do i =1, size(Ap_Cats)
-       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i))!, Core_Radius = 0.5e0_double*iAp_Radius(i))
+       print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
+!       call Maximise_Convergence_byShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
+
+       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i), Core_Radius = Core_Cut_Radius(i))
+       
+
+       print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
     end do
+!!$    print *, 'Reading, line 402 Bayesian Routines'
+!!$    read(*,*)
 
     do i =1, size(Ap_Cats)
        print *, 'Aperture:', i, ' contains:', size(Ap_Cats(I)%RA), ' galaxies'
@@ -451,7 +532,7 @@ contains
 
   subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior)
     use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles, only:SMD_SIS, SMD_NFW; use Distributions, only: ch08_redshift_distribution_Array, CH08_Redshift_Distribution_Scalar; use Interpolaters, only: Linear_Interp
-    use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar; use Statistics, only:Discrete_Covariance
+    use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
     !-For Mass_Profile = 1 (Flat): Sigma_0
     !-                   2 (SIS) : Velocity_Dispersion**2
@@ -526,6 +607,8 @@ contains
     !--Testing Declarations--!
     real(double),dimension(3,size(Cat%RA)):: Convergence_per_Cluster
     integer:: n_Default_Source_Redshift_Used, nGal_Ignored_MagLimits, nGal_Ignored_SizeLimits
+    real(double), allocatable:: Aperture_Smoothed_Size_PDF(:), Aperture_Smoothed_Mag_PDF(:)
+
 
     INTERFACE
        subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior)
@@ -600,6 +683,30 @@ contains
        KDE_Covariance_Determinant = Determinant(KDE_Gaussian_Covariance)
        deallocate(KDE_Gaussian_Covariance)
     end if
+
+    !--Testing: output smoothed size and mag distributions within the aperture to see if there is any noticable shift
+    allocate(Data_Vectors(2,size(PriorCatalogue%Sizes))); Data_Vectors(1,:) = PriorCatalogue%MF606W; Data_Vectors(2,:) = PriorCatalogue%Sizes
+    call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
+    KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
+    allocate(Aperture_Smoothed_Size_PDF(size(PriorSizeGrid))); Aperture_Smoothed_Size_PDF = 0.e0_double
+    allocate(Aperture_Smoothed_Mag_PDF(size(PriorMagGrid))); Aperture_Smoothed_Mag_PDF = 0.e0_double
+    call KDE_Univariate_Gaussian(Cat%Sizes, dsqrt(KDE_Gaussian_Covariance(2,2)), PriorSizeGrid, Aperture_Smoothed_Size_PDF)
+    call KDE_Univariate_Gaussian(Cat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), PriorMagGrid, Aperture_Smoothed_Mag_PDF)
+    open(unit = 31, file = trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Size.dat')
+    do i =1, size(PriorSizeGrid)
+       write(31, *) PriorSizeGrid(i), Aperture_Smoothed_Size_PDF(i)
+    end do
+    close(31)
+    open(unit = 31, file = trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Mag.dat')
+    do i =1, size(PriorSizeGrid)
+       write(31, *) PriorMagGrid(i), Aperture_Smoothed_Mag_PDF(i)
+    end do
+    close(31)
+    write(*, '(4A)') '**Output distributions in aperture to: ', trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Size.dat', ' : ', trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Mag.dat'
+    print *, '**with mean (Size, Mag):', mean_discrete(Cat%Sizes), mean_discrete(Cat%MF606W) 
+    deallocate(Aperture_Smoothed_Size_PDF, Aperture_Smoothed_Mag_PDF)
+    !---End of distributions in Aperture
+
 
     D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
     !--SET UP REDSHIFT GRID--!
@@ -1434,6 +1541,12 @@ contains
     integer::i,j
     logical:: iDo_KDE
 
+    !--Cuts on the prior distribution--!
+    real(double):: Size_Cuts(2) = (/3.3e0_double, 100.e0_double/)
+    real(double):: Magnitude_Cuts(2) = (/23.e0_double, 100.e0_double/)
+    real(double):: Redshift_Cuts(2)  = (/0.22e0_double, 100.e0_double/) !-- If no cuts, then lower should still be < -1 to ensure only galaxies without redshift information are cut
+    type(Catalogue)::Cut_Catalogue
+
     !--TESTING--!
     real(double),allocatable::Size_Only(:), Mag_Only(:)
     
@@ -1442,6 +1555,7 @@ contains
     else
        iDO_KDE = use_KDE_Smoothed_Distributions
     end if
+
 
  
     if(iDO_KDE) then
@@ -1453,7 +1567,15 @@ contains
     if(present(BFCat)) then
        print *, 'Producing Joint Size Magnitude Distribution from Catalogue'
 
-       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, BFCat, use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = ido_KDE)
+       Cut_Catalogue = BFCat
+
+       print *, '------Applying Cuts on the Catalogue from which the prior is constructed---------'
+       call Cut_By_Magnitude(Cut_Catalogue, Magnitude_Cuts(1), Magnitude_Cuts(2))
+       call Cut_By_PixelSize(Cut_Catalogue, Size_Cuts(1), Size_Cuts(2))
+       call Cut_by_PhotometricRedshift(Cut_Catalogue, Redshift_Cuts(1), Redshift_Cuts(2))
+       print *, '----- Finished Cuts on BF catalogue----------------------------------------------'
+
+       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue, use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = ido_KDE)
        !--Output (matches the method of output used above)--!
        Output_Filename = trim(Dir)//trim(Filename)
        open(unit = 45, file = Output_Filename)
@@ -1466,6 +1588,8 @@ contains
        close(45)
        write(*,'(2(A))') 'Output to: ', trim(Output_Filename)
     
+       call Catalogue_Destruct(Cut_Catalogue)
+
     else
        Input_Filename = trim(Dir)//trim(Filename)
 

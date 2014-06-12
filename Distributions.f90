@@ -898,9 +898,9 @@ contains
        do i =1 , nMags
           if(present(ln_size_Distribution) .and. ln_size_Distribution) then
 !             if(any(BCat%Cat(i)%Physical_Sizes <= 0.e0_double)) STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Physical Size contains zeros or negatives, stopping'
-             print *, 'Mag Bin ', i, ' : ', MagBins(i,:), ' Variance in log Physical Sizes:', dsqrt(variance_discrete(dlog(BCat%Cat(i)%Physical_Sizes), dlog(BCat%Cat(i)%Physical_Sizes)))
+             print *, 'Mag Bin ', i, ' : ', MagBins(i,:)!, ' Variance in log Physical Sizes:', dsqrt(variance_discrete(dlog(BCat%Cat(i)%Physical_Sizes), dlog(BCat%Cat(i)%Physical_Sizes)))
           else
-             print *, 'Mag Bin ', i, ' : ', MagBins(i,:), ' Variance in Physical Sizes:', dsqrt(variance_discrete(BCat%Cat(i)%Physical_Sizes, BCat%Cat(i)%Physical_Sizes))
+             print *, 'Mag Bin ', i, ' : ', MagBins(i,:)!, ' Variance in Physical Sizes:', dsqrt(variance_discrete(BCat%Cat(i)%Physical_Sizes, BCat%Cat(i)%Physical_Sizes))
           end if
        end do
 
