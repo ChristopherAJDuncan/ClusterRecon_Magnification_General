@@ -141,7 +141,84 @@ module Catalogues
       inquire(File = Filename, exist = here)
       check_Catalogue_Existence = here
     end function check_Catalogue_Existence
+
+    subroutine Mask_Circular_Aperture(Cat, Ap_Pos, Ap_Radius)
+      !--Cuts out galaxies which fall inside an aperture radius, where the radius is in DEGREES
+      type(Catalogue), intent(inout)::Cat
+      real(double), intent(in):: Ap_Pos(:,:)
+      real(double), intent(in):: Ap_Radius(:)
+
+      type(Catalogue)::Temp_Cat
+      integer:: Ap, ac, c, Expected_Cut
+
+      print *, '****Masking out Apertures:'
+      do Ap = 1, size(Ap_Pos,1)
+         print *, Ap, Ap_Pos(Ap,:), Ap_Radius(Ap)
+      end do
+
+      do Ap = 1, size(Ap_Pos,1)
+         Expected_Cut = 0
+         Expected_Cut = count( dsqrt( (Cat%RA-Ap_Pos(Ap,1))**2.e0_double +(Cat%Dec-Ap_Pos(Ap,2))**2.e0_double ) <= Ap_Radius(Ap) )
+         print *, 'Cutting:', Expected_Cut, ' from Aperture:', Ap
+
+         call Catalogue_Construct(Temp_Cat, size(Cat%RA)-Expected_Cut)
+
+         ac = 0
+         do c = 1, size(Cat%RA)
+            if( (dsqrt( (Cat%RA(c)-Ap_Pos(Ap,1))**2.e0_double +(Cat%Dec(c)-Ap_Pos(Ap,2))**2.e0_double ) > Ap_Radius(Ap)) ) then
+               if(ac > Size(Temp_Cat%RA)) STOP 'Identify_Galaxys_in_Circular_Aperture - Error in assigning aperture galaxy - GALAXY ASSINGATION IS LARGER THAN EXPECTED, stopping..'
+               ac = ac + 1
+               call Catalogue_Assign_byGalaxy_byCatalogue(Temp_Cat, ac, Cat, c)
+            end if
+         end do
+         Cat = Temp_Cat
+         call Catalogue_Destruct(Temp_Cat)
+      end do
+
+    end subroutine Mask_Circular_Aperture
       
+    subroutine Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos, Ap_Radius, Ap_Cat, Core_Radius)!, verbose)
+      !--Returns a reduced catalogue containing only the galaxies in the aperture
+      !--Ap_Pos, Ap_Radius and Core_Radius should be in DEGREES
+      type(Catalogue), intent(in)::Cat
+      real(double),intent(in)::Ap_Pos(:), Ap_Radius
+      type(Catalogue), intent(out)::Ap_Cat
+      real(double), intent(in), Optional:: Core_Radius
+!      logical, intent(in), optional:: verbose
+
+      real(double):: iCore
+      integer::c, ac
+      integer:: Expected_Number_In_Aperture
+      
+
+      if(present(Core_Radius)) then
+         iCore = Core_Radius
+      else
+         iCore = 0.e0_double
+      end if
+      
+      Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius) - count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore )
+      
+      if(Expected_Number_in_Aperture == 0) STOP 'Identify_Galaxys_in_Circular_Aperture - There are no galaxies within the aperture, suggest increasing aperture size'
+      
+      call Catalogue_Construct(Ap_Cat, Expected_Number_in_Aperture)
+
+!!$!      if(present(verbose) .and. verbose) then
+!!$         print *, ' '
+!!$         print *, 'Of ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius), ' galaxies within the aperture, ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore ), ' will be subtracted as they exisit in the core, leaving:', Expected_Number_in_Aperture
+!!$         print *, ' '
+!!$!      end if
+
+      ac = 0
+      do c = 1, size(Cat%RA)
+         if( (dsqrt( (Cat%RA(c)-Ap_Pos(1))**2.e0_double +(Cat%Dec(c)-Ap_Pos(2))**2.e0_double ) <= Ap_Radius) .and. (dsqrt( (Cat%RA(c)-Ap_Pos(1))**2.e0_double +(Cat%Dec(c)-Ap_Pos(2))**2.e0_double ) > iCore) ) then
+            if(ac > Expected_Number_in_Aperture) STOP 'Identify_Galaxys_in_Circular_Aperture - Error in assigning aperture galaxy - GALAXY ASSINGATION IS LARGER THAN EXPECTED, stopping..'
+            ac = ac + 1
+            call Catalogue_Assign_byGalaxy_byCatalogue(Ap_Cat, ac, Cat, c)
+         end if
+      end do
+      
+  end subroutine Identify_Galaxys_in_Circular_Aperture
 
     !---Catalogue Binning Routines----!
     subroutine Calculate_Bin_Limits_by_equalNumber(Array, nBin, Limits)

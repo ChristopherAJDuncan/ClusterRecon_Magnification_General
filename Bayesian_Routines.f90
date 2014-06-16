@@ -225,45 +225,7 @@ contains
 
   end subroutine Maximise_Convergence_byShifts_inAperture
 
-  subroutine Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos, Ap_Radius, Ap_Cat, Core_Radius)
-    !--Returns a reduced catalogue containing only the galaxies in the aperture
-    !--Ap_Pos, Ap_Radius and Core_Radius should be in DEGREES
-    type(Catalogue), intent(in)::Cat
-    real(double),intent(in)::Ap_Pos(:), Ap_Radius
-    type(Catalogue), intent(out)::Ap_Cat
-    real(double), intent(in), Optional:: Core_Radius
 
-    real(double):: iCore
-    integer::c, ac
-    integer:: Expected_Number_In_Aperture
-
-    if(present(Core_Radius)) then
-       iCore = Core_Radius
-       print *, 'Subtracting a core of:', Core_Radius
-    else
-       iCore = 0.e0_double
-    end if
-
-    Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius) - count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore )
-
-    if(Expected_Number_in_Aperture == 0) STOP 'Identify_Galaxys_in_Circular_Aperture - There are no galaxies within the aperture, suggest increasing aperture size'
-
-    call Catalogue_Construct(Ap_Cat, Expected_Number_in_Aperture)
-
-    print *, ' '
-    print *, 'Of ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius), ' galaxies within the aperture, ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore ), ' will be subtracted as they exisit in the core, leaving:', Expected_Number_in_Aperture
-    print *, ' '
-
-    ac = 0
-    do c = 1, size(Cat%RA)
-       if( (dsqrt( (Cat%RA(c)-Ap_Pos(1))**2.e0_double +(Cat%Dec(c)-Ap_Pos(2))**2.e0_double ) <= Ap_Radius) .and. (dsqrt( (Cat%RA(c)-Ap_Pos(1))**2.e0_double +(Cat%Dec(c)-Ap_Pos(2))**2.e0_double ) > iCore) ) then
-          if(ac > Expected_Number_in_Aperture) STOP 'Identify_Galaxys_in_Circular_Aperture - Error in assigning aperture galaxy - GALAXY ASSINGATION IS LARGER THAN EXPECTED, stopping..'
-          ac = ac + 1
-          call Catalogue_Assign_byGalaxy_byCatalogue(Ap_Cat, ac, Cat, c)
-       end if
-    end do
-
-  end subroutine Identify_Galaxys_in_Circular_Aperture
 
   subroutine Convert_Alpha_Posteriors_to_VirialMass(SMD_Profile, Posteriors, Mass_Posteriors, Lens_Redshift, Output_Label)
     !--Converts from posteriors on DM free parameter (alpha) to posteriors on virial mass using the conservation of probability
@@ -393,14 +355,15 @@ contains
 
     print *, '**Global catalogue has mean (Size, Mag):', mean_discrete(Cat%Sizes), mean_discrete(Cat%MF606W)
 
-    !--Set up core cut--!
-    Core_Cut_Radius = (/0.03e0_double,0.03e0_double,0.014e0_double, 0.014e0_double/)
+    !--Set up core cut on data, in degrees--!
+    Core_Cut_Radius = (/0.02e0_double,0.02e0_double,0.014e0_double, 0.014e0_double/)
 
     !--Identify Reduced Catalogue for each aperture--!
     do i =1, size(Ap_Cats)
        print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
 !       call Maximise_Convergence_byShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
 
+       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), 'for aperture:', i
        call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i), Core_Radius = Core_Cut_Radius(i))
        
 

@@ -15,7 +15,6 @@ program Bayesian_DM_Profile_Constraints
    character(500):: Distribution_Input = ' '
    logical::ReEvaluate_Distribution = .true.
 
-
    type(Foreground):: Clusters
 !   real(double)::Lens_Redshift = 0.165e0_double
 
@@ -100,8 +99,8 @@ program Bayesian_DM_Profile_Constraints
 
 
    call get_Clusters(Clusters, Cluster_Filename)
-   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 3.e0_double/60.e0_double !-Degrees-! Default - 1/60
-   write(*,'(A)') 'Aperture Radius HAS BEEN SET TO 3 ARCMINUTE'
+   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
+   write(*,'(A)') 'Aperture Radius HAS BEEN SET TO 2 ARCMINUTE'
    call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
 
 
@@ -644,7 +643,7 @@ contains
 
   subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, reconstruct_Prior, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
     !--inBFCat or Blank_Field_Cat_Ident should contain/point ot catalogues from which the intrinsic size-magnitude distribution can be obtained. If neither of these are entered, then the code will attempt to read in the distribution from the run_Output_Dir--!
-    use MC_Redshift_Sampling; use Bayesian_Routines; use Mass_Profiles
+    use MC_Redshift_Sampling; use Bayesian_Routines; use Mass_Profiles; use Data_Tests
     real(double),allocatable,intent(out):: returned_Cluster_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-!
     type(Foreground):: Clusters_In
     real(double),intent(in):: Aperture_Radius(:)
@@ -726,12 +725,21 @@ contains
        
        !--Cuts on Catalogue--!
        print *, '** Cutting Prior Catalogue:'
+       print *, 'Size Before Magnitude cut:', Size(BFCatt%RA), minval(BFCatt%MF606W)
        call Cut_by_Magnitude(BFCatt, 23.e0_double)
+       print *, 'Size after Magnitude cut:', Size(BFCatt%RA), minval(BFCatt%MF606W)
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
        end if
        call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
        call Cut_By_PixelSize(BFCatt, 3.3e0_double, 100.e0_double) !!!!!!!!!!!!!!!!!!!!!
+
+       print *, '**Testing for Cluster contamination in the Prior Catalogue'
+       call Foreground_Contamination_NumberDensity(BFCatt, Clusters_In%Position, trim(run_Output_Dir))
+
+       print *, '**Applying Masks to Prior Catalogue:'
+       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/1.e0_double, 1.e0_double, 1.e0_double, 1.e0_double/)/60.e0_double)
+       print *, ' '
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
     else
