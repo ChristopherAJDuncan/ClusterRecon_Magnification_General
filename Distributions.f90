@@ -2,7 +2,7 @@ module Distributions
   use Param_Types
 implicit none
 
-character(200),private::Reference_Catalogue = 'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
+character(500),private::Reference_Catalogue = 'Catalogues/STAGES_COMBO17_gsMag_size_matched.pzcat'
 integer::Reference_Catalogue_Columns(13) = (/-1,10,11,-1,-1,8,-1,-1,-1,14,16,17,5/)
 
 INTERFACE CH08_redshift_distribution
@@ -139,7 +139,7 @@ contains
     if(allocated(PDF)) deallocate(PDF)
     allocate(PDF(size(Grid))); PDF = 0.e0_double
 
-    zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    zmed = 0.7e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
     if(zmed < 0.e0_double) then
        print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
        print *, 'zmed, m:', zmed, Apparent_Magnitude
@@ -158,7 +158,7 @@ contains
     real(double)::PDF
     real(double):: z_0, Norm
 
-    zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    zmed = 0.7e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
     if(zmed < 0.e0_double) then
        print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
        print *, 'zmed, m:', zmed, Apparent_Magnitude
@@ -240,7 +240,7 @@ contains
     character(*), intent(in), optional:: Output_Dir
     type(Catalogue), intent(in)::RefCat
 
-    character(200)::Catalogue_Filename
+    character(500)::Catalogue_Filename
     integer::Catalogue_Columns(13)
 
     type(Catalogue)::Cat
@@ -492,7 +492,7 @@ contains
     integer:: I,J
     character(20)::fmtstring
 
-    character(200):: iOutput_Dir
+    character(500):: iOutput_Dir
     logical:: iln_size_Distribution
 
     real(double)::Renormalisation
@@ -544,6 +544,8 @@ contains
           TCatSizes = RefCat%Sizes
        end if
     end if
+    if(Higher > 100.e0_double) STOP 'Upper limit on size distribution too large, check catalogue'
+    
 
     !--Produce KDE Smoothed Version--!
     allocate(Smoothed_Grid_Size(nSmoothed_Sampling)); Smoothed_Grid_Size = 0.e0_double
@@ -561,7 +563,9 @@ contains
        SizeBins(i,2) = SizeBins(i,1) + dParam
        if(i==nSizes) SizeBins(i,2) = SizeBins(i,2) + 1.e-3_double*dParam
     end do
-   
+
+        
+
     
     !--Set up Magnitude Binning--!
     !-Set Higher by + 2.17e0_double*Mag_Limit_Convergence_Buffer as will be going along a +2.17Kappa de-lensing line - Ensures at least kappa = 0.3 is acheivable for *every* galaxy in sample
@@ -773,7 +777,7 @@ contains
        real(double), intent(in),optional::SizeBins(:,:)
        logical,intent(in),optional::Renormalise, KDE_Smooth
 
-       character(200)::Catalogue_Filename
+       character(500)::Catalogue_Filename
        integer::Catalogue_Columns(13)
 
        type(Catalogue)::Cat

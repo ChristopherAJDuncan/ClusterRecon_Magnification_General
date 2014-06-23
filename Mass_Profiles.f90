@@ -33,7 +33,7 @@ module Mass_Profiles
          Gamma = Differential_SMD_Scalar(Radius, Redshift, Param)/Sigma_Critical
       end select
 
-      Magnification_Factor = 1.e0_double/( ((1.e0_double-Kappa)**2.e0_double) + Gamma*Gamma)
+      Magnification_Factor = 1.e0_double/( ((1.e0_double-Kappa)**2.e0_double) - Gamma*Gamma)
 
     end function Magnification_Factor
 
@@ -328,6 +328,39 @@ module Mass_Profiles
 
     end function Differential_SMD_Scalar
 
+    real(double) function Shear_NFW(r,z,r200, Sigma_Critical, r_s)
+      !--Eqn 14 Wright and Brainerd. Tested against Differential_SMD/Sigma_Critical and works
+      real(double),intent(in)::r, r200, z, Sigma_Critical
+      real(double), intent(in),optional::r_s
+
+      real(double)::delta_c, c, rs, M200
+      real(double)::omega_matter !-Evaluated at the redshift of the Halo-!
+                                                                                                                                                                                                                  
+      real(double)::rho_c, g
+      real(double)::x
+
+      if(present(r_s)) then
+         call get_NFW_Parameters(z, r200, rho_c, M200, delta_c, c,  r_s)
+      else
+         call get_NFW_Parameters(z, r200, rho_c, M200, delta_c, c)
+      end if
+
+      rs = r200/c
+
+      x = r/rs
+      !--Following from Wright, Brainerd--!                                                                                                                                                                       
+      if(x < 1) then
+         g = ( (8.e0_double*atanh(dsqrt((1.e0_double-x)/(1.e0_double+x))))/((x*x)*dsqrt(1.e0_double-(x*x)))  ) + ((4.e0_double/(x*x))*dlog(0.5e0_double*x)) - (2.e0_double/((x*x)-1.e0_double)) + ( (4.e0_double*atanh(dsqrt((1.e0_double-x)/(1.e0_double+x))))/( ((x*x)-1.e0_double)*((1.e0_double-(x*x))**0.5e0_double)  )  )
+         Shear_NFW = (rs*delta_c*rho_c*g)/Sigma_Critical
+      elseif(x==1) then
+         Shear_NFW = ((rs*delta_c*rho_c)/Sigma_Critical)*( (10.e0_double/3.e0_double) + 4.e0_double*dlog(0.5e0_double) )
+      else
+         g = ( (8.e0_double*atan(dsqrt((x-1.e0_double)/(1.e0_double+x))))/((x*x)*dsqrt((x*x)-1.e0_double))  ) + ((4.e0_double/(x*x))*dlog(0.5e0_double*x)) - (2.e0_double/((x*x)-1.e0_double)) + ((4.e0_double*atan(dsqrt((x-1.e0_double)/(1.e0_double+x))))/(((x*x)-1.e0_double)**1.5e0_double)   )
+         Shear_NFW = (rs*delta_c*rho_c*g)/Sigma_Critical
+      end if
+
+    end function Shear_NFW
+
     function Mean_SMD_NFW_Array(r, z, r200, r_s)
       real(double),intent(in)::r(:), r200, z
       real(double), intent(in),optional::r_s
@@ -366,11 +399,14 @@ module Mass_Profiles
       x = r/rs
       !--Following from Wright, Brainerd--!
       if(x < 1) then
-         Mean_SMD_NFW_Scalar = (4.e0_double/(x*x))*rs*delta_c*rho_c*( (2.e0_double/dsqrt(1.e0_double-x*x))*atanh(dsqrt((1.e0_double-x)/(1.e0_double+x))) +dlog(0.5e0_double) )
+         Mean_SMD_NFW_Scalar = (4.e0_double/(x*x))*(rs*delta_c*rho_c)*( (2.e0_double/dsqrt(1.e0_double-(x*x)))*atanh(dsqrt((1.e0_double-x)/(1.e0_double+x))) + dlog(0.5e0_double*x) )
+!         Mean_SMD_NFW_Scalar = (4.e0_double/(x*x))*rs*delta_c*rho_c*( (2.e0_double/dsqrt(1.e0_double-x*x))*atanh(dsqrt((1.e0_double-x)/(1.e0_double+x))) +dlog(0.5e0_double*x) )
       elseif(x == 1) then
-         Mean_SMD_NFW_Scalar =  4.e0_double*rs*delta_c*rho_c*(1.e0_double+dlog(0.5e0_double))
+         Mean_SMD_NFW_Scalar = 4.e0_double*rs*delta_c*rho_c*(1.e0_double + dlog(0.5e0_double))
+!         Mean_SMD_NFW_Scalar =  4.e0_double*rs*delta_c*rho_c*(1.e0_double+dlog(0.5e0_double))
       else
-         Mean_SMD_NFW_Scalar = (4.e0_double/(x*x))*rs*delta_c*rho_c*( (2.e0_double/dsqrt(x*x-1.e0_double))*atan(dsqrt((x-1.e0_double)/(1.e0_double+x))) + dlog(0.5e0_double) )
+         Mean_SMD_NFW_Scalar = (4.e0_double/(x*x))*(rs*delta_c*rho_c)*( (2.e0_double/dsqrt((x*x)-1.e0_double))*atan(dsqrt((x-1.e0_double)/(1.e0_double+x))) + dlog(0.5e0_double*x) )
+!         Mean_SMD_NFW_Scalar = (4.e0_double/(x*x))*rs*delta_c*rho_c*( (2.e0_double/dsqrt(x*x-1.e0_double))*atan(dsqrt((x-1.e0_double)/(1.e0_double+x))) + dlog(0.5e0_double*x) )
       end if
 
     end function Mean_SMD_NFW_Scalar

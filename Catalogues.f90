@@ -84,7 +84,7 @@ module Catalogues
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'STAGES_KSBf90_RRG.cat'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 21, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'
@@ -204,9 +204,9 @@ module Catalogues
       call Catalogue_Construct(Ap_Cat, Expected_Number_in_Aperture)
 
 !!$!      if(present(verbose) .and. verbose) then
-!!$         print *, ' '
-!!$         print *, 'Of ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius), ' galaxies within the aperture, ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore ), ' will be subtracted as they exisit in the core, leaving:', Expected_Number_in_Aperture
-!!$         print *, ' '
+         print *, ' '
+         print *, 'Of ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius), ' galaxies within the aperture, ', count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore ), ' will be subtracted as they exisit in the core, leaving:', Expected_Number_in_Aperture
+         print *, ' '
 !!$!      end if
 
       ac = 0
@@ -715,7 +715,7 @@ module Catalogues
       real(double)::ilower, iupper
       type(catalogue)::Temp_Cat
       logical::Discard_Gals
-      integer::nPass,i
+      integer::nPass,i, nGal
 
 !!$      INTERFACE
 !!$         subroutine Cut_By_PhotometricRedshift(Cat, LowerCut, UpperCut, Discard_Gals_wout_Redshift)
@@ -752,14 +752,16 @@ module Catalogues
          iupper = maxval(Cat%Redshift)
       end if
   
-      if(Verbose) print *, 'Number of assigned galaxy redshifts:', count(Cat%Redshift >= 0.e0_double)
-      if(Verbose) print *, 'Cutting Catalogue to Phot-Z between limits:', ilower, iupper
+      print *, 'Number of assigned galaxy redshifts:', count(Cat%Redshift >= 0.e0_double)
+      print *, 'Cutting Catalogue to Phot-Z between limits:', ilower, iupper
 
       if(ilower >= iupper) then
          print *, 'lower/upper:', ilower, iupper
          STOP 'FATAL ERROR - Cut_By_PhotometricRedshift - lower cut larger than upper cut'
       end if
       
+      nGal = size(Cat%RA)
+
       Temp_Cat = Cat
 
       call Catalogue_Destruct(Cat)
@@ -793,7 +795,8 @@ module Catalogues
          STOP
       end if
 
-      if(Verbose) print *, 'Out of:', size(Temp_Cat%Redshift),' orginal galaxies, ', size(Cat%Redshift), ' galaxies passed the redshift cut' 
+      print *, 'Out of:', size(Temp_Cat%Redshift),' orginal galaxies, ', nGal-nPass, ' were cut by redshift' 
+!      print *, 'Out of:', size(Temp_Cat%Redshift),' orginal galaxies, ', size(Cat%Redshift), ' galaxies passed the redshift cut' 
 
       call Catalogue_Destruct(Temp_Cat)
             
@@ -842,18 +845,21 @@ module Catalogues
 
       call Catalogue_Destruct(Cat)
 
-!!$      nPass = 0
-!!$      do i = 1, size(Temp_Cat%MF606W)
-!!$         if((Temp_Cat%MF606W(i) >= ilower) .and. (Temp_Cat%MF606W(i) <= iupper)) nPass = nPass + 1
-!!$      end do
+      nPass = 0
+      do i = 1, size(Temp_Cat%MF606W)
+         if(isNaN(Temp_Cat%MF606W(i))) cycle
+         if((Temp_Cat%MF606W(i) >= ilower) .and. (Temp_Cat%MF606W(i) <= iupper)) nPass = nPass + 1
+      end do
 
-      nPass = count(Temp_cat%MF606W <= iupper) - count(Temp_Cat%MF606W < ilower)!count(Temp_cat%MF606W <= iupper) + count(Temp_Cat%MF606W >= ilower) - size(Temp_Cat%MF606W)
+      !--This does not account for NaNs yet, which may result from negative magnification
+!      nPass = count(Temp_cat%MF606W <= iupper) - count(Temp_Cat%MF606W < ilower)!count(Temp_cat%MF606W <= iupper) + count(Temp_Cat%MF606W >= ilower) - size(Temp_Cat%MF606W)
 
 
       call Catalogue_Construct(Cat, nPass)
 
       nPass = 0
       do i = 1, size(Temp_Cat%MF606W)
+         if(isNaN(Temp_Cat%MF606W(i))) cycle
          if((Temp_Cat%MF606W(i) >= ilower) .and.(Temp_Cat%MF606W(i) <= iupper)) then
             nPass = nPass + 1
             call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)
@@ -904,18 +910,20 @@ module Catalogues
 
       call Catalogue_Destruct(Cat)
 
-!!$      nPass = 0
-!!$      do i = 1, size(Temp_Cat%Sizes)
-!!$         if((Temp_Cat%Sizes(i) >= ilower) .and. (Temp_Cat%Sizes(i) <= iupper)) nPass = nPass + 1
-!!$      end do
+      nPass = 0
+      do i = 1, size(Temp_Cat%Sizes)
+         if(isNaN(Temp_Cat%Sizes(i))) cycle
+         if((Temp_Cat%Sizes(i) >= ilower) .and. (Temp_Cat%Sizes(i) <= iupper)) nPass = nPass + 1
+      end do
 
-      nPass = count(Temp_cat%Sizes <= iupper) + count(Temp_Cat%Sizes >= ilower) - size(Temp_Cat%Sizes)
+!      nPass = count(Temp_cat%Sizes <= iupper) + count(Temp_Cat%Sizes >= ilower) - size(Temp_Cat%Sizes) - count(isNaN(Temp_cat%Sizes))
 
 
       call Catalogue_Construct(Cat, nPass)
 
       nPass = 0
       do i = 1, size(Temp_Cat%Sizes)
+         if(isNaN(Temp_Cat%Sizes(i))) cycle
          if((Temp_Cat%Sizes(i) >= ilower) .and.(Temp_Cat%Sizes(i) <= iupper)) then
             nPass = nPass + 1
             call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)

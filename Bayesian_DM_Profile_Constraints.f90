@@ -3,12 +3,12 @@ program Bayesian_DM_Profile_Constraints
   use Param_Types; use Catalogues; use Bayesian_Routines; use Foreground_Clusters
   implicit none
 
-  character(200), parameter::Output_Directory_Default = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/DELETE/'
-   character(200):: Output_Directory = Output_Directory_Default
-   character(200)::Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini'
+  character(500), parameter::Output_Directory_Default = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/DELETE/'
+   character(500):: Output_Directory = Output_Directory_Default
+   character(500)::Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini'
    integer,allocatable:: Catalogue_Identifier(:)
    integer,allocatable::Blank_Field_Catalogue_Identifier(:)
-   character(200),allocatable:: Bias_Output_Directory(:)
+   character(500),allocatable:: Bias_Output_Directory(:)
    integer:: Bin_By_Magnitude_Type = 2 !-1:Absolute Magnitude, 2: Apparent Magnitude-!
    integer:: Run_Type = 1 !-1:SingleRun, 2:Bias And Error-!
    logical:: ReRun_Mocks = .false.
@@ -25,8 +25,8 @@ program Bayesian_DM_Profile_Constraints
 
    !--Command Line Argument Entry--!                
    integer::narg, i
-   character(120)::arg
-   character(200):: Input_Filename
+   character(200)::arg
+   character(500):: Input_Filename
 
    real(double),allocatable::Cluster_Posteriors(:,:,:)
 
@@ -216,7 +216,7 @@ contains
     real(double),dimension(:,:),allocatable::ParameterValues
     integer::SMD_Type = 3
     real(double),dimension(:),allocatable::Position !--Move To Centre?--!
-    character(200):: Mock_Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/Cluster_Bias_Parameter.ini'
+    character(500):: Mock_Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/Cluster_Bias_Parameter.ini'
     real(double)::Redshift = 0.165e0_double
     real(double),allocatable:: iCluster_Aperture_Radius(:)
 
@@ -226,7 +226,7 @@ contains
     real(double):: Param_Min = 0.5, Param_Max = 2.5
 
 
-    character(120):: Run_Directory(size(Directory))
+    character(500):: Run_Directory(size(Directory))
 
     real(double),allocatable:: Bias_Mode(:,:), Mode_Error(:,:) !-Catalogue, Aperture-!
     real(double),allocatable:: Param_Bias_Mode(:,:,:), Param_Mode_Error(:,:,:) !-Parameter, Catalogue, Aperture-!
@@ -389,7 +389,7 @@ contains
 
     real(double),allocatable::Bias_Mode(:), Mode_Error(:)
 
-    character(200)::Run_Output_Directory, Run_Parent_Directory
+    character(500)::Run_Output_Directory, Run_Parent_Directory
     integer::nR
 
     integer::Ap, nAp, Id
@@ -503,12 +503,15 @@ contains
           call common_Catalogue_directories(Cat_Ident(ID), Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
           Catalogue_Directory = Mock_Input
           call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+
+
           if(Blank_Field_Cat_Ident(ID) == Cat_Ident(ID)) then
              BFCat = Cat
           else
              call common_Catalogue_directories(Blank_Field_Cat_Ident(ID), Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
              Catalogue_Directory = Mock_Input
              call catalogue_readin(BFCat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+
           end if
 
           !--Decide between reading in the distribution (only Directory can be specified) or reevaluating the distribution from the input catalogue--!
@@ -656,7 +659,7 @@ contains
     character(*), intent(in):: run_Output_Dir
 
     type(Catalogue)::Catt, BFCatt
-    character(120)::Catalogue_Directory, Catalogue_Filename
+    character(500)::Catalogue_Directory, Catalogue_Filename
     integer,dimension(:),allocatable::Catalogue_Cols
     logical::here
 
@@ -712,46 +715,52 @@ contains
           STOP 'Error - Single_Run'
        end if
 
+       print *, '**Cuts on size >0 used for data and prior to ensure positive'
+       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
+       call Cut_By_PixelSize(BFCatt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
+
        !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
        !--Cuts on data catalogue--!
+       print *, '*** CUTS REMOVED - NEED REIMPLEMENTED'
        print *, '** Cutting Catalogue:'
        call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
-       if(Analyse_with_Physical_Sizes) then
-          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
-       end if
-       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
 
+!!$       if(Analyse_with_Physical_Sizes) then
+!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
+!!$       end if
+       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+
+       print *, '**Testing for Cluster contamination in the Data Catalogue'
+       call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir))
+       read(*,*)
        
        !--Cuts on Catalogue--!
        print *, '** Cutting Prior Catalogue:'
-       print *, 'Size Before Magnitude cut:', Size(BFCatt%RA), minval(BFCatt%MF606W)
        call Cut_by_Magnitude(BFCatt, 23.e0_double)
-       print *, 'Size after Magnitude cut:', Size(BFCatt%RA), minval(BFCatt%MF606W)
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
        end if
        call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
-       call Cut_By_PixelSize(BFCatt, 3.3e0_double, 100.e0_double) !!!!!!!!!!!!!!!!!!!!!
+       print *, '**CUT ON SIZE FOR PRIOR REMOVED, AND MASKING. NEEDS REINTEGRATED'
+!!$       !call Cut_By_PixelSize(BFCatt, 3.3e0_double, 100.e0_double) !!!!!!!!!!!!!!!!!!!!!
 
-       print *, '**Testing for Cluster contamination in the Prior Catalogue'
-       call Foreground_Contamination_NumberDensity(BFCatt, Clusters_In%Position, trim(run_Output_Dir))
 
-       print *, '**Applying Masks to Prior Catalogue:'
-       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/1.e0_double, 1.e0_double, 1.e0_double, 1.e0_double/)/60.e0_double)
+!       print *, '**Applying Masks to Prior Catalogue:'
+!       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        print *, ' '
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
     else
 
        !--Cuts on data catalogue--!
-       print *, '** Cutting Catalogue:'
-       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
-       if(Analyse_with_Physical_Sizes) then
-          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
-       end if
-       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
+       PRINT *, '**CUTS REMOVED (DIST READ IN), NEEDS REIMPLEMENTED'
+!!$       print *, '** Cutting Catalogue:'
+!!$       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+!!$       if(Analyse_with_Physical_Sizes) then
+!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
+!!$       end if
+!!$       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+!!$!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
 
        !--If no Blank Field Information, then attempt a read in--!
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)

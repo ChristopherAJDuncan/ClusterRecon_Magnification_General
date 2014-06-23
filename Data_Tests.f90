@@ -16,13 +16,15 @@ contains
     real(double):: Core_Radius = 0.e0_double
     real(double), allocatable:: NumberDensity(:,:) !-Ap, Seperation-!
     real(double), allocatable:: SeperationGrid(:), SeperationBins(:,:)
-    integer:: nSep = 20
+    integer:: nSep = 50
     real(double),parameter:: Seperation_Limits(2) = (/0.e0_double, 3.e0_double/) !--In ArcMinutes--!
     real(double),allocatable:: Annulus_Area(:)
 
     type(Catalogue):: Annulus_Cat
 
     character(3)::fmtstring
+
+    print *, '***Foreground Contamination tests taken on:', size(Cat%RA), 'galaxies'
 
     !--Set up number density grid--!
     allocate(SeperationGrid(nSep)); SeperationGrid = 0.e0_double
@@ -43,9 +45,11 @@ contains
     allocate(NumberDensity(size(Ap_Pos,1), size(SeperationGrid))); NumberDensity = 0.e0_double
     do Ap = 1, size(Ap_Pos,1)
        do i = 1, size(SeperationGrid)
-          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Ap,:), SeperationBins(i,2)/60.e0_double, Annulus_Cat, Core_Radius = SeperationBins(i,1)/60.e0_double)
+          
+          NumberDensity(Ap,i) = count( dsqrt( (Cat%RA-Ap_Pos(Ap,1))**2.e0_double +(Cat%Dec-Ap_Pos(Ap,2))**2.e0_double ) <= SeperationBins(i,2)/60.e0_double) - count( dsqrt( (Cat%RA-Ap_Pos(Ap,1))**2.e0_double +(Cat%Dec-Ap_Pos(Ap,2))**2.e0_double ) <= SeperationBins(i,1)/60.e0_double )
+!          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Ap,:), SeperationBins(i,2)/60.e0_double, Annulus_Cat, Core_Radius = SeperationBins(i,1)/60.e0_double)
 
-          NumberDensity(Ap,i) = (1.e0_double*size(Annulus_Cat%RA))/Annulus_Area(i)
+          NumberDensity(Ap,i) = (1.e0_double*NumberDensity(Ap,i))/Annulus_Area(i)
 
           call Catalogue_Destruct(Annulus_Cat)
        end do
