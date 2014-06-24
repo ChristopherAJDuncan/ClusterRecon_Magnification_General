@@ -1,0 +1,10 @@
+Readme for the Bayesian Posterior method of DM profile model fitting
+
+
+#####Limitation of Method#######
+
+23Jun2014: With the strong lensing routines, this has been shonw to be unbiased iff a core radius is used. For example a core cut of 1' is unbiased to around r200 = 1.8. Without the core cut, individual posteriors are noisy and combined posteriors have sharp cut off. This could occur for two reasons:
+1. High magnification where the lensed prior is moved out of the survey limits. In this case the renormalisation of the likelihood would be zero.
+2. High and negative magnification for galaxies which lie close to the Einstein Radius. These could also possibly affect prior, howver the tests were don on a pre-constructed prior.
+
+In both these cases, the posterior is manually set to zero. Case 1 is a limiation of the data - we do not know the size-magnitude distribution outside the survey limits.

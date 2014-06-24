@@ -132,7 +132,7 @@ contains
   end function angular_diameter_distance_fromRedshift_scalar
 
   real(double) function Normalised_Hubble_Parameter(z, Cos)
-    !-Returns Omega = rho(z)/pcrit(z = 0), which enters the Friedmann Equation, equivalent to the Hubbel parameter renomrlised to it's presetn day value-!
+    !-Returns Omega = rho(z)/pcrit(z = 0), which enters the Friedmann Equation, equivalent to the Hubble parameter renomrlised to it's presetn day value-!
     real(double), intent(in)::z
     type(cosmology_parameters),intent(in),optional:: Cos
 

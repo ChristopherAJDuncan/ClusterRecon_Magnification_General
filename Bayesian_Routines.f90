@@ -21,6 +21,8 @@ module  Bayesian_Routines
   logical::use_lnSize_Prior = .false.
   logical:: Cuts_Renormalise_Likelihood = .true., Enforce_Weak_Lensing = .false.
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
+  real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
+
 
 contains
 
@@ -358,8 +360,7 @@ contains
 
     !--Set up core cut on data, in degrees--!
 !    Core_Cut_Radius = 0.e0_double
-    Core_Cut_Radius = 0.014e0_double
-!    Core_Cut_Radius = (/0.50e0_double,0.50e0_double,0.025e0_double, 0.5e0_double/)/60.e0_double
+    Core_Cut_Radius = (/1.50e0_double,1.50e0_double,0.25e0_double, 0.5e0_double/)/60.e0_double !-In Arcminutes-!
 
     !--Identify Reduced Catalogue for each aperture--!
     do i =1, size(Ap_Cats)
@@ -1049,8 +1050,6 @@ contains
     logical:: iDo_KDE
 
     !--Cuts on the prior distribution--!
-    real(double):: Size_Cuts(2) = (/0.0e0_double, 100.e0_double/) !(/3.3e0_double, 100.e0_double/)
-    real(double):: Magnitude_Cuts(2) = (/23.e0_double, 100.e0_double/)
     real(double):: Redshift_Cuts(2)  = (/0.22e0_double, 100.e0_double/) !-- If no cuts, then lower should still be < -1 to ensure only galaxies without redshift information are cut
     type(Catalogue)::Cut_Catalogue
 
@@ -1077,8 +1076,8 @@ contains
        Cut_Catalogue = BFCat
 
        print *, '------Applying Cuts on the Catalogue from which the prior is constructed---------'
-       call Cut_By_Magnitude(Cut_Catalogue, Magnitude_Cuts(1), Magnitude_Cuts(2))
-       call Cut_By_PixelSize(Cut_Catalogue, Size_Cuts(1), Size_Cuts(2))
+       call Cut_By_Magnitude(Cut_Catalogue, Prior_Magnitude_Limits(1), Prior_Magnitude_Limits(2))
+       call Cut_By_PixelSize(Cut_Catalogue, Prior_Size_Limits(1), Prior_Size_Limits(2))
        call Cut_by_PhotometricRedshift(Cut_Catalogue, Redshift_Cuts(1), Redshift_Cuts(2))
        print *, '----- Finished Cuts on BF catalogue----------------------------------------------'
 

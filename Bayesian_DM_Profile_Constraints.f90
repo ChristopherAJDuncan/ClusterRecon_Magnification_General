@@ -18,6 +18,8 @@ program Bayesian_DM_Profile_Constraints
    type(Foreground):: Clusters
 !   real(double)::Lens_Redshift = 0.165e0_double
 
+   
+
     !----Mock Parameters-------!
     integer:: nSources = 70000
     real(double)::frac_z = 0.1e0_double
@@ -172,7 +174,7 @@ contains
     namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations
 
-    namelist/Distribution/Distribution_Input, ReEvaluate_Distribution
+    namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits
 
     !--Check for existence of Input File
     inquire(file = Input_File, exist = Here)
@@ -416,6 +418,9 @@ contains
 
     real(double)::eCombined_Posterior(2)
     real(double):: Virial_Mass_Input, Discardable(2), Virial_Mass, eVirial_Mass(2)
+    real(double),allocatable::Mass_Bias_Mode(:)
+    real(double),allocatable:: Mass_Posterior(:,:) !- Grid/Cluster, Value-!
+
 
     !----Mock Parameters-------!
     !--Directory formats must be referenced with respect to teh run directory, and these catalogues must be stored with the same level structure wrt to program--!
@@ -575,6 +580,8 @@ contains
 
        allocate(Bias_Mode(nAp)); Bias_Mode = 0.e0_double
        allocate(Mode_Error(nAp)); Mode_Error = 0.e0_double
+       allocate(Mass_Bias_Mode(nAp)); Bias_Mode = 0.e0_double
+       allocate(Mass_Posterior(nAp+1, size(Combined_Posterior,3))); Mass_Posterior = 0.e0_double
        open(unit = 51, file = trim(Directory(ID))//'BiasesAndErrorVariance.dat')
        write(*,'(2(A))') '!------ Details of Biases output to ', trim(Directory(ID))//'BiasesAndErrorVariance.dat'
        write(51, '(A)') '#Following is Mode and Error around Mode of Combined Posterior:'
@@ -586,11 +593,22 @@ contains
        write(*,'(A)') '!##################################################################!'
        write(*,'(A)') '!##################################################################!'
        write(*,'(A)') ' Finished Combination, following is Mode (shift from known is bias) and variance (Error on Single Run Posterior Errors) of DM profile free parameter:'
+
+       !--Get Equivalent Mass Posterior--!
+       !-1st Column is Mass Grid, c+1 column is c'th cluster-!
+       !--Output grid is in units of 10^14 Msun/h-!
+       call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Combined_Posterior(:,2,:), Mass_Posterior(:,:), iClusters%Redshift(Ap), trim(Directory(ID))//'Mass_Combined_Posterior.dat')
+
        do Ap = 1, nAp
+
+
           D_l =  angular_diameter_distance_fromRedshift(0.e0_double, iClusters%Redshift(Ap))
           Area = 3.142e0_double*(D_l*((3.142e0_double*Cluster_Aperture_Radius(Ap))/180.e0_double))**2.e0_double
        
           call Posterior_Statistics(Combined_Posterior(Ap,1,:), Combined_Posterior(Ap,2,:), ModeVal = Bias_Mode(Ap), AntiSymm_Error = eCombined_Posterior)
+
+          !--Get Mass Mode and Error--!
+          call Posterior_Statistics(Mass_Posterior(1,:), Mass_Posterior(Ap+1,:), ModeVal = Mass_Bias_Mode(Ap), AntiSymm_Error = eVirial_Mass)
 
           Mode_Error(Ap) = variance_discrete(ML_Point(Ap,:), ML_Point(Ap,:))
           if(Mode_Error(Ap) < 0.e0_double) then
@@ -609,9 +627,9 @@ contains
           !--Mass of Input--!
           call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Clusters%DM_Profile_Parameter(Ap), (/0.e0_double, 0.e0_double/), Virial_Mass_Input, Discardable, iClusters%Redshift(Ap))
           !--Mass of Output--!
-          call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Bias_Mode(Ap), eCombined_Posterior, Virial_Mass, eVirial_Mass, iClusters%Redshift(Ap))
+!          call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Bias_Mode(Ap), eCombined_Posterior, Virial_Mass, eVirial_Mass, iClusters%Redshift(Ap))
 
-          write(51,'(I2,x,8(e10.4,x))') Ap, Bias_Mode(Ap), Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap), eCombined_Posterior(2), eCombined_Posterior(1), Virial_Mass, Virial_Mass-Virial_Mass_Input, eVirial_Mass(2), eVirial_Mass(1)
+          write(51,'(I2,x,8(e10.4,x))') Ap, Bias_Mode(Ap), Bias_Mode(Ap) - Clusters%DM_Profile_Parameter(Ap), eCombined_Posterior(2), eCombined_Posterior(1), Mass_Bias_Mode(Ap)*1.e14_double, Mass_Bias_Mode(Ap)*1.e14_double-Virial_Mass_Input, eVirial_Mass(2)*1.e14_double, eVirial_Mass(1)*1.e14_double
 
           write(Bias_String, '(e10.4)') Bias_Mode(Ap)
           write(Error_String, '(e10.4)') Mode_Error(Ap)
@@ -668,6 +686,7 @@ contains
     real(double),allocatable::Cluster_Mean(:), Cluster_Variance(:), Cluster_Mode(:), AntiSymm_Variance(:,:)
     real(double):: Virial_Mass_Input, Virial_Mass, Virial_Mass_Error(2), Discardable(2)
     character(10):: Mass_String, Error_Mass_String_Positive, Error_Mass_String_Negative
+    real(double),allocatable:: Mass_Posterior(:,:) !-Grid/Ap, Value-!
     integer::Ap
 
     INTERFACE
@@ -716,15 +735,12 @@ contains
        end if
 
        print *, '**Cuts on size >0 used for data and prior to ensure positive'
-       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-       call Cut_By_PixelSize(BFCatt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-
        !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
        !--Cuts on data catalogue--!
        print *, '*** CUTS REMOVED - NEED REIMPLEMENTED'
        print *, '** Cutting Catalogue:'
-       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
-
+       call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 !!$       if(Analyse_with_Physical_Sizes) then
 !!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
 !!$       end if
@@ -732,35 +748,34 @@ contains
 
        print *, '**Testing for Cluster contamination in the Data Catalogue'
        call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir))
-       read(*,*)
        
        !--Cuts on Catalogue--!
        print *, '** Cutting Prior Catalogue:'
-       call Cut_by_Magnitude(BFCatt, 23.e0_double)
+       call Cut_by_Magnitude(BFCatt, Prior_Magnitude_Limits(1))
        if(Analyse_with_Physical_Sizes) then
           call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
        end if
        call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
-       print *, '**CUT ON SIZE FOR PRIOR REMOVED, AND MASKING. NEEDS REINTEGRATED'
+       call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 !!$       !call Cut_By_PixelSize(BFCatt, 3.3e0_double, 100.e0_double) !!!!!!!!!!!!!!!!!!!!!
 
 
-!       print *, '**Applying Masks to Prior Catalogue:'
-!       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
+       print *, '**Applying Masks to Prior Catalogue:'
+       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        print *, ' '
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
     else
 
        !--Cuts on data catalogue--!
-       PRINT *, '**CUTS REMOVED (DIST READ IN), NEEDS REIMPLEMENTED'
-!!$       print *, '** Cutting Catalogue:'
-!!$       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+       print *, '** Cutting Catalogue:'
+       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 !!$       if(Analyse_with_Physical_Sizes) then
 !!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
 !!$       end if
-!!$       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-!!$!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
+       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
 
        !--If no Blank Field Information, then attempt a read in--!
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
@@ -785,9 +800,14 @@ contains
     write(51, '(A)') '# Cluster, Input_Alpha, Mode Alpha(DM free parameter), Alpha Error (+/-), Input Virial Mass, Virial_Mass (Mode), Mode Mass Error (+/-)'
     
     print *, '!----------------------------------------------------------------------------------!'
+   call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Returned_Cluster_Posteriors(:,2,:), Mass_Posterior(:,:), Clusters_In%Redshift(Ap), trim(Bayesian_Routines_Output_Directory)//'Mass_Posterior_per_aperture.dat')
+
+
     do Ap = 1, size(Returned_Cluster_Posteriors,1)
        !--Get Mean, Mode, Variance--!                                                                                                                                                                              
        call Posterior_Statistics(Returned_Cluster_Posteriors(Ap,1,:), Returned_Cluster_Posteriors(Ap,2,:), Cluster_Mean(Ap), Cluster_Mode(Ap), Cluster_Variance(Ap), AntiSymm_Variance(Ap,:))
+       call Posterior_Statistics(Mass_Posterior(1,:), Mass_Posterior(Ap+1,:), ModeVal = Virial_Mass, AntiSymm_Error = Virial_Mass_Error)
+
        if(Surface_Mass_Profile == 1) then
           !--Convert into the correct units (i.e. Msun/h)--!                                                                                                                                                       
           Cluster_Mean(Ap) = 1.e18_double*Cluster_Mean(Ap); Cluster_Mode(Ap) =  1.e18_double*Cluster_Mode(Ap); Cluster_Variance(Ap) = 1.e18_double*Cluster_Variance(Ap); AntiSymm_Variance(Ap,:) = 1.e18_double*AntiSymm_Variance(Ap,:)
@@ -806,7 +826,7 @@ contains
        write(*,'(7(A),e9.3)') '                                   and (Mode): ', trim(Mass_String), '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative, ' S/N:', Cluster_Mode(Ap)/AntiSymm_Variance(Ap,1)
 
        !--Get Mode Virial Mass--!                                                                                                                                                                               
-       call  Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Cluster_Mode(Ap), AntiSymm_Variance(Ap,:), Virial_Mass, Virial_Mass_Error, Redshift = Clusters_In%Redshift(Ap))
+!DEPRECATED FOR COVERT ROUTINE       call  Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Cluster_Mode(Ap), AntiSymm_Variance(Ap,:), Virial_Mass, Virial_Mass_Error, Redshift = Clusters_In%Redshift(Ap))
        write(Mass_String, '(e9.3)') Virial_Mass; write(Error_Mass_String_Positive, '(e8.2)') Virial_Mass_Error(2); write(Error_Mass_String_Negative, '(e8.2)') Virial_Mass_Error(1)
        write(*,'(7A, e9.3)') "Virial Mass of Cluster (Mode):", Mass_String, '   +', trim(Error_Mass_String_Positive), ' -', Error_Mass_String_Negative, ' S/N:', Virial_Mass/Virial_Mass_Error(1)
        print *, ' '
@@ -814,7 +834,7 @@ contains
        !--Mass of Input--!                                                                                                                                                                                     
        call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Clusters%DM_Profile_Parameter(Ap), (/0.e0_double, 0.e0_double/), Virial_Mass_Input, Discardable, Clusters_In%Redshift(Ap))
        
-       write(51, '(I2,x,8(e9.3,x))') Ap, Clusters%DM_Profile_Parameter(Ap),  Cluster_Mode(Ap), AntiSymm_Variance(Ap,2), AntiSymm_Variance(Ap,1), Virial_Mass_Input, Virial_Mass,  Virial_Mass_Error(2), Virial_Mass_Error(1) 
+       write(51, '(I2,x,8(e9.3,x))') Ap, Clusters%DM_Profile_Parameter(Ap),  Cluster_Mode(Ap), AntiSymm_Variance(Ap,2), AntiSymm_Variance(Ap,1), Virial_Mass_Input, Virial_Mass*1.e14_double,  Virial_Mass_Error(2)*1.e14_double, Virial_Mass_Error(1)*1.e14_double 
     end do
     print *, '!----------------------------------------------------------------------------------!'
     close(51)

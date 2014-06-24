@@ -1,3 +1,4 @@
+!--#Version that uses r200 defined as the radius on which density contained in halo is 200rho_crit - See Wright and Brainerd
 module Mass_Profiles
   use Param_Types
   implicit none
