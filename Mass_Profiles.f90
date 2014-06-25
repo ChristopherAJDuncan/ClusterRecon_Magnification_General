@@ -143,6 +143,7 @@ module Mass_Profiles
       rs = r200/c
 
       !--Following is analytic form for the derivative, taken from Wolfram Alpha--!
+     PRINT *, '** Using outdated version of mass in error estiamtion'
       dDelcdr200 = (200.e0_double/3.e0_double)*((c*c)/rs)*( (3.e0_double*((1.e0_double+c)**2.e0_double)*dlog(1.e0_double+c) - c*(3.e0_double+4.e0_double*c))/((c-(1.e0_double+c)*dlog(1.e0_double+c))**2.e0_double) )
 
       MR = NFW_Mass_withinRadius(R, z, r_200 = r200)
@@ -417,11 +418,17 @@ module Mass_Profiles
       real(double), intent(in)::VirialRadius(:), z
       real(double),dimension(size(VirialRadius))::get_NFW_VirialMass_from_VirialRadius
 
-      real(double)::rho_c
+      real(double)::rho_c, Omega_matter, rho_c0
 
       rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(z)
+      rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
 
-      get_NFW_VirialMass_from_VirialRadius = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(VirialRadius**3.e0_double) * rho_c
+      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the critical density ** (e.g. Wright, Brainerd 1999) In this case, the fit of Dolag et al may not be correct
+      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the mean matter density ** (e.g. Dolag 2004, Heymans 2008)
+      !Omega_matter = 1.e0_double
+      Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
+
+      get_NFW_VirialMass_from_VirialRadius = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(VirialRadius**3.e0_double) * rho_c * Omega_Matter
 
     end function get_NFW_VirialMass_from_VirialRadius
 
@@ -430,11 +437,17 @@ module Mass_Profiles
       real(double), intent(in)::VirialMass, z
       real(double)::get_NFW_VirialRadius_from_VirialMass_Scalar
 
-      real(double)::rho_c
+      real(double)::rho_c, Omega_matter, rho_c0
 
       rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(z)
+      rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
 
-      get_NFW_VirialRadius_from_VirialMass_Scalar = ( (VirialMass*3.e0_double)/(800e0_double*3.142e0_double*rho_c) )**(1.e0_double/3.e0_double)
+      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the critical density ** (e.g. Wright, Brainerd 1999)
+      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the mean matter density ** (e.g. Dolag 2004, Heymans 2008)
+      !Omega_matter = 1.e0_double
+      Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
+
+      get_NFW_VirialRadius_from_VirialMass_Scalar = ( (VirialMass*3.e0_double)/(800e0_double*3.142e0_double*rho_c*Omega_Matter) )**(1.e0_double/3.e0_double)
 
     end function get_NFW_VirialRadius_from_VirialMass_Scalar
 
@@ -447,13 +460,18 @@ module Mass_Profiles
       real(double), intent(in),optional::r_s
       real(double),intent(out)::delta_c, c, M200, rho_c
 
-      real(double)::omega_matter,rs !-Evaluated at the redshift of the Halo-!                                                                                                                                        
+      real(double)::omega_matter,rs, rho_c0 !-Evaluated at the redshift of the Halo-!                                                                                                                                        
 
       !--Get M200 for entered r200--!
       rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(z) !-in Units [M_Sun/h][h/Mpc]^3. Uses G/H_0 = 4.3017e-13 (Mpc/h)^3(h/M_sun)-!
+      rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
 
-      M200 = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(r200**3.e0_double) * rho_c !-Could also use rho_bar = rho_crit * Omega_matter(z) (eg CH08)
+      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the critical density ** (e.g. Wright, Brainerd 1999)
+      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the mean matter density ** (e.g. Dolag 2004, Heymans 2008)
+      !Omega_matter = 1.e0_double
+      Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
 
+      M200 = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(r200**3.e0_double) * rho_c * Omega_Matter !-Could also use rho_bar = rho_crit * Omega_matter(z) (eg CH08)
 
       !--Get Concentration/rs
       if(present(r_s)) then
@@ -464,7 +482,6 @@ module Mass_Profiles
          rs = r200/c
       end if
 
-      Omega_matter = 1.e0_double!0.3e0_double*((1+z)**3.e0_double) -Incorrect, as rho_crit needs to vary also
       delta_c =  ((200.e0_double*Omega_Matter*c*c*c)/3.e0_double)/(dlog(1.e0_double+c) - c/(1.e0_double+c))
       
     end subroutine get_NFW_Parameters

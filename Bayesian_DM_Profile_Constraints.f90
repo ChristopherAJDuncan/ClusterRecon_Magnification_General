@@ -404,7 +404,7 @@ contains
 
     !--Conversion Declarations--!
     real(double)::D_l, Area
-    character(12)::Error_String, Bias_String
+    character(12)::Error_String, Bias_String, apString
 
     character(7)::fmtstring
 
@@ -419,7 +419,7 @@ contains
     real(double)::eCombined_Posterior(2)
     real(double):: Virial_Mass_Input, Discardable(2), Virial_Mass, eVirial_Mass(2)
     real(double),allocatable::Mass_Bias_Mode(:)
-    real(double),allocatable:: Mass_Posterior(:,:) !- Grid/Cluster, Value-!
+    real(double),allocatable:: Mass_Posterior(:,:,:) !- Aperture, Grid/Posterior, Value-!
 
 
     !----Mock Parameters-------!
@@ -581,7 +581,7 @@ contains
        allocate(Bias_Mode(nAp)); Bias_Mode = 0.e0_double
        allocate(Mode_Error(nAp)); Mode_Error = 0.e0_double
        allocate(Mass_Bias_Mode(nAp)); Bias_Mode = 0.e0_double
-       allocate(Mass_Posterior(nAp+1, size(Combined_Posterior,3))); Mass_Posterior = 0.e0_double
+       allocate(Mass_Posterior(nAp, 2, size(Combined_Posterior,3))); Mass_Posterior = 0.e0_double
        open(unit = 51, file = trim(Directory(ID))//'BiasesAndErrorVariance.dat')
        write(*,'(2(A))') '!------ Details of Biases output to ', trim(Directory(ID))//'BiasesAndErrorVariance.dat'
        write(51, '(A)') '#Following is Mode and Error around Mode of Combined Posterior:'
@@ -597,10 +597,9 @@ contains
        !--Get Equivalent Mass Posterior--!
        !-1st Column is Mass Grid, c+1 column is c'th cluster-!
        !--Output grid is in units of 10^14 Msun/h-!
-       call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Combined_Posterior(:,2,:), Mass_Posterior(:,:), iClusters%Redshift(Ap), trim(Directory(ID))//'Mass_Combined_Posterior.dat')
-
        do Ap = 1, nAp
-
+          write(apString, '(I1)') Ap
+          call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Combined_Posterior(Ap,:,:), Mass_Posterior(Ap,:,:), iClusters%Redshift(Ap), trim(Directory(ID))//'Mass_Combined_Posterior_'//trim(apString)//'.dat')
 
           D_l =  angular_diameter_distance_fromRedshift(0.e0_double, iClusters%Redshift(Ap))
           Area = 3.142e0_double*(D_l*((3.142e0_double*Cluster_Aperture_Radius(Ap))/180.e0_double))**2.e0_double
@@ -608,7 +607,7 @@ contains
           call Posterior_Statistics(Combined_Posterior(Ap,1,:), Combined_Posterior(Ap,2,:), ModeVal = Bias_Mode(Ap), AntiSymm_Error = eCombined_Posterior)
 
           !--Get Mass Mode and Error--!
-          call Posterior_Statistics(Mass_Posterior(1,:), Mass_Posterior(Ap+1,:), ModeVal = Mass_Bias_Mode(Ap), AntiSymm_Error = eVirial_Mass)
+          call Posterior_Statistics(Mass_Posterior(Ap,1,:), Mass_Posterior(Ap,2,:), ModeVal = Mass_Bias_Mode(Ap), AntiSymm_Error = eVirial_Mass)
 
           Mode_Error(Ap) = variance_discrete(ML_Point(Ap,:), ML_Point(Ap,:))
           if(Mode_Error(Ap) < 0.e0_double) then
@@ -685,8 +684,8 @@ contains
     real(double)::D_l, Area
     real(double),allocatable::Cluster_Mean(:), Cluster_Variance(:), Cluster_Mode(:), AntiSymm_Variance(:,:)
     real(double):: Virial_Mass_Input, Virial_Mass, Virial_Mass_Error(2), Discardable(2)
-    character(10):: Mass_String, Error_Mass_String_Positive, Error_Mass_String_Negative
-    real(double),allocatable:: Mass_Posterior(:,:) !-Grid/Ap, Value-!
+    character(10):: Mass_String, Error_Mass_String_Positive, Error_Mass_String_Negative, apString
+    real(double),allocatable:: Mass_Posterior(:,:,:) !-Aperture, Grid/Posterior, Value-!
     integer::Ap
 
     INTERFACE
@@ -734,7 +733,7 @@ contains
           STOP 'Error - Single_Run'
        end if
 
-       print *, '**Cuts on size >0 used for data and prior to ensure positive'
+       PRINT *, ' '
        !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
        !--Cuts on data catalogue--!
        print *, '*** CUTS REMOVED - NEED REIMPLEMENTED'
@@ -757,17 +756,17 @@ contains
        end if
        call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
        call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-!!$       !call Cut_By_PixelSize(BFCatt, 3.3e0_double, 100.e0_double) !!!!!!!!!!!!!!!!!!!!!
 
-
-       print *, '**Applying Masks to Prior Catalogue:'
-       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
+       print *, '** MO MASKS APPLIED TO PRIOR'
+!       print *, '**Applying Masks to Prior Catalogue:'
+!       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        print *, ' '
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
     else
 
        !--Cuts on data catalogue--!
+       PRINT *, ' '
        print *, '** Cutting Catalogue:'
        call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
        call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
@@ -775,7 +774,7 @@ contains
 !!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
 !!$       end if
        call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-!    call Cut_By_PixelSize(Catt, 0.e0_double, 25.e0_double) !!!!!!!!!!!!!!!!!!!!!!!
+       PRINT *, ' '
 
        !--If no Blank Field Information, then attempt a read in--!
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
@@ -799,14 +798,16 @@ contains
     open(51, file = trim(Bayesian_Routines_Output_Directory)//'Mass_Estimates.dat')
     write(51, '(A)') '# Cluster, Input_Alpha, Mode Alpha(DM free parameter), Alpha Error (+/-), Input Virial Mass, Virial_Mass (Mode), Mode Mass Error (+/-)'
     
-    print *, '!----------------------------------------------------------------------------------!'
-   call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Returned_Cluster_Posteriors(:,2,:), Mass_Posterior(:,:), Clusters_In%Redshift(Ap), trim(Bayesian_Routines_Output_Directory)//'Mass_Posterior_per_aperture.dat')
-
+    allocate(Mass_Posterior(size(Returned_Cluster_Posteriors,1), size(Returned_Cluster_Posteriors,2), size(Returned_Cluster_Posteriors,3))); Mass_Posterior = 0.e0_double
 
     do Ap = 1, size(Returned_Cluster_Posteriors,1)
-       !--Get Mean, Mode, Variance--!                                                                                                                                                                              
+       !--Get Mean, Mode, Variance--!                                                                                                                                                                             
+       write(apString, '(I1)') Ap
+       print *, '!----------------------------------------------------------------------------------!'
+       call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Returned_Cluster_Posteriors(Ap,:,:), Mass_Posterior(Ap,:,:), Clusters_In%Redshift(Ap), trim(Bayesian_Routines_Output_Directory)//'Mass_Posterior_Aperture_'//trim(apString)//'.dat')
+ 
        call Posterior_Statistics(Returned_Cluster_Posteriors(Ap,1,:), Returned_Cluster_Posteriors(Ap,2,:), Cluster_Mean(Ap), Cluster_Mode(Ap), Cluster_Variance(Ap), AntiSymm_Variance(Ap,:))
-       call Posterior_Statistics(Mass_Posterior(1,:), Mass_Posterior(Ap+1,:), ModeVal = Virial_Mass, AntiSymm_Error = Virial_Mass_Error)
+       call Posterior_Statistics(Mass_Posterior(Ap,1,:), Mass_Posterior(Ap,2,:), ModeVal = Virial_Mass, AntiSymm_Error = Virial_Mass_Error)
 
        if(Surface_Mass_Profile == 1) then
           !--Convert into the correct units (i.e. Msun/h)--!                                                                                                                                                       

@@ -243,19 +243,32 @@ contains
     integer:: i
     real(double):: Discardable(1)
     character(20)::fmt
+    real(double):: Redshift
+
+    !-Posteriors entered must be in the form of the output mass posterior: that is, Dimension 1 labels grid/cluster, so that element A of Dim. 1 is Grid if A==1, or Cluster A-1 if A>1
 
     if(size(Posteriors,1) < 2) STOP 'Convert_VirialRadius_Posteriors_to_VirialMass - Error in input posterior - no grid/value'
     if(size(Mass_Posteriors) /= size(Posteriors)) STOP 'Convert_VirialRadius_Posteriors_to_VirialMass - Error in size of mass posterior, not equal to Original posterior' !Can be deleted in the case of interpolation
 
+    print *, 'Converting alpha posterior to Mass Posterior'
 
+!!$    if(size(Lens_Redshift) /= 1 .and. size(Lens_Redshift) /= size(Redshift)) STOP 'Convert_Alpha_Posteriors_to_VirialMass - Either enter 1 redshift or a redshift for each cluster'
+!!$    if(size(Lens_Redshift) == 1) then
+!!$       Redshift = Lens_Redshift(1)
+!!$    else
+!!$       Redshift = Lens_Redshift
+!!$    end if
+    
+
+    !--Assumes that all the clusters entered are at teh same redshift--!
     do i = 1, size(Posteriors,2)
-       call Halo_Mass(SMD_Profile, Posteriors(1,i), (/0.e0_double/), Mass_Posteriors(1,i), Discardable, Lens_Redshift)
+       call Halo_Mass(SMD_Profile, Posteriors(1,i), (/0.e0_double/), Mass_Posteriors(1,i), Discardable, Redshift)
        
-       !--p(M)dM = p(r)dr -> p(M) \propto p(r)/r^2 
+       !--p(M)dM = p(r)dr -> p(M) \propto p(r)/r^2 -- Proportionality just affects renormalisation
        Mass_Posteriors(2:,i) = Posteriors(2:,i)/virial_Radius_from_ProfileFreeParameter(SMD_Profile, Posteriors(1,i))
     end do
 
-    print *, 'Mass Posterior output on grid of 10^13 Msun/h'
+    print *, '**Mass Posterior output on grid of 10^14 Msun/h'
     Mass_Posteriors(1,:) = Mass_Posteriors(1,:)/1.e14_double
 
     !--Renormalise
@@ -272,6 +285,9 @@ contains
        write(*,'(2A)') '* Output file to: ', trim(Output_Label)//'VirialMass_Posterior.dat'
        close(78)
     end if
+    print *, '** Virial Mass Posterior output to: ', trim(Output_Label)//'VirialMass_Posterior.dat'
+
+    print *, '---Finished Conversion'
 
   end subroutine Convert_Alpha_Posteriors_to_VirialMass
 
@@ -335,6 +351,8 @@ contains
 
     real(double),allocatable::MagGrid(:) !--Discardable for now as marginalised over--!
 
+    type(catalogue)::TCat
+
     INTERFACE
          subroutine DM_Profile_Variable_Posteriors_CircularAperture(Cat, Ap_Pos, Ap_Radius, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
            use Param_Types; use Catalogues
@@ -356,11 +374,15 @@ contains
        iAp_Radius = Ap_Radius
     end if
 
-    print *, '**Global catalogue has mean (Size, Mag):', mean_discrete(Cat%Sizes), mean_discrete(Cat%MF606W)
-
     !--Set up core cut on data, in degrees--!
 !    Core_Cut_Radius = 0.e0_double
-    Core_Cut_Radius = (/1.50e0_double,1.50e0_double,0.25e0_double, 0.5e0_double/)/60.e0_double !-In Arcminutes-!
+    Core_Cut_Radius = 0.5E0_double/60.e0_double !-Used for Mocks-!
+!    Core_Cut_Radius = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/)/60.e0_double !-In Arcminutes-!
+    call Mask_Circular_Aperture(TCat, Ap_Pos, Core_Cut_Radius)
+    TCat = Cat
+
+    print *, '**Global catalogue has mean [Core mask accounted for] (Size, Mag):', mean_discrete(TCat%Sizes), mean_discrete(TCat%MF606W)
+    call Catalogue_Destruct(TCat)
 
     !--Identify Reduced Catalogue for each aperture--!
     do i =1, size(Ap_Cats)
@@ -933,7 +955,6 @@ contains
                    end if
 
                       !--If no KDE Extrapolation, then this will set to a default value (effectively zero) outside the prior grid range
-                   !OBSOLETE Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c)+2.17e0_double*Effective_Convergence(c,i), Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)), PriorMagGrid, PriorSizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*(1.e0_double/(1+Effective_Convergence(c,i)))*RedshiftPDF(z)
                    end if
              case default
                 STOP 'DM_Profile_Variable_Posterior - Error in choosing method of finding posterior'
@@ -1031,6 +1052,10 @@ contains
 !!$    call system('rm '//trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat')
 
   end subroutine DM_Profile_Variable_Posterior
+
+
+!  real(double) function Evaluate_Posterior_atPoint(LSize, LMag, Redshift, MagnificationFactor, PriorMagGrid, PriorSizeGrid, PriorSizeMag, PriorMag)
+!    real(double), intent(in)
 
 
   subroutine return_Size_Magnitude_Distribution(MagGrid, SizeGrid, Dist, Dir, BFCat, do_KDE)
