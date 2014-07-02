@@ -15,11 +15,16 @@ module  Bayesian_Routines
 
   integer::Surface_Mass_Profile = 3 !-1:Flat, 2:SIS, 3:NFW-!
 
-  !--Method: 1: Size-Only, 2: Size-Magnitude--!
-  integer:: Posterior_Method = 2 !--Eventually pass in--!
+  !--Method: 1: Size-Only, 2: Size-Magnitude, 3:Magnitude Only, 4: SizeMag - MagOnly Combination (SizeLimits)--!
+  integer:: Posterior_Method = 2
+
+  logical:: Enforce_Weak_Lensing = .false.
+  real(double):: Core_Cut_Radius(4) = 0.5e0_double !--Default
+!  real(double):: Core_Cut_Radius(4) = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/) !-In Arcminutes-! Data
+
   logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false., allow_KDE_Extrapolation = .false.
   logical::use_lnSize_Prior = .false.
-  logical:: Cuts_Renormalise_Likelihood = .true., Enforce_Weak_Lensing = .false.
+  logical:: Cuts_Renormalise_Likelihood = .true.
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
   real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
 
@@ -55,7 +60,6 @@ contains
              nPosteriorsSkipped = nPosteriorsSkipped + 1
              cycle
           end if
-
 
           if(all(Posteriors(c,:)*Combination_Normalisation == 0.e0_double)) then
              print *, 'Invalid Posterior for galaxy:', c, ' (==0) press [ENTER] to output an stop..'; READ(*,*)
@@ -258,14 +262,16 @@ contains
 !!$    else
 !!$       Redshift = Lens_Redshift
 !!$    end if
-    
+    Redshift = Lens_Redshift
+
 
     !--Assumes that all the clusters entered are at teh same redshift--!
     do i = 1, size(Posteriors,2)
        call Halo_Mass(SMD_Profile, Posteriors(1,i), (/0.e0_double/), Mass_Posteriors(1,i), Discardable, Redshift)
        
        !--p(M)dM = p(r)dr -> p(M) \propto p(r)/r^2 -- Proportionality just affects renormalisation
-       Mass_Posteriors(2:,i) = Posteriors(2:,i)/virial_Radius_from_ProfileFreeParameter(SMD_Profile, Posteriors(1,i))
+!       Mass_Posteriors(2:,i) = Posteriors(2:,i)/(virial_Radius_from_ProfileFreeParameter(SMD_Profile, Posteriors(1,i))**2.e0_double)
+       Mass_Posteriors(2:,i) = Posteriors(2:,i)/(Mass_Posteriors(1,i)**(2.e0_double/3.e0_double))
     end do
 
     print *, '**Mass Posterior output on grid of 10^14 Msun/h'
@@ -320,7 +326,7 @@ contains
     real(double)::SizeGrid_Lower = 0.e0_double, SizeGrid_Upper = 0.0035e0_double, dSizeGrid
     real(double),allocatable::SizeGrid(:)
 
-    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:)
+    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:)
 
     real(double),allocatable::SizePrior_byMag(:,:) !-MagBin, GridValue-!
     real(double),allocatable::Aperture_Posterior_byMag(:,:,:) !-MagBin, Grid/Posterior, Value-! 
@@ -331,8 +337,6 @@ contains
 
     real(double)::Lens_Redshift = 0.165e0_double
     real(double)::Renorm
-
-    real(double)::Core_Cut_Radius(4)
 
     character(2)::fmtString, apString
 
@@ -375,9 +379,9 @@ contains
     end if
 
     !--Set up core cut on data, in degrees--!
-!    Core_Cut_Radius = 0.e0_double
-    Core_Cut_Radius = 0.5E0_double/60.e0_double !-Used for Mocks-!
-!    Core_Cut_Radius = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/)/60.e0_double !-In Arcminutes-!
+    Core_Cut_Radius = Core_Cut_Radius/60.e0_double !-Used for Mocks-!
+
+    !--Get Mean of size and magnitude distributions in masked apertures
     call Mask_Circular_Aperture(TCat, Ap_Pos, Core_Cut_Radius)
     TCat = Cat
 
@@ -392,11 +396,8 @@ contains
        print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), 'for aperture:', i
        call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i), Core_Radius = Core_Cut_Radius(i))
        
-
        print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
     end do
-!!$    print *, 'Reading, line 402 Bayesian Routines'
-!!$    read(*,*)
 
     do i =1, size(Ap_Cats)
        print *, 'Aperture:', i, ' contains:', size(Ap_Cats(I)%RA), ' galaxies'
@@ -405,15 +406,14 @@ contains
     print *, count(Cat%Redshift >= 0.e0_double), ' of ',size(Cat%Redshift), ' galaxies have redshift information'
 
     !--If a catalogue for the blank field is passed in, then use this catalogue to get the intrinsic distributions--!
-
     if(KDE_OnTheFly == .false.) then
        if(reproduce_Prior) then
           if(present(Blank_Field_Catalogue) == .false.) STOP 'DM_Profile_Variable_Posteriors_CircularAperture - Blankf Field Catalogue must be entered to allow for the production of the prior on a grid'
           write(*,'(A)') 'Producing Distribution from Catalogue'
-          call return_Size_Magnitude_Distribution(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Distribution_Directory, Blank_Field_Catalogue)
+          call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, Blank_Field_Catalogue)
        else
           write(*,'(A)') 'Reading in distribution from:', Distribution_Directory
-          call return_Size_Magnitude_Distribution(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Distribution_Directory)
+          call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory)
           print *, 'Success:', Distribution_Directory
        end if
     else
@@ -436,9 +436,9 @@ contains
           call DM_Profile_Variable_Posterior(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior, PriorCatalogue = Blank_Field_Catalogue)  
        else
           if(present(Blank_Field_Catalogue)) then
-             call DM_Profile_Variable_Posterior(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior, PriorCatalogue = Blank_Field_Catalogue, PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution)  
+             call DM_Profile_Variable_Posterior(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior, PriorCatalogue = Blank_Field_Catalogue, PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
           else
-             call DM_Profile_Variable_Posterior(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior, PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution)  
+             call DM_Profile_Variable_Posterior(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior, PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
           end if
        end if
 
@@ -477,7 +477,7 @@ contains
 
   end subroutine DM_Profile_Variable_Posteriors_CircularAperture
 
-  subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior)
+  subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
     use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles; use Distributions, only: ch08_redshift_distribution_Array, CH08_Redshift_Distribution_Scalar; use Interpolaters, only: Linear_Interp
     use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
@@ -498,18 +498,20 @@ contains
     character(*), intent(in)::Output_Prefix
     logical,intent(in)::lnSize_Prior
     type(Catalogue), intent(in), optional:: PriorCatalogue
-    real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), Prior(:,:) !-Magnitude, Size-!
+    real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), MagPrior(:), Prior(:,:) !-Magnitude, Size-!
 
     integer::i, c, j, z, m
+    integer:: Galaxy_Posterior_Method
 
     !--Variable Grid Declarations-!
     integer::nGrid = 1000
     real(double)::VGrid_Lower, VGrid_Higher
 
     !-Size_Only_Prior contains the priors which depends only on size, which is evalutaed for each redshift and integrates over all magnitudes
-    real(double),dimension(:),allocatable:: Size_Only_Prior
+    real(double),dimension(:),allocatable:: Size_Only_Prior, Mag_Prior
     !--Size_Only_Mag_Prior contains the prior for size which evaluated over the mag grid, which will be integrated over. Contains p_[theta_0, m_0|z]*p[z|m_0] for all m in grid
     real(double),dimension(:,:),allocatable::  Kappa_Renormalised_Prior, Survey_Renormalised_Prior, Size_Only_Mag_Prior
+    real(double),dimension(:),allocatable::Kappa_Renormalised_MagPrior, Survey_Renormalised_MagPrior
     real(double),allocatable::Posterior_perGalaxy(:,:) !-Galaxy, Posterior-! - Uses Same Grid as overall Posterior -
     real(double),allocatable:: Effective_Magnification(:,:) !-Galaxy, DM Free Parameter-! - Only Model Dependant
 
@@ -545,20 +547,22 @@ contains
     !--Kappa dependant renormalisation--!
 !!    real(double),dimension(2):: Survey_Magnitude_Limits, Survey_Size_Limits !--User defined needs edit to below, these are set by default from distribution-!
     real(double),dimension(2):: Renormalisation_Magnitude_Limits, Renormalisation_Size_Limits
-    real(double),allocatable:: MagnificationGrid(:), Renormalisation_by_Magnification(:), Convergence_Renorm_PerGalaxy(:,:)
+    real(double),allocatable:: MagnificationGrid(:), Renormalisation_by_Magnification(:), Convergence_Renorm_PerGalaxy(:,:),  MagOnly_Renormalisation_by_Magnification(:)
     !vv Must be set here vv!
     integer:: nMagnificationGrid = 2000
     real(double):: MagFactorGridLower = 1.e0_double, MagFactorGridHigher = 65.e0_double
     integer:: IntegrationFlag = -1000
 
+    integer:: nMagPosterior, nSizePosterior, nSizeMagPosterior
+
     !--Testing Declarations--!
     real(double),dimension(3,size(Cat%RA)):: Convergence_per_Cluster
-    integer:: n_Default_Source_Redshift_Used, nGal_Ignored_MagLimits, nGal_Ignored_SizeLimits
+    integer:: n_Default_Source_Redshift_Used, nGal_Ignored_MagLimits, nGal_Ignored_SizeLimits, nGal_Ignored_NaN
     real(double), allocatable:: Aperture_Smoothed_Size_PDF(:), Aperture_Smoothed_Mag_PDF(:)
-
+    logical:: Produce_Shift_inAperture = .false.
 
     INTERFACE
-       subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior)
+       subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
          use Param_Types; use Catalogues
          type(Catalogue)::Cat
          integer,intent(in)::Mass_Profile !-1:Flat, 2:SIS, 3:NFW-!
@@ -569,7 +573,7 @@ contains
          logical,intent(in)::lnSize_Prior
 
          type(Catalogue), intent(in), optional:: PriorCatalogue
-         real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), Prior(:,:) !-Magnitude, Size-!
+         real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), MagPrior(:), Prior(:,:) !-Magnitude, Size-!
        END subroutine DM_Profile_Variable_Posterior
     END INTERFACE
 
@@ -578,10 +582,14 @@ contains
     if(Analyse_with_Physical_Sizes) STOP 'DM_Profile_Variable_Posterior - I HAVE DISABLED THE ABILITY TO USE PHYISCAL SIZES AS UNNECESSARY, code still to be edited'
 
     do_KDE_Extrapolation = .false.; do_KDE_OnTheFly = .false.
-    if(present(Prior)) then
+    if(present(Prior) .or. present(MagPrior)) then
        if((present(PriorMagGrid) == .false.) .or. (present(PriorSizeGrid)== .false.)) STOP 'DM_Profile_Variable_Posterior - Prior must be accompanied by grids'
        allocate(Kappa_Renormalised_Prior(size(Prior,1), size(Prior,2))); Kappa_Renormalised_Prior = 0.e0_double
        allocate(Survey_Renormalised_Prior(size(Prior,1),size(Prior,2))); Survey_Renormalised_Prior = 0.e0_double
+       if(present(MagPrior)) then
+          allocate(Survey_Renormalised_MagPrior(size(PriorMagGrid))); Survey_Renormalised_MagPrior = 0.e0_double
+          allocate(Kappa_Renormalised_MagPrior(size(PriorMagGrid))); Kappa_Renormalised_MagPrior =0.e0_double
+       end if
        allocate(Size_Only_Mag_Prior(size(Prior,1),size(Prior,2))); Size_Only_Mag_Prior = 0.e0_double
        if(allow_KDE_Extrapolation .and. present(PriorCatalogue)) then
           do_KDE_Extrapolation = .true.
@@ -631,29 +639,30 @@ contains
        deallocate(KDE_Gaussian_Covariance)
     end if
 
-    !--Testing: output smoothed size and mag distributions within the aperture to see if there is any noticable shift
-    allocate(Data_Vectors(2,size(PriorCatalogue%Sizes))); Data_Vectors(1,:) = PriorCatalogue%MF606W; Data_Vectors(2,:) = PriorCatalogue%Sizes
-    call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
-    KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
-    allocate(Aperture_Smoothed_Size_PDF(size(PriorSizeGrid))); Aperture_Smoothed_Size_PDF = 0.e0_double
-    allocate(Aperture_Smoothed_Mag_PDF(size(PriorMagGrid))); Aperture_Smoothed_Mag_PDF = 0.e0_double
-    call KDE_Univariate_Gaussian(Cat%Sizes, dsqrt(KDE_Gaussian_Covariance(2,2)), PriorSizeGrid, Aperture_Smoothed_Size_PDF)
-    call KDE_Univariate_Gaussian(Cat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), PriorMagGrid, Aperture_Smoothed_Mag_PDF)
-    open(unit = 31, file = trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Size.dat')
-    do i =1, size(PriorSizeGrid)
-       write(31, *) PriorSizeGrid(i), Aperture_Smoothed_Size_PDF(i)
-    end do
-    close(31)
-    open(unit = 31, file = trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Mag.dat')
-    do i =1, size(PriorSizeGrid)
-       write(31, *) PriorMagGrid(i), Aperture_Smoothed_Mag_PDF(i)
-    end do
-    close(31)
-    write(*, '(4A)') '**Output distributions in aperture to: ', trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Size.dat', ' : ', trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Mag.dat'
-    print *, '**with mean (Size, Mag):', mean_discrete(Cat%Sizes), mean_discrete(Cat%MF606W) 
-    deallocate(Aperture_Smoothed_Size_PDF, Aperture_Smoothed_Mag_PDF)
+    if(produce_Shift_inAperture) then
+       !--Testing: output smoothed size and mag distributions within the aperture to see if there is any noticable shift
+       allocate(Data_Vectors(2,size(PriorCatalogue%Sizes))); Data_Vectors(1,:) = PriorCatalogue%MF606W; Data_Vectors(2,:) = PriorCatalogue%Sizes
+       call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
+       KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
+       allocate(Aperture_Smoothed_Size_PDF(size(PriorSizeGrid))); Aperture_Smoothed_Size_PDF = 0.e0_double
+       allocate(Aperture_Smoothed_Mag_PDF(size(PriorMagGrid))); Aperture_Smoothed_Mag_PDF = 0.e0_double
+       call KDE_Univariate_Gaussian(Cat%Sizes, dsqrt(KDE_Gaussian_Covariance(2,2)), PriorSizeGrid, Aperture_Smoothed_Size_PDF)
+       call KDE_Univariate_Gaussian(Cat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), PriorMagGrid, Aperture_Smoothed_Mag_PDF)
+       open(unit = 31, file = trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Size.dat')
+       do i =1, size(PriorSizeGrid)
+          write(31, *) PriorSizeGrid(i), Aperture_Smoothed_Size_PDF(i)
+       end do
+       close(31)
+       open(unit = 31, file = trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Mag.dat')
+       do i =1, size(PriorSizeGrid)
+          write(31, *) PriorMagGrid(i), Aperture_Smoothed_Mag_PDF(i)
+       end do
+       close(31)
+       write(*, '(4A)') '**Output distributions in aperture to: ', trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Size.dat', ' : ', trim(adjustl(Output_Prefix))//'KDE_Distributions_in_Aperture_Mag.dat'
+       print *, '**with mean (Size, Mag):', mean_discrete(Cat%Sizes), mean_discrete(Cat%MF606W) 
+       deallocate(Aperture_Smoothed_Size_PDF, Aperture_Smoothed_Mag_PDF)
     !---End of distributions in Aperture
-
+    end if
 
     D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
     !--SET UP REDSHIFT GRID--!
@@ -664,25 +673,22 @@ contains
     end if
 
 
-    !--Limits may need edited --!!!
-!    Survey_Magnitude_Limits = (/21.e0_double, 40e0_double/) !27.5
-!    Survey_Size_Limits = (/0.e0_double, 100.e0_double/) 
-
-
     !--Renormalise the prior within these size and magnitude limits--!
     print *, 'Renormalisation of the intrinsic distribution:', Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
     Survey_Renormalised_Prior = Prior/Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
 
-    !--Remove any probability outside the survey limits - Do we really want to do that? We would surely want to know what galaxies would be brought in outside the limits?--!
-!!$    do i = 1, size(PriorMagGrid)
-!!$       do j = 1, size(PriorSizeGrid)
-!!$          if( (PriorMagGrid(i) < Survey_Magnitude_Limits(1)) .or. (PriorMagGrid(i) > Survey_Magnitude_Limits(2)) .or. (PriorSizeGrid(j) < Survey_Size_Limits(1)) .or. (PriorSizeGrid(j) > Survey_Size_Limits(2)) ) Survey_Renormalised_Prior(i,j) = 0.e0_double
-!!$       end do
-!!$    end do
+    if(present(MagPrior)) then
+       !--Allow for seperate renormalisation of the magnitude prior. This is required if the magnitude prior is constructed from galaxies which are excluded from the joint size-magnitude analysis, e.g. due to size cuts--!
+       print *, 'Renormalisation of the intrinsic magnitude distribution:', Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
+       Survey_Renormalised_MagPrior = MagPrior/Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
+    end if
 
     !------This section renormalises the likelihhod, taking into account kappa-dependent mag and size cuts, however this need to be implemented in the prior-----!
     allocate(MagnificationGrid(nMagnificationGrid)); MagnificationGrid = 0.e0_double
     allocate(Renormalisation_by_Magnification(size(MagnificationGrid))); Renormalisation_by_Magnification = 0.e0_double
+    if(present(MagPrior)) then
+       allocate(MagOnly_Renormalisation_by_Magnification(size(MagnificationGrid))); MagOnly_Renormalisation_by_Magnification = 0.e0_double
+    end if
     allocate(Size_Only_Prior(size(Prior,2))); Size_Only_Prior = 0.e0_double
     !Choose MagGrid lower to be the point where the full magnitude range is swept out:
     MagFactorGridHigher = 1.05e0_double*(10.e0_double**((Survey_Magnitude_Limits(2)-Survey_Magnitude_Limits(1))/2.5e0_double)) !1.05 gives lee-way!
@@ -692,6 +698,11 @@ contains
        Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.5e0_double*dlog10(MagnificationGrid(i))
 
        Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
+       if(present(MagPrior)) then
+          !--This is only true if there are no cuts on the size-mag prior
+          MagOnly_Renormalisation_by_Magnification(i) =  Renormalisation_by_Magnification(i)!Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
+!          MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
+       end if
     end do
     deallocate(Size_Only_Prior)
        
@@ -701,38 +712,66 @@ contains
     end do
     write(*,'(2(A))') 'File output: ', trim(adjustl(Output_Prefix))//'Renormalisation_by_Magnification.dat'
 
-
-    !--Construct Size Given Mag Prior, p(theta|m)
-    !~~~~Found from p(m) = int dtheta p(theta,m) so p(theta|m) = p(theta,m)/p(m)
-    !~~~~ In pratice, take p(theta,m), for each m evaluation renormalise by the integral over theta, or p(m) [calc'd above] for that m
-!!$    Size_Given_Mag_Prior = 0.e0_double
-!!$    do j = 1, size(PriorMagGrid)
-!!$       Size_Given_Mag_Prior(j,:) = Prior(j,:)/Mag_Only_Prior(j)
-!!$    end do
-
     !--Start of Posterior Routines--!
     allocate(Posterior_perGalaxy(size(Cat%RA), size(Posterior,2))); Posterior_perGalaxy = 1.e-100_double
     allocate(Effective_Magnification(size(Cat%RA), size(Posterior,2))); Effective_Magnification = 0.e0_double
     Convergence_Per_Cluster = 0.e0_double
 
 
-
-    print *, ' '
+    write(*,'(A)') '--------------------------------------------------------------------------------------------------'
     write(*,'(A)',advance = 'no') 'Getting Posterior for Cluster '
     if(Posterior_Method == 1) write(*,'(A)') 'using Sizes Only'
     if(Posterior_Method == 2) write(*,'(A)') 'using Sizes and Magnitudes'
+    if(Posterior_Method == 3) write(*,'(A)') 'using Magnitudes Only'
+    if(Posterior_Method == 4) write(*,'(A)') 'using Size and Magnitudes, and Magnitudes Only below the size limit'
     if(Enforce_Weak_Lensing) print *, '*** Weak lensing assumptions have been enforced'
-    n_Default_Source_Redshift_Used = 0; nGal_Ignored_MagLimits = 0; nGal_Ignored_SizeLimits = 0
+
+    n_Default_Source_Redshift_Used = 0; nGal_Ignored_MagLimits = 0; nGal_Ignored_SizeLimits = 0; nGal_Ignored_NaN = 0
+    nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
     do c = 1, size(Effective_Magnification,1) !-Loop over galaxies-!
+       !--Select the method of posterior reconstruction for that point based in input method
+       select case(Posterior_Method)
+       case(1) !--SizeOnly--!
+          if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
+             nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
+             cycle
+          end if
+          nSizePosterior = nSizePosterior + 1
+          Galaxy_Posterior_Method = 1
+       case(2)!--SizeMag--!
+          if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
+             nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
+             cycle
+          end if
+          nSizeMagPosterior = nSizeMagPosterior + 1
+          Galaxy_Posterior_Method = 2
+       case(3) !-Magnitude Only--!
+          nMagPosterior = nMagPosterior + 1
+
+          if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only, but no magnitde prior entered, stopping'
+          Galaxy_Posterior_Method = 3
+       case(4) !-Size mag above size data limit, Mag-Only below size data limit-!
+          if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only under size limit, but no magnitde prior entered, stopping'
+
+          !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies
+          if(Cat%Sizes(c) < Survey_Size_Limits(1)) then
+             Galaxy_Posterior_Method = 3
+             nMagPosterior = nMagPosterior + 1
+          else
+             Galaxy_Posterior_Method = 2
+             nSizeMagPosterior = nSizeMagPosterior + 1
+          end if
+       end select
+
        if( (Cat%MF606W(c) > Survey_Magnitude_Limits(2)) .or. (Cat%MF606W(c) < Survey_Magnitude_Limits(1))) then
           nGal_Ignored_MagLimits = nGal_Ignored_MagLimits + 1
           cycle
        end if
-       if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
-          nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
+
+       if(isNaN(Cat%Sizes(c)) .or. isNaN(Cat%MF606W(c))) then
+          nGal_Ignored_NaN = nGal_Ignored_NaN + 1
           cycle
        end if
-
 
        if(c == size(Effective_Magnification,1)/2) print *, 'Halfway done for this Aperture..'
 
@@ -799,7 +838,6 @@ contains
 !!$       if(c==1) write(*,'(A)', advance = 'no') 'Galaxy:'
 !!$       write(*,'(I3,x,A)',advance = 'no') c, ','
 
-
        do i = 1, size(Effective_Magnification,2) !--Loop over posterior values--!
           do z = 1, size(RedshiftPDF)
              select case(Mass_Profile)
@@ -829,7 +867,7 @@ contains
                 cycle
              end if
 
-             if(Effective_Magnification(c,i) < 0.e0_double) then
+             if(Effective_Magnification(c,i) <= 0.e0_double) then
 !!$                Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
 !!$                cycle
                 !--This won't be picked up unless the above cycle is relaxed--!
@@ -839,11 +877,8 @@ contains
              if(Effective_Magnification(c,i) < 1.e0_double) print *, '** DE-AMPLIFICATION!', Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i)
 
              !--Construct Joint Size-Magnitde Prior which is renormalised according to the convergence value--!
-             !-if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED OFF'
              Renormalisation_Size_Limits = Survey_Size_Limits/dsqrt(Effective_Magnification(c,i))
              Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.5e0_double*dlog10(Effective_Magnification(c,i))
-!             Renormalisation_Size_Limits = Survey_Size_Limits/(1.e0_double+Effective_Convergence(c,i))!--WL--!             
-!             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.17e0_double*Effective_Convergence(c,i)!--WL--!
 
              if(Cuts_Renormalise_Likelihood) then
                 if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED ON'
@@ -857,11 +892,12 @@ contains
              else
                 if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED OFF'
                 Kappa_Renormalised_Prior =  Survey_Renormalised_Prior
+                Kappa_Renormalised_MagPrior = Survey_Renormalised_MagPrior
              end if
-
              
-             select case (Posterior_Method)
+             select case (Galaxy_Posterior_Method)
              case(1) !--Size Only--!
+
                 !--Evaluate p_{theta_0, m_0}*p_{z|m_0} for the whole magnitude grid
                 do m =  1, size(PriorMagGrid)
                    !--m_0, theta_0--!
@@ -876,6 +912,7 @@ contains
                       end if
                    end if
                 end do
+
 
                 if(lnSize_Prior) then
                    STOP 'ln Size prior has been switched off since the conversion to strong lensing - check the theory carefully before use'
@@ -901,7 +938,7 @@ contains
                    if((Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)) > maxval(PriorSizeGrid)) .or. (Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)) < minval(PriorSizeGrid))) then
 !                   if(Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)) > maxval(PriorSizeGrid) .or. (Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)) < minval(PriorSizeGrid))) then !-WL-!
                       !--Extrapolation--!
-                      Posterior_perGalaxy_Redshift(c,i,z) = 0.e0_double
+                      Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
                       cycle
                    else
                       
@@ -922,6 +959,7 @@ contains
                 end if
                 deallocate(Size_Only_Prior)
              case(2)!-Size and Magnitude-!
+
                 if(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)) < 21.e0_double) then
                    print *, 'Possible problem with de-lensed magnitude - falls outwith bright limit of Scrabback Fit (21)'
                    print *, Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i))
@@ -956,6 +994,26 @@ contains
 
                       !--If no KDE Extrapolation, then this will set to a default value (effectively zero) outside the prior grid range
                    end if
+                case(3) !--Magnitude Only--!
+                   !--Renoramlise Magnitude Prior Distribution--!
+
+                   if(Cuts_Renormalise_Likelihood) then
+                      Renorm = Linear_Interp(Effective_Magnification(c,i), MagnificationGrid, MagOnly_Renormalisation_by_Magnification, ExValue = 1.e30_double)                      
+                      if(Renorm == 0) then
+                         Kappa_Renormalised_MagPrior = 0.e0_double
+                      else
+                         Kappa_Renormalised_MagPrior = Survey_Renormalised_MagPrior/Renorm
+                      end if
+                   end if
+
+                   if(Known_Redshift) then
+                      RedshiftPDF(z) = 1.e0_double
+                   else
+                      RedshiftPDF(z) = CH08_Redshift_Distribution_Scalar(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), RedshiftGrid(z))
+                   end if
+                   !--Could be edited for KDE Extrapolation, not done yet--!
+
+                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), PriorMagGrid, Kappa_Renormalised_MagPrior, ExValue =  1.e-100_double)*RedshiftPDF(z)
              case default
                 STOP 'DM_Profile_Variable_Posterior - Error in choosing method of finding posterior'
              end select
@@ -997,7 +1055,14 @@ contains
     end do !--End of galaxy loop-!
     if(n_Default_Source_Redshift_Used > 0) write(*,'(A,I3,A)') '****** Used the default redshift for:', n_Default_Source_Redshift_Used, ' galaxies ********'
     if(nGal_Ignored_SizeLimits > 0) write(*,'(A,I3)') '****** Number of galxies ignored as they fell outside the survey size limits:', nGal_Ignored_SizeLimits
-    if(nGal_Ignored_MagLimits > 0) write(*,'(A,I3)') '****** Number of galxies ignored as they fell outside the survey magnitude limits:', nGal_Ignored_MagLimits
+    if(nGal_Ignored_NaN > 0) write(*,'(A,I3)') '****** Number of galaxies ignored as they were NaNs:', nGal_Ignored_NaN
+
+
+    print *, '-------------------------------------------------------------'
+    print *, 'Constructed ', nSizePosterior, ' size-only posteriors'
+    print *, 'Constructed ', nSizeMagPosterior, ' size-magnitude posteriors'
+    print *, 'Constructed ', nMagPosterior, ' magnitude-only posteriors'
+    print *, '-------------------------------------------------------------'
 
     if(Debug_Mode .and. Output_Posterior_Per_Galaxy) then
 !!$       Filename = trim(adjustl(Output_Prefix))//'Convergence_Per_Cluster.dat'
@@ -1054,25 +1119,24 @@ contains
   end subroutine DM_Profile_Variable_Posterior
 
 
-!  real(double) function Evaluate_Posterior_atPoint(LSize, LMag, Redshift, MagnificationFactor, PriorMagGrid, PriorSizeGrid, PriorSizeMag, PriorMag)
-!    real(double), intent(in)
-
-
-  subroutine return_Size_Magnitude_Distribution(MagGrid, SizeGrid, Dist, Dir, BFCat, do_KDE)
-    use IO, only: readin; use Distributions, only: produce_Joint_Size_Magnitude_Distribution; use Integration
+  subroutine return_Prior_Distributions(MagGrid, SizeGrid, Dist, MagDist, Dir, BFCat, do_KDE)
+    use IO, only: readin; use Distributions, only: produce_Joint_Size_Magnitude_Distribution, produce_Magnitude_Distribution; use Integration; use Interpolaters, only: linear_Interp
     !--Returns the joint size magnitude distribution--!
     !-- If BFCat entered, then the Distribution is calculated from the catalogue, otherwise a read in is attempted --!
-    real(double),intent(out),allocatable:: MagGrid(:), SizeGrid(:), Dist(:,:)
+    !--Dist is Size-Magnitude Distribution. MagDist is magnitude-only distribution, which may differ from the projected Dist due to size cuts on the prior. Magnitude_Distribution is constructed from a catalogue which only cuts between entered prior magnitude limits--!
+    real(double),intent(out),allocatable:: MagGrid(:), SizeGrid(:), Dist(:,:), MagDist(:)
     character(*),intent(in):: Dir
     type(Catalogue),intent(in),optional:: BFCat
     logical,optional:: do_KDE
 
-    character(500):: Filename, Output_Filename, Input_Filename
+    character(500):: Filename, Output_Filename, Input_Filename, MagFilename
     real(double),allocatable:: Input_Array(:,:)
 
     character(5)::fmtstring
     integer::i,j
     logical:: iDo_KDE
+
+    real(double),allocatable:: tMagGrid(:), tMagDist(:)
 
     !--Cuts on the prior distribution--!
     real(double):: Redshift_Cuts(2)  = (/0.22e0_double, 100.e0_double/) !-- If no cuts, then lower should still be < -1 to ensure only galaxies without redshift information are cut
@@ -1080,6 +1144,7 @@ contains
 
     !--TESTING--!
     real(double),allocatable::Size_Only(:), Mag_Only(:)
+    logical:: here
     
     if(present(do_KDE)) then
        iDo_KDE = do_KDE
@@ -1091,16 +1156,21 @@ contains
  
     if(iDO_KDE) then
        Filename = 'MagSize_Distribution_KDE.dat'
+       MagFilename = 'Magnitude_Distribution_KDE.dat'
     else
        Filename= 'MagSize_Distribution_Histogram.dat'
+       MagFilename = 'Magnitude_Distribution_Histogram.dat'
     end if
 
-    if(present(BFCat)) then
-       print *, 'Producing Joint Size Magnitude Distribution from Catalogue'
 
+    if(present(BFCat)) then
+       print *, '--Producing Joint Size Magnitude Distribution from Catalogue.....'
+       
+!!$    print *, '**Applying Masks to Prior Catalogue:'                                                                                                                                                            
        Cut_Catalogue = BFCat
 
        print *, '------Applying Cuts on the Catalogue from which the prior is constructed---------'
+!       call Mask_Circular_Aperture(Cut_Catalogue, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        call Cut_By_Magnitude(Cut_Catalogue, Prior_Magnitude_Limits(1), Prior_Magnitude_Limits(2))
        call Cut_By_PixelSize(Cut_Catalogue, Prior_Size_Limits(1), Prior_Size_Limits(2))
        call Cut_by_PhotometricRedshift(Cut_Catalogue, Redshift_Cuts(1), Redshift_Cuts(2))
@@ -1121,10 +1191,40 @@ contains
     
        call Catalogue_Destruct(Cut_Catalogue)
 
+       print *, 'Producing magnitude Distribution using Integration Method'
+       allocate(MagDist(size(MagGrid))); MagDist = 0.e0_double
+       do i= 1, size(SizeGrid)
+          MagDist(i) = Integrate(SizeGrid, Dist(i,:), 2, lim = (/minval(SizeGrid), maxval(SizeGrid)/))
+       end do
+
+
+!!$       print *, '--Producing Magnitude Distribution from Catalogue.....'
+!!$       Cut_Catalogue = BFCat
+!!$       
+!!$       print *, '------Applying Cuts on the Catalogue from which the prior is constructed---------'
+!!$       call Cut_By_Magnitude(Cut_Catalogue, Prior_Magnitude_Limits(1), Prior_Magnitude_Limits(2))
+!!$       call Cut_by_PhotometricRedshift(Cut_Catalogue, Redshift_Cuts(1), Redshift_Cuts(2))
+!!$       print *, '----- Finished Cuts on BF catalogue----------------------------------------------'
+!!$
+!!$       call produce_Magnitude_Distribution(MagGrid, MagDist, Cut_Catalogue, iDO_KDE)
+
+       !--Output (matches the method of output used above)--!
+       Output_Filename = trim(Dir)//trim(MagFilename)
+       open(unit = 46, file = Output_Filename)
+       do i= 1, size(magGrid)
+          write(46, '(2(e14.7,x))') magGrid(i), MagDist(i)
+       end do
+       close(46)
+       write(*,'(2(A))') 'Output to: ', trim(Output_Filename)
+       
+
     else
        Input_Filename = trim(Dir)//trim(Filename)
 
-       write(*,'(2A)') 'Reading In Distribution from:', trim(Input_Filename)
+       write(*,'(2A)') 'Reading In Size-Magnitude Distribution from:', trim(Input_Filename)
+
+       inquire(file = Input_Filename, exist = here)
+       if(here == .false.) STOP 'return_Prior_Distributions - Size-Magnitude Distribution File does not exist, stopping...'
 
        call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
        !--Output of ReadIn is (Col, Row)
@@ -1140,6 +1240,46 @@ contains
        Dist = Input_Array(2:,2:)
 
        deallocate(Input_Array)
+
+       !--Magnitude Distribution-!
+       print *, 'Producing magnitude Distribution using Integration Method'
+       allocate(MagDist(size(MagGrid))); MagDist = 0.e0_double
+       do i= 1, size(SizeGrid)
+          MagDist(i) = Integrate(SizeGrid, Dist(i,:), 2, lim = (/minval(SizeGrid), maxval(SizeGrid)/))
+       end do
+
+!!$
+!!$       Input_Filename = trim(Dir)//trim(MagFilename)
+!!$
+!!$       write(*,'(2A)') 'Reading In Magnitude Distribution from:', trim(Input_Filename)
+!!$       inquire(file = Input_Filename, exist = here)
+!!$       if(here == .false.) STOP 'return_Prior_Distributions - Magnitude Distribution File does not exist, stopping...'
+!!$
+!!$       call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
+!!$       !--Output of ReadIn is (Col, Row)  
+!!$
+!!$       print *, 'Input_Array has:', size(Input_Array,1), size(Input_Array,2)
+!!$
+!!$       allocate(tMagGrid(size(Input_Array,2))); tMagGrid = 0.e0_double
+!!$       allocate(tMagDist(size(tMagGrid))); MagDist = 0.e0_double
+!!$
+!!$       tMagGrid = Input_Array(1,:)
+!!$       tMagDist = Input_Array(2,:)
+!!$
+!!$       deallocate(Input_Array)
+!!$       !--Linearly Interpolate onto Joint Size-Magnitude Distribution (this shouldn't be a problem since the output is the same as the input)--!
+!!$       allocate(MagDist(size(MagGrid))); MagDist = 0.e0_double
+!!$       call Linear_Interp(MagGrid, MagDist, tMagGrid, tMagDist)
+
+       !--Test output--!
+       Output_Filename = trim(Dir)//'Magnitude_Distribution_Prior_ReadinTest_DELETE.dat'
+       open(unit = 46, file = Output_Filename)
+       do i= 1, size(magGrid)
+          write(46, '(2(e14.7,x))') MagGrid(i), MagDist(i)
+       end do
+       close(46)
+       write(*,'(2(A))') 'Output to: ', trim(Output_Filename)
+       
     end if
 
 !    print *, 'Testing of Distribution Input:'
@@ -1160,7 +1300,7 @@ contains
 !!$    print *, 'Output to ', trim(Dir), 'SizeOnlyDist_Test_DELETE.dat, MagOnlyDist_Test_DELETE.dat'
 !!$    read(*,*)
 
-  end subroutine return_Size_Magnitude_Distribution
+  end subroutine return_Prior_Distributions
 
 
   integer function Nearest_Neighbour_Index(Grid, Val)

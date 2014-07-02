@@ -136,10 +136,15 @@ contains
 
     integer:: j
 
+    integer,save:: callcount = 0
+
     if(allocated(PDF)) deallocate(PDF)
     allocate(PDF(size(Grid))); PDF = 0.e0_double
 
-    zmed = 0.7e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
+    callcount = callcount + 1
+
+    zmed = 1.e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
     if(zmed < 0.e0_double) then
        print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
        print *, 'zmed, m:', zmed, Apparent_Magnitude
@@ -157,8 +162,12 @@ contains
     real(double):: zmed, alpha = 2.e0_double, beta = 1.5e0_double
     real(double)::PDF
     real(double):: z_0, Norm
+    integer,save:: callcount  = 0
 
-    zmed = 0.7e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
+    callcount = callcount + 1
+
+    zmed = 1.e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
     if(zmed < 0.e0_double) then
        print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
        print *, 'zmed, m:', zmed, Apparent_Magnitude
@@ -465,7 +474,50 @@ contains
 
 
   end subroutine angular_Diameter_Distance_Distribution
-  
+
+  !----------------Magnitude Distributions------------------------------------------------------!
+  subroutine produce_Magnitude_Distribution(MagGrid, PDF, RefCat, KDE_Smooth)
+    use Catalogues; use Statistics, only: Discrete_Covariance; use Smoothing, only:KDE_Univariate_Gaussian
+    !--Produces a magnitude distribution for the data--!
+    !-Uses covariance for size-magnitude to set smoothing length. This could be edited to a simpler routine, but kept as is for speed's sake--!
+    real(double), intent(out),allocatable,dimension(:):: MagGrid
+    real(double), intent(out),allocatable::pdf(:)
+    type(Catalogue), intent(in):: RefCat
+    logical, intent(in):: KDE_Smooth
+
+    integer:: nSmoothed_Sampling_Mag = 110
+    real(double):: Higher, Lower, Mag_Limit_Convergence_Buffer = 0.3e0_double
+    
+    integer::i
+
+    !--KDE Declarations--!
+    real(double),allocatable:: KDE_Gaussian_Covariance(:,:), Data_Vectors(:,:)
+    real(double):: KDE_Gaussian_Covariance_Reduction = 0.01e0_double
+
+    if(KDE_Smooth == .false.) STOP "produce_Magnitude_Distribution - I haven't coded up a non-KDE version of this yet... Stopping"
+
+    if(allocated(MagGrid) == .false.) then
+       Higher =maxval(RefCat%MF606W)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%MF606W)
+       
+       !--KDE Declarations--!
+       allocate(MagGrid(nSmoothed_Sampling_Mag)); MagGrid = 0.e0_double
+       do i =1, nSmoothed_Sampling_Mag
+          MagGrid(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling_Mag-1))
+       end do
+    end if
+       
+    allocate(Data_Vectors(2,size(RefCat%Sizes))); Data_Vectors(1,:) = RefCat%MF606W; Data_Vectors(2,:) = RefCat%Sizes
+    call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
+    KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
+    
+    allocate(PDF(size(MagGrid))); PDF = 0.e0_double
+    call KDE_Univariate_Gaussian(RefCat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), MagGrid, PDF)
+
+    deallocate(KDE_Gaussian_Covariance, Data_Vectors)
+
+  end subroutine produce_Magnitude_Distribution
+
+
   !----------------SIZE DISTRIBUTIONS-----------------------------------------------------------!
   subroutine produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth)
     use Catalogues; use Statistics, only: variance_discrete, Discrete_Covariance; use Smoothing, only:KDE_Bivariate_Gaussian; use Integration, only: Integrate, TrapInt, RectangularIntegration

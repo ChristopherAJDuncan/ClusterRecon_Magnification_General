@@ -13,7 +13,7 @@ Program_Pathway = '/disk1/cajd/Size_Magnification/'
 Do_Run = [1,0,0,0,0,0]
 
 ## THERE MUST NOT BE A TRAILING '/' IN THESE DIRECTORY DECLARATIONS
-Output_Paths = [Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES+COMBO_StrongLensingCheck_SLPipeline", \
+Output_Paths = [Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES_Clusters_Bias/STAGES+COMBO/WLWL/SM+Mag_P3.3_D6.5", \
                 Program_Pathway+"Bayesian_DM_Profile_Constraints_Output/SizeOnly/STAGES+COMBO", \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/COMBO', \
                 Program_Pathway+'Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES/StrongLensingSTAGES_Check', \

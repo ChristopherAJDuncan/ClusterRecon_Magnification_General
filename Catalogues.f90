@@ -199,6 +199,8 @@ module Catalogues
       
       Expected_Number_in_Aperture = count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= Ap_Radius) - count( dsqrt( (Cat%RA-Ap_Pos(1))**2.e0_double +(Cat%Dec-Ap_Pos(2))**2.e0_double ) <= iCore )
       
+      write(*,'(A,2e9.5)') '----- Identifying sample in aperture palced at (RA,Dec):', Ap_Pos
+
       if(Expected_Number_in_Aperture == 0) STOP 'Identify_Galaxys_in_Circular_Aperture - There are no galaxies within the aperture, suggest increasing aperture size'
       
       call Catalogue_Construct(Ap_Cat, Expected_Number_in_Aperture)
@@ -218,6 +220,8 @@ module Catalogues
          end if
       end do
       
+      if(ac < Expected_Number_in_Aperture) print *, '**** WARNING - Identify_Galaxys_in_Circular_Aperture - Number assigned to catalogue does not equal the number expected'
+
   end subroutine Identify_Galaxys_in_Circular_Aperture
 
     !---Catalogue Binning Routines----!

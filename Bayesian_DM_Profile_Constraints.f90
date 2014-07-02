@@ -599,7 +599,7 @@ contains
        !--Output grid is in units of 10^14 Msun/h-!
        do Ap = 1, nAp
           write(apString, '(I1)') Ap
-          call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Combined_Posterior(Ap,:,:), Mass_Posterior(Ap,:,:), iClusters%Redshift(Ap), trim(Directory(ID))//'Mass_Combined_Posterior_'//trim(apString)//'.dat')
+          call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Combined_Posterior(Ap,:,:), Mass_Posterior(Ap,:,:), iClusters%Redshift(Ap), trim(Directory(ID))//'Combined_Posterior_'//trim(apString))
 
           D_l =  angular_diameter_distance_fromRedshift(0.e0_double, iClusters%Redshift(Ap))
           Area = 3.142e0_double*(D_l*((3.142e0_double*Cluster_Aperture_Radius(Ap))/180.e0_double))**2.e0_double
@@ -736,30 +736,30 @@ contains
        PRINT *, ' '
        !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
        !--Cuts on data catalogue--!
-       print *, '*** CUTS REMOVED - NEED REIMPLEMENTED'
-       print *, '** Cutting Catalogue:'
-       call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
-       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
+!!$       print *, '** Cutting Catalogue:'
+!!$       call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+!!$       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 !!$       if(Analyse_with_Physical_Sizes) then
 !!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
 !!$       end if
-       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-
-       print *, '**Testing for Cluster contamination in the Data Catalogue'
-       call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir))
+!!$       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+!!$
+!!$       print *, '**Testing for Cluster contamination in the Data Catalogue'
+!!$       call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir))
        
        !--Cuts on Catalogue--!
-       print *, '** Cutting Prior Catalogue:'
-       call Cut_by_Magnitude(BFCatt, Prior_Magnitude_Limits(1))
-       if(Analyse_with_Physical_Sizes) then
-          call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
-       end if
-       call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
-       call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
+       !--Cuts on prior removed as effectively implemented in the production of priors--!
+!!$       print *, '** Cutting Prior Catalogue:'
+!!$       call Cut_by_Magnitude(BFCatt, Prior_Magnitude_Limits(1))
+!!$       if(Analyse_with_Physical_Sizes) then
+!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
+!!$       end if
+!!$       call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 
-       print *, '** MO MASKS APPLIED TO PRIOR'
-!       print *, '**Applying Masks to Prior Catalogue:'
-!       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
+!!$       print *, '** MO MASKS APPLIED TO PRIOR'
+!!$       call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
+!!$       print *, '**Applying Masks to Prior Catalogue:'
+!!$       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        print *, ' '
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
@@ -768,12 +768,9 @@ contains
        !--Cuts on data catalogue--!
        PRINT *, ' '
        print *, '** Cutting Catalogue:'
-       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
-       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-!!$       if(Analyse_with_Physical_Sizes) then
-!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
-!!$       end if
-       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+!!$       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
+!!$       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
+!!$       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
        PRINT *, ' '
 
        !--If no Blank Field Information, then attempt a read in--!
@@ -804,7 +801,7 @@ contains
        !--Get Mean, Mode, Variance--!                                                                                                                                                                             
        write(apString, '(I1)') Ap
        print *, '!----------------------------------------------------------------------------------!'
-       call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Returned_Cluster_Posteriors(Ap,:,:), Mass_Posterior(Ap,:,:), Clusters_In%Redshift(Ap), trim(Bayesian_Routines_Output_Directory)//'Mass_Posterior_Aperture_'//trim(apString)//'.dat')
+       call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Returned_Cluster_Posteriors(Ap,:,:), Mass_Posterior(Ap,:,:), Clusters_In%Redshift(Ap), trim(Bayesian_Routines_Output_Directory)//'Mass_Posterior_Aperture_'//trim(apString))
  
        call Posterior_Statistics(Returned_Cluster_Posteriors(Ap,1,:), Returned_Cluster_Posteriors(Ap,2,:), Cluster_Mean(Ap), Cluster_Mode(Ap), Cluster_Variance(Ap), AntiSymm_Variance(Ap,:))
        call Posterior_Statistics(Mass_Posterior(Ap,1,:), Mass_Posterior(Ap,2,:), ModeVal = Virial_Mass, AntiSymm_Error = Virial_Mass_Error)

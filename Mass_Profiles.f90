@@ -34,9 +34,64 @@ module Mass_Profiles
          Gamma = Differential_SMD_Scalar(Radius, Redshift, Param)/Sigma_Critical
       end select
 
+
       Magnification_Factor = 1.e0_double/( ((1.e0_double-Kappa)**2.e0_double) - Gamma*Gamma)
 
     end function Magnification_Factor
+
+    real(double) function Total_MagnificationFactor_MultipleClusters(Profile, Position, Source_Redshift, Cluster_Pos, Param, Redshift)
+      use Cosmology, only: angular_diameter_distance_fromRedshift
+      integer, intent(in):: Profile
+      real(double), intent(in)::Param(:), Redshift(:),  Source_Redshift
+      real(double),intent(in):: Cluster_Pos(:,:) !-Cluster, Position (RA,Dec)-!
+      real(double), intent(in):: Position(2) !-RA, Dec-!
+
+      real(double):: dRA, dDec, Theta, Radius, Sigma_Critical, D_l, D_ls, D_s
+      integer:: C, nCl
+      real(double):: Gamma1, Gamma2, Kappa, Gamma
+      real(double):: KappaT, Gamma1T, Gamma2T, GammaT
+
+      if(Profile /=3) STOP 'Total_MagnificationFactor_MultipleClusters - I can only do this for NFW for now'
+
+      if(size(Redshift) /= size(Cluster_Pos,1)) STOP 'Total_MagnificationFactor_MultipleClusters - Error in redshift - not correct size'
+      if(size(Param) /= size(Cluster_Pos,1)) STOP 'Total_MagnificationFactor_MultipleClusters - Error in DM Profile Param - not correct size'
+
+      KappaT = 0.e0_double; Gamma1T = 0.e0_double; Gamma2T = 0.e0_double
+      nCl = size(Cluster_Pos,1)
+
+      D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
+      do C = 1, nCl
+         !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
+         dRA = Position(1)-Cluster_Pos(C, 1)
+         dDec = Position(2) - Cluster_Pos(C,2)
+         Theta = acos(dDec/dRA)
+         
+         !--Get Sigma_Critical--!
+         D_l = angular_diameter_distance_fromRedshift(0.e0_double, Redshift(C))
+         D_ls = angular_diameter_distance_fromRedshift(Redshift(C), Source_Redshift)
+         Sigma_Critical = 1.66492e18_double*(D_s/(D_l*D_ls))
+
+         Radius = dsqrt( dRA*dRA + dDec*dDec ) !-in Degrees-!
+         Radius = D_l*Radius*(3.142e0_double/180.e0_double) !-In Mpc/h-!
+         !-Get Gamma Tangential
+         Gamma = Differential_SMD_Scalar(Radius, Redshift(C), Param(C))/Sigma_Critical
+         Kappa = SMD_NFW_Scalar(Radius, Redshift(C), Param(C))/Sigma_Critical
+         
+         !--Convert to Shear Components on Cartesian Frame
+         Gamma1 = Gamma*dcos(2.e0_double*Theta)
+         Gamma2 = Gamma*dsin(2.e0_double*Theta)
+
+         !--Get Summed Quantities
+         KappaT = KappaT + Kappa
+         Gamma1T = Gamma1T + Gamma1
+         Gamma2T = Gamma2T + Gamma2
+      end do
+
+      !--Calculate Magnification Factor from total quantities
+      GammaT = dsqrt(Gamma1T*Gamma1T + Gamma2T*Gamma2T)
+      Total_MagnificationFactor_MultipleClusters = 1.e0_double/( ((1.e0_double-KappaT)**2.e0_double) - GammaT*GammaT)
+
+    end function Total_MagnificationFactor_MultipleClusters
 
     subroutine Halo_Mass(Profile, Param, Param_Error, Integrated_Mass, Mass_Error, Redshift)
       !--Gets Virial Radius for SMD type and returns Halo Mass--!
@@ -124,6 +179,7 @@ module Mass_Profiles
 
     !------------------------------------NFW------------------------------------------------------------------!
     real(double) function Error_NFW_Mass_withinRadius(R, r200, Er200, z, r_s)
+      use Cosmology, only: Normalised_Hubble_Parameter
       !--Returns the error on the integrated NFW mass within a radius--!
       !--Uses an analytic for for dDelcdr200 given by Wolfram Alpha, but could alos be done analytically--!
       !--Er200 is the measured error on r200-!
@@ -135,6 +191,8 @@ module Mass_Profiles
 
       real(double):: dDelcdr200, dMdr200, MR
 
+      real(double):: Omega_Matter, rho_c0
+
       if(present(r_s)) then
          STOP 'Error_NFW_Mass_withinRadius - I cannot deal with rs yet'
       end if
@@ -142,9 +200,13 @@ module Mass_Profiles
       call get_NFW_Parameters(z, r200, rho_c, M200, delta_c, c)
       rs = r200/c
 
+      rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(z)
+      rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
+!      Omega_matter = 1.e0_double !-Use for halo defined wrt critical density
+      Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c) !-Use for halo defined wrt mass density
+
       !--Following is analytic form for the derivative, taken from Wolfram Alpha--!
-     PRINT *, '** Using outdated version of mass in error estiamtion'
-      dDelcdr200 = (200.e0_double/3.e0_double)*((c*c)/rs)*( (3.e0_double*((1.e0_double+c)**2.e0_double)*dlog(1.e0_double+c) - c*(3.e0_double+4.e0_double*c))/((c-(1.e0_double+c)*dlog(1.e0_double+c))**2.e0_double) )
+      dDelcdr200 = Omega_Matter*(200.e0_double/3.e0_double)*((c*c)/rs)*( (3.e0_double*((1.e0_double+c)**2.e0_double)*dlog(1.e0_double+c) - c*(3.e0_double+4.e0_double*c))/((c-(1.e0_double+c)*dlog(1.e0_double+c))**2.e0_double) )
 
       MR = NFW_Mass_withinRadius(R, z, r_200 = r200)
       dMdr200 = (MR/delta_c)*dDelcdr200 !--Isolates the parts of the integrated mass which do not depend on delta_c, and therefore r200--!
@@ -422,11 +484,11 @@ module Mass_Profiles
 
       rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(z)
       rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
-
+      Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
       !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the critical density ** (e.g. Wright, Brainerd 1999) In this case, the fit of Dolag et al may not be correct
       !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the mean matter density ** (e.g. Dolag 2004, Heymans 2008)
       !Omega_matter = 1.e0_double
-      Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
+
 
       get_NFW_VirialMass_from_VirialRadius = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(VirialRadius**3.e0_double) * rho_c * Omega_Matter
 
