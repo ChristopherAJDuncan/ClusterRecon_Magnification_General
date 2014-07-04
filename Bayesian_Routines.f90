@@ -508,7 +508,7 @@ contains
     real(double)::VGrid_Lower, VGrid_Higher
 
     !-Size_Only_Prior contains the priors which depends only on size, which is evalutaed for each redshift and integrates over all magnitudes
-    real(double),dimension(:),allocatable:: Size_Only_Prior, Mag_Prior
+    real(double),dimension(:),allocatable:: Size_Only_Prior, Mag_Prior, Mag_Only_Prior
     !--Size_Only_Mag_Prior contains the prior for size which evaluated over the mag grid, which will be integrated over. Contains p_[theta_0, m_0|z]*p[z|m_0] for all m in grid
     real(double),dimension(:,:),allocatable::  Kappa_Renormalised_Prior, Survey_Renormalised_Prior, Size_Only_Mag_Prior
     real(double),dimension(:),allocatable::Kappa_Renormalised_MagPrior, Survey_Renormalised_MagPrior
@@ -699,9 +699,11 @@ contains
 
        Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
        if(present(MagPrior)) then
-          !--This is only true if there are no cuts on the size-mag prior
-          MagOnly_Renormalisation_by_Magnification(i) =  Renormalisation_by_Magnification(i)!Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
-!          MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
+
+          !--Edit this code to calculate the magnitude renormalisation over the whole size grid if Posterior_Method == 3, and over (0, Survey_Size_Limit(1)) if Posterior_Method == 4
+          !-- vv This is only true if there are no cuts on the size-mag prior vv
+!MagRenorm          MagOnly_Renormalisation_by_Magnification(i) =  Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
+          MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
        end if
     end do
     deallocate(Size_Only_Prior)
@@ -736,6 +738,8 @@ contains
              nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
              cycle
           end if
+!MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
+
           nSizePosterior = nSizePosterior + 1
           Galaxy_Posterior_Method = 1
        case(2)!--SizeMag--!
@@ -743,21 +747,31 @@ contains
              nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
              cycle
           end if
+
+!MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
+
           nSizeMagPosterior = nSizeMagPosterior + 1
           Galaxy_Posterior_Method = 2
        case(3) !-Magnitude Only--!
           nMagPosterior = nMagPosterior + 1
 
+!MagRenorm          iSurvey_size_Limits = (/0.e0_double, 1.e30_double/) !--Should encompase the whole data set
+
           if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only, but no magnitde prior entered, stopping'
           Galaxy_Posterior_Method = 3
        case(4) !-Size mag above size data limit, Mag-Only below size data limit-!
           if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only under size limit, but no magnitde prior entered, stopping'
+          STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distriution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
 
           !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies
           if(Cat%Sizes(c) < Survey_Size_Limits(1)) then
+!MagRenorm             iSurvey_Size_Limits = (/0.e0_double, Survey_Size_Limits(1)/)
+
              Galaxy_Posterior_Method = 3
              nMagPosterior = nMagPosterior + 1
           else
+!MagRenorm             iSurvey_Size_Limits = Survey_Size_Limits
+
              Galaxy_Posterior_Method = 2
              nSizeMagPosterior = nSizeMagPosterior + 1
           end if
@@ -844,19 +858,16 @@ contains
              case(1) !-Flat-!
                 STOP 'The Strong Lensing approximation has not been implemented for this profile yet'
                 Effective_Magnification(c,i) = 1.e0_double+2.e0_double*(Posterior(1,i)/Sigma_Crit(c,z))
-                !Effective_Convergence(c,i) = Posterior(1,i)/Sigma_Crit(c,z) !--WL--!
-             case(2) !-SIS-
+             case(2) !-SIS-!
                 STOP 'The Strong Lensing approximation has not been implemented for this profile yet'
                 Effective_Magnification(c,i) = 1.e0_double+2.e0_double*(SMD_SIS(Posterior(1,i), Distance_From_Mass_Center)/(Sigma_Crit(c,z)*1.e18_double))
-                !Effective_Convergence(c,i) = SMD_SIS(Posterior(1,i), Distance_From_Mass_Center)/(Sigma_Crit(c,z)*1.e18_double) !--WL--!
                 Convergence_Per_Cluster(:,c)  = (/Distance_From_Mass_Center,  SMD_SIS(1073.e0_double*1073.e0_double, Distance_From_Mass_Center), Sigma_Crit(c,z)/) !---TESTING--!
-             case(3)
+             case(3) !-NFW-!
                 if(Enforce_Weak_Lensing) then
                    Effective_Magnification(c,i) = 1.e0_double + 2.e0_double*(SMD_NFW(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i))/(Sigma_Crit(c,z)*1.e18_double))
                 else
                    Effective_Magnification(c,i) = Magnification_Factor(3, Distance_From_Mass_Center, Posterior(1,i),  Lens_Redshift, Sigma_Crit(c,z)*1.e18_double)
                 end if
-!                Effective_Convergence(c,i) = SMD_NFW(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i))/(Sigma_Crit(c,z)*1.e18_double) !--WL--!
              case default
                 STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
              end select
@@ -1013,6 +1024,22 @@ contains
                    end if
                    !--Could be edited for KDE Extrapolation, not done yet--!
 
+                   !--Construct p_[m_0] as the magnitude distribution for a sample of galaxies between cuts-corrected survey size limits 
+                   !-MagRenorm
+!!$                   allocate(Mag_Only_Prior(2)); Mag_Only_Prior = 0.e0_double
+!!$                   !--Find point where de-lensed magnitude lie on intrinsic distribution - could also use locate.
+!!$                   do j = 1, size(PriorMagGrid)-1
+!!$                      if( ( PriorMagGrid(j)<=  Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)) ) .and. (  PriorMagGrid(j+1) > Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i))) ) then
+!!$                         Mag_Only_Prior(1) = Integrate(PriorSizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)
+!!$                         Mag_Only_Prior(2) = Integrate(PriorSizeGrid, Kappa_Renormalised_Prior(j+1,:), 2, lim = Renormalisation_Size_Limits)
+!!$                         exit
+!!$                      end if
+!!$                   end do
+!!$                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), PriorMagGrid(j:j+1), Mag_Only_Prior, ExValue =  1.e-100_double)*RedshiftPDF(z)
+!!$                   deallocate(Mag_Only_Prior)
+                   !---------------------------------------------------------------------------------------------------------------------
+
+                   !--The following gives unbiased results if no size cuts are used, however is known to be biased in the presence of size cuts, I believe that this is due to the fact that the prior itself should depend on the size cuts in the presence of a size-magnitude correlation.
                    Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), PriorMagGrid, Kappa_Renormalised_MagPrior, ExValue =  1.e-100_double)*RedshiftPDF(z)
              case default
                 STOP 'DM_Profile_Variable_Posterior - Error in choosing method of finding posterior'
