@@ -141,10 +141,10 @@ contains
     if(allocated(PDF)) deallocate(PDF)
     allocate(PDF(size(Grid))); PDF = 0.e0_double
 
-    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
+!    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
     callcount = callcount + 1
 
-    zmed = 1.e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
     if(zmed < 0.e0_double) then
        print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
        print *, 'zmed, m:', zmed, Apparent_Magnitude
@@ -164,10 +164,10 @@ contains
     real(double):: z_0, Norm
     integer,save:: callcount  = 0
 
-    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
+!    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
     callcount = callcount + 1
 
-    zmed = 1.e0_double!0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
+    zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
     if(zmed < 0.e0_double) then
        print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
        print *, 'zmed, m:', zmed, Apparent_Magnitude

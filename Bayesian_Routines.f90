@@ -19,8 +19,8 @@ module  Bayesian_Routines
   integer:: Posterior_Method = 2
 
   logical:: Enforce_Weak_Lensing = .false.
-  real(double):: Core_Cut_Radius(4) = 0.5e0_double !--Default
-!  real(double):: Core_Cut_Radius(4) = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/) !-In Arcminutes-! Data
+!  real(double):: Core_Cut_Radius(4) = 0.5e0_double !--Default
+  real(double):: Core_Cut_Radius(4) = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/) !-In Arcminutes-! Data
 
   logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false., allow_KDE_Extrapolation = .false.
   logical::use_lnSize_Prior = .false.

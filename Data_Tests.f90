@@ -6,10 +6,13 @@ module Data_Tests
   
 contains
 
-  subroutine Foreground_Contamination_NumberDensity(Cat, Ap_Pos, Output_Directory)
+  subroutine Foreground_Contamination_NumberDensity(Cat, Ap_Pos, Output_Directory, MaskedSurveyArea)
+    !--Improvements:
+    !~~~~ Edit code to output a global number density, calculated from the entered masked survey area, and source number of catalogue using 3' apertures around the clusters. Be sure to edit the survey area to subtract the area of the masks. --- This will reduce contamination from the clusters, but this may be expected to be small
     type(Catalogue), intent(in):: Cat
     real(double), intent(in):: Ap_Pos(:,:) !--in DEGREES; Apeture, RA/Dec-!
     character(*), intent(in):: Output_Directory
+    real(double), intent(in):: MaskedSurveyArea
 
     integer:: Ap, i
 
@@ -19,6 +22,8 @@ contains
     integer:: nSep = 50
     real(double),parameter:: Seperation_Limits(2) = (/0.e0_double, 3.e0_double/) !--In ArcMinutes--!
     real(double),allocatable:: Annulus_Area(:)
+
+    real(double):: global_Number_Density
 
     type(Catalogue):: Annulus_Cat
 
@@ -59,6 +64,7 @@ contains
     open(unit = 31, file = trim(Output_Directory)//'Foreground_Contamination_NumberDensity.dat')
     !--Header--!
     write(31, '(A)') '#1,2:Seperation Bin [Annulus Limits], 3+: Number Density of galaxies in annulus'
+    write(31, '(A, x, I6, x, A, x, e8.1)') '# nSource: ', size(Cat%Dec)
     write(fmtstring, '(I2)') size(Ap_Pos)+2
     do i = 1, size(SeperationGrid)
        write(31, '('//trim(fmtstring)//'(e9.3,x))') SeperationBins(i,:), NumberDensity(:,i)
@@ -66,6 +72,21 @@ contains
     close(31)
 
     write(*,'(2A)') '*** Cluster Contamination Test output to: ', trim(Output_Directory)//'Foreground_Contamination_NumberDensity.dat'
+
+
+    global_Number_Density = size(Cat%Dec)/MaskedSurveyArea
+    open(unit = 31, file = trim(Output_Directory)//'Foreground_Contamination_Fraction.dat')
+    !--Header--!
+    write(31, '(A)') '#1,2:Seperation Bin [Annulus Limits], 3+: Cantamination Fraction (ngal_annulus/ngal_field) of galaxies in annulus'
+    write(31, '(A, x, I6, x, A, x, e8.1)') '# nSource: ', size(Cat%Dec), ' global_Number_Density:', global_Number_Density
+    write(fmtstring, '(I2)') size(Ap_Pos)+2
+    do i = 1, size(SeperationGrid)
+       write(31, '('//trim(fmtstring)//'(e9.3,x))') SeperationBins(i,:), NumberDensity(:,i)/global_Number_Density
+    end do
+    close(31)
+
+    write(*,'(2A)') '*** Cluster Contamination Test output to: ', trim(Output_Directory)//'Foreground_Contamination_Fraction.dat'
+
     
     deallocate(Annulus_Area,SeperationGrid,SeperationBins,NumberDensity)
 

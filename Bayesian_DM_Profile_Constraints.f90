@@ -15,6 +15,10 @@ program Bayesian_DM_Profile_Constraints
    character(500):: Distribution_Input = ' '
    logical::ReEvaluate_Distribution = .true.
 
+   !--Eventually want these to be passed in
+   logical:: Set_Foreground_Masks = .false.
+   real(double):: Masked_Survey_Area = 822.5666e0_double !- Defaults: 1089 (Mocks), 822.566577778 (Data)
+
    type(Foreground):: Clusters
 !   real(double)::Lens_Redshift = 0.165e0_double
 
@@ -23,7 +27,10 @@ program Bayesian_DM_Profile_Constraints
     !----Mock Parameters-------!
     integer:: nSources = 70000
     real(double)::frac_z = 0.1e0_double
-    integer:: nRealisations = 20
+    integer:: nRealisations = 10
+    !-These should be passed in-!
+    logical:: Mock_Do_SL = .true., Mock_Do_Cluster_Contamination = .true.
+    integer:: Mock_Contaminant_Cluster_Single = 2
 
    !--Command Line Argument Entry--!                
    integer::narg, i
@@ -379,7 +386,7 @@ contains
   end subroutine Cluster_Bias_Outputs
 
   subroutine Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Directory, Blank_Field_Cat_Ident, Input_Clusters_Filename, Aperture_Radius, Bias_Mode_Out, Mode_Error_Out)
-    use Cosmology; use Statistics, only:variance_discrete; use Matrix_methods, only:Subset; use Bayesian_Routines, only:Surface_Mass_Profile; use Mass_Profiles, only:integrated_mass_within_radius
+    use Cosmology; use Statistics, only:mean_discrete, variance_discrete; use Matrix_methods, only:Subset; use Bayesian_Routines, only:Surface_Mass_Profile; use Mass_Profiles, only:integrated_mass_within_radius
     !--Produces multiple Posteriors for many different mock catalogue realisations, to calculate the ML-point bias and variance--!
     !--Unlensed distribution is calculated from the Blank_Field_Catlaogue for the first run, and then read in on consecutive runs--!
     integer, intent(in)::Cat_Ident(:)
@@ -401,6 +408,7 @@ contains
     real(double),allocatable:: Posteriors(:,:,:,:,:) !-CatalogueID, Run, Aperture, Grid/Posterior, Value-!
     real(double),allocatable:: Combined_Posterior(:,:,:) !-Aperture, Grid/Posterior, Value-!
     real(double),allocatable:: ML_Point(:,:) !-Ap, Point-!
+    real(double),allocatable:: Single_Posterior_Error(:,:,:), Signal_to_Noise(:)
 
     !--Conversion Declarations--!
     real(double)::D_l, Area
@@ -452,7 +460,7 @@ contains
 
        if(ReRun_Mocks) then
           !- Run Mock Catalogue Production Script -!
-          call run_Mock_Production_Script(Mock_Output, nSources, frac_z, Input_Clusters_Filename)
+          call run_Mock_Production_Script(Mock_Output, nSources, frac_z, Input_Clusters_Filename, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single)
           Mock_Input = Mock_Output
        else
           if(nR < 10) then
@@ -560,14 +568,23 @@ contains
     do ID = 1, size(Cat_Ident)
        allocate(ML_Point(nAp, nRealisations)); ML_Point = 0.e0_double
        allocate(Combined_Posterior(nAp, 2, size(Posteriors,5))); Combined_Posterior = 0.e0_double
+       allocate(Single_Posterior_Error(nAp,nRealisations,2)); Single_Posterior_Error = 0.e0_double
+       allocate(Signal_to_Noise(nAp)); Signal_to_Noise = 0.e0_double
 
        Combined_Posterior(:,1,:) = Posteriors(1,1,:,1,:)
+
        do Ap = 1, nAp
           do nR = 1, nRealisations
-             call Posterior_Statistics(Posteriors(ID,nR,Ap,1,:), Posteriors(ID,nR,Ap,2,:), ModeVal = ML_Point(Ap,nR))
+             call Posterior_Statistics(Posteriors(ID,nR,Ap,1,:), Posteriors(ID,nR,Ap,2,:), ModeVal = ML_Point(Ap,nR), AntiSymm_Error = Single_Posterior_Error(Ap,nR,:))
           end do
           call Combine_Posteriors(Posteriors(ID,1,Ap,1,:), Posteriors(ID,:,Ap,2,:), .true., Combined_Posterior(Ap,2,:))
+
+          !--Construct a measure of the average Signal-to-Noise for each cluster across all the runs
+          Signal_to_Noise(Ap) = mean_discrete(ML_Point(Ap,:)/(0.5e0_double*dabs(Single_Posterior_Error(Ap,:,1)-Single_Posterior_Error(Ap,:,2))), Ignore_NaNs = .true.)
+          
        end do
+
+
 
        !---Output---!
        open(37, file = trim(Directory(ID))//'Bias_Combined_Posterior.dat')
@@ -648,15 +665,21 @@ contains
           call Integrated_Mass_Within_Radius(Surface_Mass_Profile, -1.e0_double, Bias_Mode(Ap), (/Mode_Error(Ap),Mode_Error(Ap)/), Virial_Mass, eVirial_Mass, iClusters%Redshift(Ap))
           write(*,'(A, e10.4)') '    with ML-Error:', eVirial_Mass(1)
 
+          print *, '---Average Signal-to-Noise:'
+          print *, 'StN: ', Signal_to_Noise(Ap)
 
        end do
        write(*,'(A)') '!##################################################################!'
        write(*,'(A)') '!##################################################################!'
        close(51)
-       deallocate(Bias_mode, Combined_Posterior, ML_Point, Mode_Error)
+       deallocate(Bias_mode, Combined_Posterior, ML_Point, Mode_Error, Signal_to_Noise)
     end do
     deallocate(Posteriors)
     call Foreground_Destruct(iClusters)
+
+    !--Remove the mock catalogue file
+    print *, 'Deleting Mock Catalogues:'
+    call system('rm -r '//trim(Mock_Output))
 
   end subroutine Posterior_Maximum_Likelihood_Bias_Error
 
@@ -679,6 +702,8 @@ contains
     character(500)::Catalogue_Directory, Catalogue_Filename
     integer,dimension(:),allocatable::Catalogue_Cols
     logical::here
+
+    real(double), dimension(size(Core_Cut_Radius)):: Core_Cuts_CommandLine_ReadIn
 
     !--Output Declarations
     real(double)::D_l, Area
@@ -737,16 +762,39 @@ contains
        !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
        !--Cuts on data catalogue--!
 !!$       print *, '** Cutting Catalogue:'
-!!$       call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
-!!$       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
+!!$       
+!!$       
 !!$       if(Analyse_with_Physical_Sizes) then
 !!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
 !!$       end if
-!!$       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-!!$
-!!$       print *, '**Testing for Cluster contamination in the Data Catalogue'
-!!$       call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir))
-       
+
+       print *, '--Cuts on Catalogue: REMOVED - NEEDS REINSTATED'
+       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground-
+       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2))  
+       call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+
+       print *, '**Testing for Cluster contamination in the Data Catalogue'
+       call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir), Masked_Survey_Area)
+
+       if(Set_Foreground_Masks) then
+          write(*,'(A)') '!---------------------------------------------------------------------------------------------------------'
+          write(*,'(A)') 'Check for foreground contamination and enter new values for the foreground masks to be applied to data:'
+          write(*,'(A)') ' (enter "-1" to use default)'
+          write(*,'(A,x,I2,x,A)') ' (',size(Core_Cuts_CommandLine_ReadIn), ' values needed. Less can be entered by finishing with "/")'
+          Core_Cuts_CommandLine_ReadIn = -1
+          read(*,*) Core_Cuts_CommandLine_ReadIn
+          where(Core_Cuts_CommandLine_ReadIn < 0)
+             Core_Cuts_CommandLine_ReadIn = Core_Cut_Radius
+          end where
+!          if(all(Core_Cuts_CommandLine_ReadIn < 0)) Core_Cuts_CommandLine_ReadIn = Core_Cut_Radius
+          Core_Cut_Radius  = Core_Cuts_CommandLine_ReadIn
+          print *, 'Applying Core Cuts of:'
+          print *, Core_Cut_Radius
+          print *, 'Press <ENTER> to accept.'
+          read(*,*)
+          write(*,'(A)') '---------------------------------------------------------------------------------------------------------!'
+       end if
+
        !--Cuts on Catalogue--!
        !--Cuts on prior removed as effectively implemented in the production of priors--!
 !!$       print *, '** Cutting Prior Catalogue:'
@@ -756,10 +804,10 @@ contains
 !!$       end if
 !!$       call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 
-!!$       print *, '** MO MASKS APPLIED TO PRIOR'
-!!$       call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
-!!$       print *, '**Applying Masks to Prior Catalogue:'
-!!$       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
+       print *, '--Cuts on Prior:'
+       call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
+       print *, '**Applying Masks to Prior Catalogue:'
+       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        print *, ' '
 
        call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
@@ -770,7 +818,7 @@ contains
        print *, '** Cutting Catalogue:'
 !!$       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
 !!$       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-!!$       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
+       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
        PRINT *, ' '
 
        !--If no Blank Field Information, then attempt a read in--!
@@ -846,20 +894,24 @@ contains
   !######################################################!
   !-------Mock Catalogue Multiple Run Routines-----------!
   !######################################################!
-  subroutine run_Mock_Production_Script(Mock_Output, nSources, frac_z, Cluster_Parameter_Filename)
+  subroutine run_Mock_Production_Script(Mock_Output, nSources, frac_z, Cluster_Parameter_Filename, Do_SL, Do_Clus_Cont, Contaminant_Cluster)
     character(*), intent(in):: Mock_Output, Cluster_Parameter_Filename
     integer,intent(in):: nSources
     real(double),intent(in)::frac_z
+    logical, intent(in):: Do_SL, Do_Clus_Cont
+    integer, intent(in):: Contaminant_Cluster
 
     character(120)::Script_Name = './Mock_Catalogue_Production.sh'
     character(500)::Arguement_String
-    integer::callcount
+    integer::callcount = 0
+
+    callcount = callcount + 1
 
     write(*,'(A)')       '###############################################################################################################################################################################'
     write(*, '(A,I3,A)') '##################################################### Running Mock for the ', callcount, ' time ###############################################################################'
     write(*,'(A)')       '###############################################################################################################################################################################'
 
-    write(Arguement_String, '(A,x,I6,x,e12.5,x,A)') trim(adjustl(Mock_Output)), nSources, frac_z, trim(adjustl(Cluster_Parameter_Filename))
+    write(Arguement_String, '(A,x,I6,x,e12.5,x,A,x, A,x, A,x ,I2)') trim(adjustl(Mock_Output)), nSources, frac_z, trim(adjustl(Cluster_Parameter_Filename)), logical_to_string(Do_SL),  logical_to_string(Do_Clus_Cont), Contaminant_Cluster
     print *, 'Running Mock:', trim(Script_Name)//' '//trim(Arguement_String)
     call system(trim(Script_Name)//' '//trim(Arguement_String))
 
@@ -869,6 +921,17 @@ contains
 
 
   end subroutine run_Mock_Production_Script
+
+  character(1) function logical_to_string(Log)
+    logical:: log
+    
+    if(log) then
+       logical_to_string = 'T'
+    else
+       logical_to_string = 'F'
+    end if
+
+  end function logical_to_string
 
   subroutine create_ClusterFile(File, nCluster, SMD_Profile, Position, FreeParameters, Redshift)
     character(*),intent(in)::File
