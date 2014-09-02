@@ -31,6 +31,7 @@ program Bayesian_DM_Profile_Constraints
     !-These should be passed in-!
     logical:: Mock_Do_SL = .true., Mock_Do_Cluster_Contamination = .true.
     integer:: Mock_Contaminant_Cluster_Single = 2
+    character(500):: Mock_Contaminant_File = 'THISFILE'
 
    !--Command Line Argument Entry--!                
    integer::narg, i
@@ -140,6 +141,7 @@ program Bayesian_DM_Profile_Constraints
   inquire(directory = trim(Output_Directory), exist = here)
   if(here == .false.) call system('mkdir '//trim(Output_Directory))
 
+
   select case(Run_Type)
   case(1)
      print *, '!---- Producing a single Mass Estimate:'
@@ -178,8 +180,8 @@ contains
 
     logical:: here
 
-    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits
-    namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations
+    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Core_Cut_Radius, Set_Foreground_Masks
+    namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File
 
     namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits
 
@@ -432,7 +434,7 @@ contains
 
     !----Mock Parameters-------!
     !--Directory formats must be referenced with respect to teh run directory, and these catalogues must be stored with the same level structure wrt to program--!
-    character(500)::Mock_Output = 'Output/', Mock_Input, Mock_Input_Parent = 'Catalogues/Mock_Catalogues/'
+    character(500)::Mock_Output = 'Output/', Mock_Input, Mock_Input_Parent = 'Mock_Catalogues/'
 
 
     !--Temporary Storage of User-entered variable--!
@@ -460,7 +462,7 @@ contains
 
        if(ReRun_Mocks) then
           !- Run Mock Catalogue Production Script -!
-          call run_Mock_Production_Script(Mock_Output, nSources, frac_z, Input_Clusters_Filename, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single)
+          call run_Mock_Production_Script(Mock_Output, nSources, frac_z, Input_Clusters_Filename, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File)
           Mock_Input = Mock_Output
        else
           if(nR < 10) then
@@ -538,7 +540,10 @@ contains
              !--Read in--! - Filename is set by return_size..., with no freedom here to avoid inaccuracies in the input
              if(trim(Distribution_Input) == ' ') STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) is empty'
              inquire(Directory = trim(Distribution_Input), exist = here)
-             if(here==.false.) STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) does not exist'
+             if(here==.false.) then
+                print *, 'Distribution Directory:', trim(Distribution_Input)
+                STOP 'Bayesian_DM - Error and Bias - Distribution read in attempt aborted as Distribution Directory (Distribution_Input) does not exist'
+             end if
              call Mass_Estimate_Single_Run(Run_Output_Directory, Single_Run_Posterior, iClusters, Aperture_Radius, Dist_Directory = Distribution_Input, reconstruct_Prior = .false., inCat = Cat, inBFCat = BFCat)
           end if
 !--OBSOLETE--
@@ -894,12 +899,13 @@ contains
   !######################################################!
   !-------Mock Catalogue Multiple Run Routines-----------!
   !######################################################!
-  subroutine run_Mock_Production_Script(Mock_Output, nSources, frac_z, Cluster_Parameter_Filename, Do_SL, Do_Clus_Cont, Contaminant_Cluster)
+  subroutine run_Mock_Production_Script(Mock_Output, nSources, frac_z, Cluster_Parameter_Filename, Do_SL, Do_Clus_Cont, Contaminant_Cluster, ContFile)
     character(*), intent(in):: Mock_Output, Cluster_Parameter_Filename
     integer,intent(in):: nSources
     real(double),intent(in)::frac_z
     logical, intent(in):: Do_SL, Do_Clus_Cont
     integer, intent(in):: Contaminant_Cluster
+    character(*):: ContFile
 
     character(120)::Script_Name = './Mock_Catalogue_Production.sh'
     character(500)::Arguement_String
@@ -911,7 +917,7 @@ contains
     write(*, '(A,I3,A)') '##################################################### Running Mock for the ', callcount, ' time ###############################################################################'
     write(*,'(A)')       '###############################################################################################################################################################################'
 
-    write(Arguement_String, '(A,x,I6,x,e12.5,x,A,x, A,x, A,x ,I2)') trim(adjustl(Mock_Output)), nSources, frac_z, trim(adjustl(Cluster_Parameter_Filename)), logical_to_string(Do_SL),  logical_to_string(Do_Clus_Cont), Contaminant_Cluster
+    write(Arguement_String, '(A,x,I6,x,e12.5,x,A,x, A,x, A,x ,I2,x, A)') trim(adjustl(Mock_Output)), nSources, frac_z, trim(adjustl(Cluster_Parameter_Filename)), logical_to_string(Do_SL),  logical_to_string(Do_Clus_Cont), Contaminant_Cluster, trim(adjustl(ContFile))
     print *, 'Running Mock:', trim(Script_Name)//' '//trim(Arguement_String)
     call system(trim(Script_Name)//' '//trim(Arguement_String))
 

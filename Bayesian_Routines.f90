@@ -1,3 +1,6 @@
+!~~To DO: Adaptive method ofr finding mode of posterior, moving towards peak, checking gradient on wither side until peak is found to within a ceertain tolerance. Would require that each cluster is evaluated on a different grid range (of alpha), and possbile complications in setting the order fo the grid
+!~~This would need to address the issue on whether renormalisation of the posterior for each galaxy is important, aseach point would need combined individually
+
 module  Bayesian_Routines
   !--Uses Bayesian Means to Calculate Posterior for the Dark Matter Profile variables--!
   !--Method must have redshifts for every galaxy (20Jan2014)--!
@@ -19,8 +22,8 @@ module  Bayesian_Routines
   integer:: Posterior_Method = 2
 
   logical:: Enforce_Weak_Lensing = .false.
-!  real(double):: Core_Cut_Radius(4) = 0.5e0_double !--Default
-  real(double):: Core_Cut_Radius(4) = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/) !-In Arcminutes-! Data
+  real(double):: Core_Cut_Radius(4) = 0.5e0_double !--Default
+!  real(double):: Core_Cut_Radius(4) = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/) !-In Arcminutes-! Data
 
   logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false., allow_KDE_Extrapolation = .false.
   logical::use_lnSize_Prior = .false.
@@ -378,11 +381,8 @@ contains
        iAp_Radius = Ap_Radius
     end if
 
-    !--Set up core cut on data, in degrees--!
-    Core_Cut_Radius = Core_Cut_Radius/60.e0_double !-Used for Mocks-!
-
     !--Get Mean of size and magnitude distributions in masked apertures
-    call Mask_Circular_Aperture(TCat, Ap_Pos, Core_Cut_Radius)
+    call Mask_Circular_Aperture(TCat, Ap_Pos, Core_Cut_Radius/60.e0_double)
     TCat = Cat
 
     print *, '**Global catalogue has mean [Core mask accounted for] (Size, Mag):', mean_discrete(TCat%Sizes), mean_discrete(TCat%MF606W)
@@ -393,8 +393,8 @@ contains
        print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
 !       call Maximise_Convergence_byShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
 
-       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), 'for aperture:', i
-       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i), Core_Radius = Core_Cut_Radius(i))
+       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), ' arcminutes for aperture:', i
+       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i), Core_Radius = Core_Cut_Radius(i)/60.e0_double)
        
        print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
     end do
@@ -560,6 +560,8 @@ contains
     integer:: n_Default_Source_Redshift_Used, nGal_Ignored_MagLimits, nGal_Ignored_SizeLimits, nGal_Ignored_NaN
     real(double), allocatable:: Aperture_Smoothed_Size_PDF(:), Aperture_Smoothed_Mag_PDF(:)
     logical:: Produce_Shift_inAperture = .false.
+    real::Time1, Time2, Time3, Time4
+    integer::test
 
     INTERFACE
        subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
@@ -730,8 +732,15 @@ contains
 
     n_Default_Source_Redshift_Used = 0; nGal_Ignored_MagLimits = 0; nGal_Ignored_SizeLimits = 0; nGal_Ignored_NaN = 0
     nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
+    Time1 = 0.; Time2 = 0.
     do c = 1, size(Effective_Magnification,1) !-Loop over galaxies-!
        !--Select the method of posterior reconstruction for that point based in input method
+
+!!$       Time1 = Time2
+!!$       call CPU_TIME(Time2)
+!!$
+!!$       print *, 'Galaxy:', c, Time2-Time1
+
        select case(Posterior_Method)
        case(1) !--SizeOnly--!
           if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
@@ -852,8 +861,11 @@ contains
 !!$       if(c==1) write(*,'(A)', advance = 'no') 'Galaxy:'
 !!$       write(*,'(I3,x,A)',advance = 'no') c, ','
 
+
        do i = 1, size(Effective_Magnification,2) !--Loop over posterior values--!
+
           do z = 1, size(RedshiftPDF)
+
              select case(Mass_Profile)
              case(1) !-Flat-!
                 STOP 'The Strong Lensing approximation has not been implemented for this profile yet'
@@ -872,22 +884,32 @@ contains
                 STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
              end select
 
+             if(isNaN(Effective_Magnification(c,i))) then
+                print *, 'Magnification Factor is a NaN:', Distance_From_Mass_Center, Posterior(1,i), Lens_Redshift, Sigma_Crit(c,z)*1.e18_double
+                STOP
+             end if
+
+
+!             if(Effective_Magnification(c,i) < 1.e0_double) print *, '** DE-AMPLIFICATION!', Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i), Distance_From_Mass_Center
              if(Effective_Magnification(c,i) < minval(MagnificationGrid) .or. Effective_Magnification(c,i) > maxval(MagnificationGrid)) then
                 !--Skipping as outside limits on which magnification was evaluated--!
+!                print *, 'Skipping since mu lie outside renormalisation limits (including < 1)', Effective_Magnification(c,i)
                 Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
                 cycle
              end if
 
              if(Effective_Magnification(c,i) <= 0.e0_double) then
-!!$                Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
-!!$                cycle
+!                print *, 'Skipping since Mu is negative'
+!                Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
+!                cycle
                 !--This won't be picked up unless the above cycle is relaxed--!
-                print *, Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i)
+                print *, Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i), Distance_From_Mass_Center
                 STOP 'Effective Magnification invalid - negative. Stopping'
              end if
-             if(Effective_Magnification(c,i) < 1.e0_double) print *, '** DE-AMPLIFICATION!', Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i)
+
 
              !--Construct Joint Size-Magnitde Prior which is renormalised according to the convergence value--!
+
              Renormalisation_Size_Limits = Survey_Size_Limits/dsqrt(Effective_Magnification(c,i))
              Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.5e0_double*dlog10(Effective_Magnification(c,i))
 
@@ -905,6 +927,7 @@ contains
                 Kappa_Renormalised_Prior =  Survey_Renormalised_Prior
                 Kappa_Renormalised_MagPrior = Survey_Renormalised_MagPrior
              end if
+
              
              select case (Galaxy_Posterior_Method)
              case(1) !--Size Only--!

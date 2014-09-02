@@ -27,19 +27,23 @@ module Mass_Profiles
       select case(Profile)
       case(1)
          STOP 'I cannot calculate the Magnification Factor for this profile yet'
-      case(2)
-         STOP 'I cannot calculate the Magnification Factor for this profile yet'
+      case(2) !-SIS-!
+         !--As SIS has Kappa \propto 1/theta, |gamma| = kappa, so only theta needs calculated
+         Kappa = SMD_SIS_Scalar(Param, Radius)/Sigma_Critical
+         Magnification_Factor = 1.e0_double/(1.e0_double-(2.e0_double*Kappa))
       case(3) !-NFW-!
          Kappa = SMD_NFW_Scalar(Radius, Redshift, Param)/Sigma_Critical
          Gamma = Differential_SMD_Scalar(Radius, Redshift, Param)/Sigma_Critical
+         Magnification_Factor = 1.e0_double/( ((1.e0_double-Kappa)**2.e0_double) - Gamma*Gamma)
       end select
-
-
-      Magnification_Factor = 1.e0_double/( ((1.e0_double-Kappa)**2.e0_double) - Gamma*Gamma)
 
     end function Magnification_Factor
 
+
+
+
     real(double) function Total_MagnificationFactor_MultipleClusters(Profile, Position, Source_Redshift, Cluster_Pos, Param, Redshift)
+      !--Does not work--!
       use Cosmology, only: angular_diameter_distance_fromRedshift
       integer, intent(in):: Profile
       real(double), intent(in)::Param(:), Redshift(:),  Source_Redshift
@@ -200,6 +204,7 @@ module Mass_Profiles
       call get_NFW_Parameters(z, r200, rho_c, M200, delta_c, c)
       rs = r200/c
 
+      !--Use normalise Hubble Parameter as 4.3017e-13 labels G/H_0^2
       rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(z)
       rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
 !      Omega_matter = 1.e0_double !-Use for halo defined wrt critical density
@@ -505,7 +510,7 @@ module Mass_Profiles
       rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
 
       !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the critical density ** (e.g. Wright, Brainerd 1999)
-      !--Use Omega_Matter = 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the mean matter density ** (e.g. Dolag 2004, Heymans 2008)
+      !--Use Omega_Matter \= 1 to use definition of r200 as where density of matter contained in halo is ** 200 times the mean matter density ** (e.g. Dolag 2004, Heymans 2008)
       !Omega_matter = 1.e0_double
       Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
 
@@ -579,6 +584,54 @@ module Mass_Profiles
 
     end function Error_SIS_Mass_withinRadius
 
+    real(double) function VelocityDispersionSquared_SIS_fromHaloMass(M200, Lens_Redshift)
+      !@--Sets sigma_v^2, which sets the scale of the profile, from the halo mass M200
+      use Cosmology, only: Normalised_Hubble_Parameter
+      real(double), intent(in):: M200, Lens_Redshift
+
+      real(double):: rho_c, rho_c0, Omega_Matter
+      real(double):: G = 4.302e-9_double !-in units [Mpc/M_{sun}][km/s]^2
+      
+      !--Use normalise Hubble Parameter as 4.3017e-13 labels G/H_0^2
+      !--rho_c then in units [M_{Sun}/h][h/Mpc]^3
+      rho_c = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(Lens_Redshift)
+      rho_c0 = (3.e0_double/(8.e0_double*3.142e0_double*4.3017e-13_double))*Normalised_Hubble_Parameter(0.0e0_double)
+      Omega_matter = 1.e0_double !-Use for halo defined wrt critical density
+      !Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c) !-Use for halo defined wrt mass density
+      
+      VelocityDispersionSquared_SIS_fromHaloMass = (( ((4.e0_double*200.e0_double)/3.e0_double)*rho_c*Omega_Matter*((M200/3.14159265359e0_double)**2.e0_double))**0.3333e0_double)*G
+
+    end function VelocityDispersionSquared_SIS_fromHaloMass
+
+    real(double) function get_Einstein_Radius_SIS(velocity_dispersion2, Lens_Redshift, Source_Redshift)
+      use cosmology, only: angular_diameter_distance_fromRedshift
+      !--Utilises two methods: 1 searches for point where kappa = 0.5, the other uses an analytic form for the Einstein Radius
+      real(double), intent(in):: velocity_dispersion2, Lens_Redshift, Source_Redshift
+
+      integer:: Method = 2
+
+      !--Method 1 declarations--!
+      real(double):: D_ls, D_s
+
+      !--Method 2 Declarations--!
+
+      select case(Method)
+      case(1)
+         !--Search for kappa = 0.5
+         STOP 'get_Einstein_Radius_SIS - Search Method not coded yet'
+      case(2)
+         !-- \theta_E = \frac{4\pi D_{ds}}{D_s}\left(\frac{\sigma_v}{c}\right)^2
+         D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
+         D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Source_Redshift)
+
+         !-- Velocity Dispersion should be km/s
+         get_Einstein_Radius_SIS = (4.e0_double*3.141592e0_double)*(D_ls/D_s)*(velocity_dispersion2/((2.99792e5_double)**2.e0_double))
+      case default
+         STOP 'get_Einstein_Radius_SIS - Invalid method entered'
+      end select
+
+    end function get_Einstein_Radius_SIS
+
     function SMD_SIS_Array(velocity_dispersion2, radius, core, truncation)
       real(double), intent(in):: velocity_dispersion2, radius(:)
       real(double), intent(in),optional:: core, truncation
@@ -601,6 +654,7 @@ module Mass_Profiles
 
 
     real(double) function SMD_SIS_Scalar(velocity_dispersion2, radius, core, truncation)
+      !--Velocity Dispersion^2 should be (km/s)^2
       real(double), intent(in):: velocity_dispersion2, radius
       real(double), intent(in),optional:: core, truncation
 
@@ -610,6 +664,7 @@ module Mass_Profiles
       if(present(Core)) Core_Radius = Core
       if(present(Truncation)) Truncation_Radius = Truncation
 
+      !--Newtons Constant here is taken to be 4.3017e-9 [M_Sun/Mpc][km/s]^2
       SMD_SIS_Scalar =  ( (Velocity_Dispersion2)/(2.e0_double*4.3017e-9_double) )*( 1.e0_double/(dsqrt(Radius*Radius + Core_Radius*Core_Radius)) - 1.e0_double/(dsqrt(Radius*Radius + Truncation_Radius*Truncation_Radius)) )
 
 
