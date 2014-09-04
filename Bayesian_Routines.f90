@@ -30,40 +30,73 @@ module  Bayesian_Routines
   logical:: Cuts_Renormalise_Likelihood = .true.
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
   real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
+  real(double),parameter:: Lower_Redshift_Cut = 0.21
+
+
+  !--Overload function for Combine Posteriors
+  interface Combine_Posteriors
+     module procedure Combine_Posteriors_Scalar, Combine_Posteriors_Vector
+  end interface Combine_Posteriors
 
 
 contains
 
-  subroutine Combine_Posteriors(PosteriorGrid, Posteriors, Combine_by_ln, Combined_Posterior)
+  subroutine Combine_Posteriors_Scalar(GridValue, Posteriors,  Combine_by_ln, Renormalise, Return_lnP, Combined_Posterior)
+    !--Combines the posterior on a single grid value (free parameter alpha), using a call to the "normal" (vector) combined posterior subroutine
+     real(double), intent(in):: GridValue,Posteriors(:) !-Galaxy-!  
+     real(double), intent(out):: Combined_Posterior
+     logical, intent(in):: Combine_by_ln, Renormalise, Return_lnP
+
+     !--Internal Declarations
+     real(double),dimension(1):: tGrid, tCombinedPosterior
+     real(double), dimension(size(Posteriors),1):: tPosteriors
+
+     !--Set up internals
+     tGrid = GridValue
+     tPosteriors(:,1) = Posteriors
+
+     call Combine_Posteriors(tGrid, tPosteriors, Combine_by_ln, .false., Return_lnP, tCombinedPosterior)
+     Combined_Posterior = tCombinedPosterior(1)
+
+   end subroutine Combine_Posteriors_Scalar
+
+  subroutine Combine_Posteriors_Vector(PosteriorGrid, Posteriors, Combine_by_ln, Renormalise, Return_lnP, Combined_Posterior)
     !--Combines posteriors by looping over the first dimension--!
-    real(double), intent(in):: PosteriorGrid(:),Posteriors(:,:)
+    real(double), intent(in):: PosteriorGrid(:),Posteriors(:,:) !-Galaxy, Grid/Value-!
     real(double), intent(out):: Combined_Posterior(:)
-    logical, intent(in):: Combine_by_ln
+    logical, intent(in):: Combine_by_ln, Renormalise, Return_lnP
 
     integer::c, j
     real(double)::Renorm, Combination_Normalisation
+    logical::iDoRenormalise
 
     integer::nPosteriorsSkipped
 
     INTERFACE
-       subroutine Combine_Posteriors(PosteriorGrid, Posteriors, Combine_by_ln, Combined_Posterior)
+       subroutine Combine_Posteriors_Vector(PosteriorGrid, Posteriors, Combine_by_ln, Renormalise, Return_lnP, Combined_Posterior)
          use Param_Types
          real(double), intent(in):: PosteriorGrid(:), Posteriors(:,:)
          real(double), intent(out):: Combined_Posterior(:)
-         logical, intent(in):: Combine_by_ln
-       END subroutine Combine_Posteriors
+         logical, intent(in):: Combine_by_ln, Renormalise, Return_lnP
+       END subroutine Combine_Posteriors_Vector
     END INTERFACE
+
+    !--Set renormalisation by input. If a single alpha value entered, then do not renormalise
+    iDoRenormalise = Renormalise
+    if(size(PosteriorGrid) == 1) iDoRenormalise = .false.
 
     nPosteriorsSkipped = 0
     if(Combine_by_ln == .false.) then
        Combination_Normalisation = 1.e0_double/maxval(Posteriors)!or 1.e0_double/(0.5e0_double*maxval(Posteriors(c,:))) within loop
        Combined_Posterior = 1.e0_double
        do c = 1, size(Posteriors,1) !-Loop over galaxies-!   
+          !--Skip if zero (lnP not defined then) or NaN
           if(all(Posteriors(c,:) == 0.e0_double) .or. all(isNaN(Posteriors(c,:)))) then
              nPosteriorsSkipped = nPosteriorsSkipped + 1
              cycle
           end if
 
+          !--Skip when `renormalised' posteriors are invalid (zero/negative)
           if(all(Posteriors(c,:)*Combination_Normalisation == 0.e0_double)) then
              print *, 'Invalid Posterior for galaxy:', c, ' (==0) press [ENTER] to output an stop..'; READ(*,*)
              print *, Posteriors(c,:)
@@ -94,8 +127,11 @@ contains
           
        end do
     else
-       print *, 'Combining using logs'
+       if(return_lnP) iDoRenormalise = .false.
+!       print *, 'Combining using logs'
+       !-Set lnP to a large negative value as default, equivalent to P ~ 0
        Combined_Posterior = -100_double
+       Combination_Normalisation = size(Posteriors,1)
        do c = 1, size(Posteriors,1) !-Loop over galaxies-!
           !-Error Catching--!
           if(all(Posteriors(c,:) == 1.e-75_double) .or. all(isNaN(Posteriors(c,:)))) then
@@ -103,21 +139,35 @@ contains
              cycle
           end if
           !--Sum log posteriors--!
+!!$          print *, 'CombinePosterior, loop:', c
+!!$          print *, Combined_Posterior, dlog(Posteriors(c,:))
+
           where(Posteriors(c,:) == 0.e0_double)
              Combined_Posterior = Combined_Posterior - 100.e0_double
           elsewhere
-             Combined_Posterior = Combined_Posterior + dlog(Posteriors(c,:))
+             Combined_Posterior = Combined_Posterior + dlog(Posteriors(c,:)) + 1.e0_double
           end where
 
-             if(any(isNAN(Combined_Posterior(:)))) then
-                print *, 'Any NaNs in Combined Posterior?, galaxy:',c, any(isNAN(Combined_Posterior)), count(isNAN(Combined_Posterior) == .true.)
-                STOP
-             end if
+
+          if(any(isNAN(Combined_Posterior(:)))) then
+             print *, 'Any NaNs in Combined Posterior?, galaxy:',c, any(isNAN(Combined_Posterior)), count(isNAN(Combined_Posterior) == .true.)
+             STOP
+          end if
        end do
        !--Convert to PDF, not ln(PDF)--!
-       Combined_Posterior = dexp(Combined_Posterior - maxval(Combined_Posterior))
+       if(Return_lnP) then
+          return
+       else
+          if(size(Combined_Posterior)/= 1) then
+             Combined_Posterior = dexp(Combined_Posterior - maxval(Combined_Posterior))
+          else
+             Combined_Posterior = dexp(Combined_Posterior)
+          end if
+       end if
     end if
  
+    
+
     if(any(isNAN(Combined_Posterior(:)))) then
        print *, 'Any NaNs in Combined Posterior?', any(isNAN(Combined_Posterior)), count(isNAN(Combined_Posterior) == .true.)
        print *, 'Stopping'
@@ -127,16 +177,18 @@ contains
     if(nPosteriorsSkipped > 0) write(*,'(A,I4,A,I4,A)') '################### Combine_Posteriors - ', nPosteriorsSkipped, ' of ', size(Posteriors,1), ' posteriors were skipped as they we invlaid - NaNs or 0 ###########################'
     if((1.e0_double*nPosteriorsSkipped)/size(Posteriors,1) > 0.1) STOP 'Combine_Posteriors - number of skipped posteriors too large, stopping!'
 
-    !--Renormalise--!                                                                                                                                     
-    Renorm = 0.e0_double
-    do j = 1, size(Combined_Posterior)-1
-       Renorm = Renorm + 0.5e0_double*(Combined_Posterior(j) + Combined_Posterior(j+1))*(PosteriorGrid(j+1)-PosteriorGrid(j))
-    end do
-    if(Renorm <= 0.e0_double) then
-       print *, 'Renormalisation:', Renorm
-       STOP 'Combine_Posteriors - Invalid Renormalisation for combined Posterior'
+    !--Renormalise--!
+    if(iDoRenormalise) then
+       Renorm = 0.e0_double
+       do j = 1, size(Combined_Posterior)-1
+          Renorm = Renorm + 0.5e0_double*(Combined_Posterior(j) + Combined_Posterior(j+1))*(PosteriorGrid(j+1)-PosteriorGrid(j))
+       end do
+       if(Renorm <= 0.e0_double) then
+          print *, 'Renormalisation:', Renorm
+          STOP 'Combine_Posteriors - Invalid Renormalisation for combined Posterior'
+       end if
+       Combined_Posterior(:) = Combined_Posterior(:)/Renorm
     end if
-    Combined_Posterior(:) = Combined_Posterior(:)/Renorm
 
     if(any(isNAN(Combined_Posterior(:)))) then
        print *, 'Any NaNs in Renormalised Combined Posterior?', any(isNAN(Combined_Posterior)), count(isNAN(Combined_Posterior) == .true.)
@@ -144,7 +196,7 @@ contains
        STOP
     END if
 
-  end subroutine Combine_Posteriors
+  end subroutine Combine_Posteriors_Vector
 
   subroutine Posterior_Statistics(PosteriorGrid, Posterior, MeanVal, ModeVal, Error, AntiSymm_Error)
     use Statistics, only: mean, mode_distribution, variance_distribution, Antisymmetric_Variance_Distribution
@@ -479,7 +531,7 @@ contains
 
   subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
     use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles; use Distributions, only: ch08_redshift_distribution_Array, CH08_Redshift_Distribution_Scalar; use Interpolaters, only: Linear_Interp
-    use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete
+    use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete;
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
     !-For Mass_Profile = 1 (Flat): Sigma_0
     !-                   2 (SIS) : Velocity_Dispersion**2
@@ -540,7 +592,7 @@ contains
 
     !--Redshift Distribution Declarations--!
     integer,parameter:: nRedshift_Sampling = 50
-    real(double),parameter::Redshift_Lower = 0.156e0_double, Redshift_Higher = 4.e0_double !!!Edit to Lens_Redshift
+    real(double),parameter::Redshift_Lower = Lower_Redshift_Cut, Redshift_Higher = 4.e0_double !!!Edit to Lens_Redshift
     real(double), dimension(nRedshift_Sampling):: RedshiftGrid
     real(double)::RedshiftPDF
     real(double),allocatable:: Posterior_perGalaxy_Redshift(:) !-Galaxy, Posterior, Redshift-!
@@ -749,7 +801,6 @@ contains
     Time1 = 0.; Time2 = 0.
 
     do i = 1, size(Posterior_perGalaxy,2) !--Loop over posterior values--!
-!       print *, 'Doing Alpha loop:', i
        if(i == size(Posterior_perGalaxy,2)/2) print *, 'Halfway done for this Aperture..'          
        do c = 1, size(Posterior_perGalaxy,1) !-Loop over galaxies-!
           !             print *, 'Doing Galaxy Loop:', c, size(Posterior_pergalaxy,1)
@@ -820,22 +871,19 @@ contains
              !--Ignore Galaxies with redshift less than the foreground-!
              if(Cat%Redshift(c) < Lens_Redshift) cycle
              
-             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
-             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
+!!$             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
+!!$             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
              
-             Galaxy_Sigma_Critical = 1.66492e0_double*(D_s/(D_l*D_ls))
-             
+             Galaxy_Sigma_Critical = Linear_Interp(Cat%Redshift(c), RedshiftGrid, Sigma_Crit)!1.66492e0_double*(D_s/(D_l*D_ls))
              Known_Redshift = .true.
              
           elseif(Marginalise_Redshift_Distribution == .false.) then
              !--Use Default Redshift if everything else fails--!
              
              n_Default_Source_Redshift_Used = n_Default_Source_Redshift_Used + 1
-             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
-             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
              
-             Galaxy_Sigma_Critical = 1.66492e0_double*(D_s/(D_l*D_ls))
-             
+             Galaxy_Sigma_Critical = Linear_Interp(Default_Source_Redshift, RedshiftGrid, Sigma_Crit)
+!             Galaxy_Sigma_Critical = 1.66492e0_double*(D_s/(D_l*D_ls)) !Obsolete after testing, to reintroduce would need re-calculation of DLS, DL
              Known_Redshift = .false.
           elseif(Marginalise_Redshift_Distribution) then
              !--Marginalising over the redshift distribution for that galaxy--!
@@ -853,8 +901,8 @@ contains
 !          if(Known_Redshift) print *, 'Known_Redshift gal:', c
           
           do z = 1, size(Posterior_perGalaxy_Redshift,1)             
-             !--There must be a better way to do this, perhaps using interpolation? (i.e. it is very seperated from other methods
 
+             !--There must be a better way to do this, perhaps using interpolation? (i.e. it is very seperated from other methods
              if(Marginalise_Redshift_Distribution .and. (Known_Redshift == .false.)) Galaxy_Sigma_Critical = Sigma_Crit(z)
              
              select case(Mass_Profile)
@@ -876,6 +924,7 @@ contains
 
              if(isNaN(Effective_Magnification)) then
                 print *, 'Magnification Factor is a NaN:', Distance_From_Mass_Center(c), Posterior(1,i), Lens_Redshift, Galaxy_Sigma_Critical*1.e18_double
+                print *, 'Loops, posterior, galaxy, redshift:', i, c, z
                 STOP
              end if
 
@@ -1063,33 +1112,14 @@ contains
        end do !--End of galaxy loop       
 
        !--Combination of galaxy posteriors could be done here, provided that the overall renomralisation of these individual posteriors is unimportant
+       !~~Return lnP to ensure that we can renormalise in an alpha-independent way in teh combined posterior, and to ensure that the PDF is correctly recovered even with ronding error (large negative lnP across all alphas). The renormalisation is done after the outer loop is finished
+       call Combine_Posteriors(Posterior(1,i), Posterior_perGalaxy(:,i), Combine_log_Posteriors, Renormalise = .false., Return_lnP = Combine_log_Posteriors, Combined_Posterior = Posterior(2,i))
 
-!       print *, 'Reading at end of posterior value loop'
-!       read(*,*)
     end do !--End of Posterior Loop
     
-    !~~Galaxy Posterior renormalisation and error checking
-    do c = 1, size(Posterior_perGalaxy,1)
-       !--Get Posterior on Size for each galaxy by marginalising over the redshift distribution--!
-       
-       IF(all(Posterior_perGalaxy(C,:) == 0.E0_DOUBLE)) then
-          print *, 'Galxy ', c, ' has zero posterior'
-          read(*,*)
-       end IF
-       
-       !--Renormalise the posterior per galaxy - could reasonably be removed.
-       Renorm = 0.e0_double
-       do j = 1, size(Posterior_perGalaxy,2)-1
-          Renorm = Renorm + 0.5e0_double*(Posterior_perGalaxy(c,j) + Posterior_perGalaxy(c,j+1))*(Posterior(1,j+1)-Posterior(1,j))
-       end do
-       if(Renorm == 0.e0_double) THEN
-          PRINT *, 'DM_Profile_Variable_Posterior - Error Renormalising Galaxy posteriors - Posterior Empty', C
-          !STOP
-       END if
-       
-       Posterior_perGalaxy(c,:) = Posterior_perGalaxy(c,:)/Renorm
-       Renorm = 0.e0_double
-    end do !--End of galaxy loop-!
+    !--Convert from lnP to P for posterior, renormalise so that max(P) = 1, to avoid rounding errors
+    if(Combine_log_Posteriors) Posterior(2,:) = dexp(Posterior(2,:) - maxval(Posterior(2,:)))
+
     if(n_Default_Source_Redshift_Used > 0) write(*,'(A,I3,A)') '****** Used the default redshift for:', n_Default_Source_Redshift_Used, ' galaxies ********'
     if(nGal_Ignored_SizeLimits > 0) write(*,'(A,I3)') '****** Number of galxies ignored as they fell outside the survey size limits:', nGal_Ignored_SizeLimits
     if(nGal_Ignored_NaN > 0) write(*,'(A,I3)') '****** Number of galaxies ignored as they were NaNs:', nGal_Ignored_NaN
@@ -1114,7 +1144,8 @@ contains
     end if
     
     !--Get the total posterior for the source set by combining all galaxies in that source set
-    call Combine_Posteriors(Posterior(1,:), Posterior_perGalaxy(:,:), Combine_log_Posteriors, Posterior(2,:))
+    !--Removed as part of work to combine per alpha value, in the hope of reducing the number of alpha values necessary to get result
+!!$    call Combine_Posteriors(Posterior(1,:), Posterior_perGalaxy(:,:), Combine_log_Posteriors, Renormalise = .true., Combined_Posterior = Posterior(2,:))
     
     Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined_Renormalised.dat'
     open(unit = 82, file = Filename)
@@ -1169,7 +1200,7 @@ contains
     real(double),allocatable:: tMagGrid(:), tMagDist(:)
 
     !--Cuts on the prior distribution--!
-    real(double):: Redshift_Cuts(2)  = (/0.22e0_double, 100.e0_double/) !-- If no cuts, then lower should still be < -1 to ensure only galaxies without redshift information are cut
+    real(double):: Redshift_Cuts(2)  = (/Lower_Redshift_Cut, 100.e0_double/) !-- If no cuts, then lower should still be < -1 to ensure only galaxies without redshift information are cut
     type(Catalogue)::Cut_Catalogue
 
     !--TESTING--!

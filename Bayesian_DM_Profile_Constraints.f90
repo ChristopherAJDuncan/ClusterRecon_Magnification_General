@@ -582,7 +582,7 @@ contains
           do nR = 1, nRealisations
              call Posterior_Statistics(Posteriors(ID,nR,Ap,1,:), Posteriors(ID,nR,Ap,2,:), ModeVal = ML_Point(Ap,nR), AntiSymm_Error = Single_Posterior_Error(Ap,nR,:))
           end do
-          call Combine_Posteriors(Posteriors(ID,1,Ap,1,:), Posteriors(ID,:,Ap,2,:), .true., Combined_Posterior(Ap,2,:))
+          call Combine_Posteriors(Posteriors(ID,1,Ap,1,:), Posteriors(ID,:,Ap,2,:), .true., .true., .false., Combined_Posterior(Ap,2,:))
 
           !--Construct a measure of the average Signal-to-Noise for each cluster across all the runs
           Signal_to_Noise(Ap) = mean_discrete(ML_Point(Ap,:)/(0.5e0_double*dabs(Single_Posterior_Error(Ap,:,1)-Single_Posterior_Error(Ap,:,2))), Ignore_NaNs = .true.)
@@ -774,7 +774,7 @@ contains
 !!$       end if
 
        print *, '--Cuts on Catalogue: REMOVED - NEEDS REINSTATED'
-       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground-
+       call Cut_By_PhotoMetricRedshift(Catt, Lower_Redshift_Cut) !--Cut out foreground-
        call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2))  
        call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
 
@@ -810,7 +810,7 @@ contains
 !!$       call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
 
        print *, '--Cuts on Prior:'
-       call Cut_By_PhotoMetricRedshift(BFCatt, 0.22e0_double) !--Cut out foreground-
+       call Cut_By_PhotoMetricRedshift(BFCatt, Lower_Redshift_Cut) !--Cut out foreground-
        print *, '**Applying Masks to Prior Catalogue:'
        call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
        print *, ' '
