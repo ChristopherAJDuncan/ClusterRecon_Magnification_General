@@ -66,8 +66,8 @@ module Mass_Profiles
       D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
       do C = 1, nCl
          !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
-         dRA = Position(1)-Cluster_Pos(C, 1)
-         dDec = Position(2) - Cluster_Pos(C,2)
+         dRA = dabs(Position(1)-Cluster_Pos(C, 1))
+         dDec = dabs(Position(2) - Cluster_Pos(C,2))
          Theta = acos(dDec/dRA)
          
          !--Get Sigma_Critical--!

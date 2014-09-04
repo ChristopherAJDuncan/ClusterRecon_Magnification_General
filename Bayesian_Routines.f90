@@ -513,7 +513,7 @@ contains
     real(double),dimension(:,:),allocatable::  Kappa_Renormalised_Prior, Survey_Renormalised_Prior, Size_Only_Mag_Prior
     real(double),dimension(:),allocatable::Kappa_Renormalised_MagPrior, Survey_Renormalised_MagPrior
     real(double),allocatable::Posterior_perGalaxy(:,:) !-Galaxy, Posterior-! - Uses Same Grid as overall Posterior -
-    real(double),allocatable:: Effective_Magnification(:,:) !-Galaxy, DM Free Parameter-! - Only Model Dependant
+    real(double):: Effective_Magnification !- Only Model Dependant
 
     logical:: MC_Sigma_Critical = .false.
     logical:: Marginalise_Redshift_Distribution = .true.
@@ -526,9 +526,10 @@ contains
     logical:: do_KDE_Extrapolation, do_KDE_OnTheFly
     logical:: need_Extrapolate
 
-    real(double),allocatable::Sigma_Crit(:,:), Sigma_Crit_MC(:)
+    real(double),allocatable::Sigma_Crit(:), Sigma_Crit_MC(:)
+    real(double):: Galaxy_Sigma_Critical
     real(double)::D_l, D_s, D_ls
-    real(double)::Distance_from_Mass_Center
+    real(double),allocatable::Distance_from_Mass_Center(:) !-Galaxy-!
 
     real(double)::Renorm
 
@@ -541,8 +542,8 @@ contains
     integer,parameter:: nRedshift_Sampling = 50
     real(double),parameter::Redshift_Lower = 0.156e0_double, Redshift_Higher = 4.e0_double !!!Edit to Lens_Redshift
     real(double), dimension(nRedshift_Sampling):: RedshiftGrid
-    real(double),allocatable::RedshiftPDF(:)
-    real(double),allocatable:: Posterior_perGalaxy_Redshift(:,:,:) !-Galaxy, Posterior, Redshift-!
+    real(double)::RedshiftPDF
+    real(double),allocatable:: Posterior_perGalaxy_Redshift(:) !-Galaxy, Posterior, Redshift-!
 
     !--Kappa dependant renormalisation--!
 !!    real(double),dimension(2):: Survey_Magnitude_Limits, Survey_Size_Limits !--User defined needs edit to below, these are set by default from distribution-!
@@ -578,11 +579,11 @@ contains
          real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), MagPrior(:), Prior(:,:) !-Magnitude, Size-!
        END subroutine DM_Profile_Variable_Posterior
     END INTERFACE
-
+    
     print *, 'Called DM_Profile_Variable_Posterior'
-
+    
     if(Analyse_with_Physical_Sizes) STOP 'DM_Profile_Variable_Posterior - I HAVE DISABLED THE ABILITY TO USE PHYISCAL SIZES AS UNNECESSARY, code still to be edited'
-
+    
     do_KDE_Extrapolation = .false.; do_KDE_OnTheFly = .false.
     if(present(Prior) .or. present(MagPrior)) then
        if((present(PriorMagGrid) == .false.) .or. (present(PriorSizeGrid)== .false.)) STOP 'DM_Profile_Variable_Posterior - Prior must be accompanied by grids'
@@ -667,14 +668,21 @@ contains
     end if
 
     D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift)
-    !--SET UP REDSHIFT GRID--!
+    !--Set up the redshift grid--!
     if(Marginalise_Redshift_Distribution) then
        do z = 1, nRedshift_Sampling
           RedshiftGrid(z) = Redshift_Lower + (z-1)*((Redshift_Higher-Redshift_Lower)/(nRedshift_Sampling-1))
        end do
     end if
 
-
+    !--Get Sigma_Critical for each point on the Redshift PDF grid--!
+    allocate(Sigma_Crit(size(RedshiftGrid))); Sigma_Crit = 0.e0_double
+    do z = 1, size(RedshiftGrid)
+       D_s = angular_diameter_distance_fromRedshift(0.e0_double, RedshiftGrid(z))
+       D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, RedshiftGrid(z))
+       Sigma_Crit(z) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
+    end do
+    
     !--Renormalise the prior within these size and magnitude limits--!
     print *, 'Renormalisation of the intrinsic distribution:', Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
     Survey_Renormalised_Prior = Prior/Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
@@ -684,8 +692,8 @@ contains
        print *, 'Renormalisation of the intrinsic magnitude distribution:', Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
        Survey_Renormalised_MagPrior = MagPrior/Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
     end if
-
-    !------This section renormalises the likelihhod, taking into account kappa-dependent mag and size cuts, however this need to be implemented in the prior-----!
+    
+    !------This section renormalises the likelihood, taking into account kappa-dependent mag and size cuts, however this need to be implemented in the prior-----!
     allocate(MagnificationGrid(nMagnificationGrid)); MagnificationGrid = 0.e0_double
     allocate(Renormalisation_by_Magnification(size(MagnificationGrid))); Renormalisation_by_Magnification = 0.e0_double
     if(present(MagPrior)) then
@@ -718,9 +726,8 @@ contains
 
     !--Start of Posterior Routines--!
     allocate(Posterior_perGalaxy(size(Cat%RA), size(Posterior,2))); Posterior_perGalaxy = 1.e-100_double
-    allocate(Effective_Magnification(size(Cat%RA), size(Posterior,2))); Effective_Magnification = 0.e0_double
+    Effective_Magnification = 0.e0_double
     Convergence_Per_Cluster = 0.e0_double
-
 
     write(*,'(A)') '--------------------------------------------------------------------------------------------------'
     write(*,'(A)',advance = 'no') 'Getting Posterior for Cluster '
@@ -730,192 +737,176 @@ contains
     if(Posterior_Method == 4) write(*,'(A)') 'using Size and Magnitudes, and Magnitudes Only below the size limit'
     if(Enforce_Weak_Lensing) print *, '*** Weak lensing assumptions have been enforced'
 
+
+    !--Get the distance from the mass centre for each galaxy
+    allocate(Distance_from_Mass_Center(size(Cat%RA))); Distance_from_Mass_Center = 0.e0_double
+    Distance_from_Mass_Center = dsqrt( (Cat%RA(:)-Lens_Position(1))**2.e0_double + (Cat%Dec(:)-Lens_Position(2))**2.e0_double ) !-in Degrees-!
+    Distance_from_Mass_Center = (D_l*Distance_from_Mass_Center*(3.142e0_double/(180.e0_double))) !-in Mpc/h-! 
+
+
     n_Default_Source_Redshift_Used = 0; nGal_Ignored_MagLimits = 0; nGal_Ignored_SizeLimits = 0; nGal_Ignored_NaN = 0
     nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
     Time1 = 0.; Time2 = 0.
-    do c = 1, size(Effective_Magnification,1) !-Loop over galaxies-!
-       !--Select the method of posterior reconstruction for that point based in input method
 
-!!$       Time1 = Time2
-!!$       call CPU_TIME(Time2)
-!!$
-!!$       print *, 'Galaxy:', c, Time2-Time1
-
-       select case(Posterior_Method)
-       case(1) !--SizeOnly--!
-          if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
-             nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
-             cycle
-          end if
-!MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
-
-          nSizePosterior = nSizePosterior + 1
-          Galaxy_Posterior_Method = 1
-       case(2)!--SizeMag--!
-          if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
-             nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
-             cycle
-          end if
-
-!MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
-
-          nSizeMagPosterior = nSizeMagPosterior + 1
-          Galaxy_Posterior_Method = 2
-       case(3) !-Magnitude Only--!
-          nMagPosterior = nMagPosterior + 1
-
-!MagRenorm          iSurvey_size_Limits = (/0.e0_double, 1.e30_double/) !--Should encompase the whole data set
-
-          if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only, but no magnitde prior entered, stopping'
-          Galaxy_Posterior_Method = 3
-       case(4) !-Size mag above size data limit, Mag-Only below size data limit-!
-          if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only under size limit, but no magnitde prior entered, stopping'
-          STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distriution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
-
-          !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies
-          if(Cat%Sizes(c) < Survey_Size_Limits(1)) then
-!MagRenorm             iSurvey_Size_Limits = (/0.e0_double, Survey_Size_Limits(1)/)
-
-             Galaxy_Posterior_Method = 3
-             nMagPosterior = nMagPosterior + 1
-          else
-!MagRenorm             iSurvey_Size_Limits = Survey_Size_Limits
-
-             Galaxy_Posterior_Method = 2
+    do i = 1, size(Posterior_perGalaxy,2) !--Loop over posterior values--!
+!       print *, 'Doing Alpha loop:', i
+       if(i == size(Posterior_perGalaxy,2)/2) print *, 'Halfway done for this Aperture..'          
+       do c = 1, size(Posterior_perGalaxy,1) !-Loop over galaxies-!
+          !             print *, 'Doing Galaxy Loop:', c, size(Posterior_pergalaxy,1)
+          
+          !~~Select the method of posterior reconstruction for that point based in input method   
+          select case(Posterior_Method)
+          case(1) !--SizeOnly--!
+             if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
+                nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
+                cycle
+             end if
+             !MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
+             
+             nSizePosterior = nSizePosterior + 1
+             Galaxy_Posterior_Method = 1
+          case(2)!--SizeMag--!
+             if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
+                nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
+                cycle
+             end if
+             
+             !MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
+             
              nSizeMagPosterior = nSizeMagPosterior + 1
+             Galaxy_Posterior_Method = 2
+          case(3) !-Magnitude Only--!
+             nMagPosterior = nMagPosterior + 1
+             
+             !MagRenorm          iSurvey_size_Limits = (/0.e0_double, 1.e30_double/) !--Should encompase the whole data set
+             
+             if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only, but no magnitde prior entered, stopping'
+             Galaxy_Posterior_Method = 3
+          case(4) !-Size mag above size data limit, Mag-Only below size data limit-!
+             if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only under size limit, but no magnitde prior entered, stopping'
+             STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distriution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
+             
+             !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies
+             if(Cat%Sizes(c) < Survey_Size_Limits(1)) then
+                !MagRenorm             iSurvey_Size_Limits = (/0.e0_double, Survey_Size_Limits(1)/)
+                
+                Galaxy_Posterior_Method = 3
+                nMagPosterior = nMagPosterior + 1
+             else
+                !MagRenorm             iSurvey_Size_Limits = Survey_Size_Limits
+                
+                Galaxy_Posterior_Method = 2
+                nSizeMagPosterior = nSizeMagPosterior + 1
+             end if
+          end select
+          
+          !~~~ Cycle if the observed magnitude falls outside the survey limits
+          if( (Cat%MF606W(c) > Survey_Magnitude_Limits(2)) .or. (Cat%MF606W(c) < Survey_Magnitude_Limits(1))) then
+             nGal_Ignored_MagLimits = nGal_Ignored_MagLimits + 1
+             cycle
           end if
-       end select
-
-       if( (Cat%MF606W(c) > Survey_Magnitude_Limits(2)) .or. (Cat%MF606W(c) < Survey_Magnitude_Limits(1))) then
-          nGal_Ignored_MagLimits = nGal_Ignored_MagLimits + 1
-          cycle
-       end if
-
-       if(isNaN(Cat%Sizes(c)) .or. isNaN(Cat%MF606W(c))) then
-          nGal_Ignored_NaN = nGal_Ignored_NaN + 1
-          cycle
-       end if
-
-       if(c == size(Effective_Magnification,1)/2) print *, 'Halfway done for this Aperture..'
-
-       Known_Redshift = .false.
-       if(Cat%Redshift(c) >= 0.e0_double) then
-          !--Ignore Galaxies with redshift less than the foreground-!
-          if(Cat%Redshift(c) < Lens_Redshift) cycle
-          !--Use Galaxy Redshift if available--!
-
-          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), 1)); Posterior_perGalaxy_Redshift = 0.e0_double
-          allocate(Sigma_Crit(size(Cat%RA),1)); Sigma_Crit = -1.e0_double
-
-          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
-          D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
-
-          Sigma_Crit(c,1) = 1.66492e0_double*(D_s/(D_l*D_ls))
-
-          allocate(RedshiftPDF(1)); RedshiftPDF = -1.
-          Known_Redshift = .true.
+          if(isNaN(Cat%Sizes(c)) .or. isNaN(Cat%MF606W(c))) then
+             nGal_Ignored_NaN = nGal_Ignored_NaN + 1
+             cycle
+          end if
           
-       elseif(MC_Sigma_Critical == .false. .and. Marginalise_Redshift_Distribution == .false.) then
-          !--Use Default Redshift if everything else fails--!
-          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), 1)); Posterior_perGalaxy_Redshift = 0.e0_double
-          allocate(Sigma_Crit(size(Cat%RA),1)); Sigma_Crit = -1.e0_double
-
-          n_Default_Source_Redshift_Used = n_Default_Source_Redshift_Used + 1
-          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
-          D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
+          !~~~Determine method of setting source redshift: Either Marginalise over distribution; Use Redshift of source if known; Use a default redshift
           
-          Sigma_Crit(c,1) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
+          !~~~Set Redshift PDF. If redshift is known, this is not needed. Alternatively, this could be determined externally and interpolated
+          Known_Redshift = .false.
+          if(Cat%Redshift(c) >= 0.e0_double) then
+             !--Use Galaxy Redshift if available--!
+             
+             !--Ignore Galaxies with redshift less than the foreground-!
+             if(Cat%Redshift(c) < Lens_Redshift) cycle
+             
+             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Cat%Redshift(c))
+             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Cat%Redshift(c))
+             
+             Galaxy_Sigma_Critical = 1.66492e0_double*(D_s/(D_l*D_ls))
+             
+             Known_Redshift = .true.
+             
+          elseif(Marginalise_Redshift_Distribution == .false.) then
+             !--Use Default Redshift if everything else fails--!
+             
+             n_Default_Source_Redshift_Used = n_Default_Source_Redshift_Used + 1
+             D_s = angular_diameter_distance_fromRedshift(0.e0_double, Default_Source_Redshift)
+             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, Default_Source_Redshift)
+             
+             Galaxy_Sigma_Critical = 1.66492e0_double*(D_s/(D_l*D_ls))
+             
+             Known_Redshift = .false.
+          elseif(Marginalise_Redshift_Distribution) then
+             !--Marginalising over the redshift distribution for that galaxy--!
+          else
+             STOP 'DM_Profile_Variable_Posterior - Both MC and Redshift Distribution methods set - this cannot be'
+          end if
+          if(Galaxy_Sigma_Critical < 0.e0_double) STOP 'DM_Profile_Variable_Posterior - Invalid Sigma Critical Entered, negative'
+          
+          if(Known_Redshift) then
+             allocate(Posterior_perGalaxy_Redshift(1)); Posterior_perGalaxy_Redshift = 0.e0_double
+          else
+             allocate(Posterior_perGalaxy_Redshift(nRedshift_Sampling)); Posterior_perGalaxy_Redshift = 0.e0_double
+          end if
 
-          allocate(RedshiftPDF(1)); RedshiftPDF= -1.
-       elseif(MC_Sigma_Critical .and. Marginalise_Redshift_Distribution == .false.) then
-          !--Not really used anymore--!
-          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), 1)); Posterior_perGalaxy_Redshift = 0.e0_double
-          allocate(Sigma_Crit(size(Cat%RA),1)); Sigma_Crit = -1.e0_double
+!          if(Known_Redshift) print *, 'Known_Redshift gal:', c
+          
+          do z = 1, size(Posterior_perGalaxy_Redshift,1)             
+             !--There must be a better way to do this, perhaps using interpolation? (i.e. it is very seperated from other methods
 
-          call Monte_Carlo_Redshift_Sampling_SigmaCritical(Cat, Lens_Redshift, Sigma_Crit_MC)
-          Sigma_Crit(:,1) = Sigma_Crit_MC
-          deallocate(Sigma_Crit_MC)
-
-       elseif(Marginalise_Redshift_Distribution .and. MC_Sigma_Critical == .false.) then
-          !--Marginalising over the redshift distribution for that galaxy--!
-          allocate(Posterior_perGalaxy_Redshift(size(Posterior_perGalaxy,1), size(Posterior_perGalaxy,2), nRedshift_Sampling)); Posterior_perGalaxy_Redshift = 0.e0_double
-          allocate(Sigma_Crit(size(Cat%RA),nRedshift_Sampling)); Sigma_Crit = -1.e0_double
-
-          !--Get Sigma_Critical for each point on the Redshift PDF grid--!
-          do z = 1, nRedshift_Sampling
-             D_s = angular_diameter_distance_fromRedshift(0.e0_double, RedshiftGrid(z))
-             D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift, RedshiftGrid(z))
-             Sigma_Crit(c,z) = 1.66492e0_double*(D_s/(D_l*D_ls)) !-(10^18 M_Sun/h)-!
-          end do
-
-          !--Get Redshift PDF for this galaxy--!
-          allocate(RedshiftPDF(size(RedshiftGrid))); RedshiftPDF = 0.e0_double
-       else
-          STOP 'DM_Profile_Variable_Posterior - Both MC and Redshift Distribution methods set - this cannot be'
-       end if
-       if(any(Sigma_Crit(c,:) < 0.e0_double)) STOP 'DM_Profile_Variable_Posterior - Invalid Sigma Critical Entered, negative'
-
-       Distance_from_Mass_Center = dsqrt( (Cat%RA(c)-Lens_Position(1))**2.e0_double + (Cat%Dec(c)-Lens_Position(2))**2.e0_double ) !-in Degrees-!
-       Distance_from_Mass_Center = (D_l*Distance_from_Mass_Center*(3.142e0_double/(180.e0_double))) !-in Mpc/h-! 
-
-!!$       if(c==1) write(*,'(A)', advance = 'no') 'Galaxy:'
-!!$       write(*,'(I3,x,A)',advance = 'no') c, ','
-
-
-       do i = 1, size(Effective_Magnification,2) !--Loop over posterior values--!
-
-          do z = 1, size(RedshiftPDF)
-
+             if(Marginalise_Redshift_Distribution .and. (Known_Redshift == .false.)) Galaxy_Sigma_Critical = Sigma_Crit(z)
+             
              select case(Mass_Profile)
              case(1) !-Flat-!
                 STOP 'The Strong Lensing approximation has not been implemented for this profile yet'
-                Effective_Magnification(c,i) = 1.e0_double+2.e0_double*(Posterior(1,i)/Sigma_Crit(c,z))
+                Effective_Magnification = 1.e0_double+2.e0_double*(Posterior(1,i)/Galaxy_Sigma_Critical)
              case(2) !-SIS-!
                 STOP 'The Strong Lensing approximation has not been implemented for this profile yet'
-                Effective_Magnification(c,i) = 1.e0_double+2.e0_double*(SMD_SIS(Posterior(1,i), Distance_From_Mass_Center)/(Sigma_Crit(c,z)*1.e18_double))
-                Convergence_Per_Cluster(:,c)  = (/Distance_From_Mass_Center,  SMD_SIS(1073.e0_double*1073.e0_double, Distance_From_Mass_Center), Sigma_Crit(c,z)/) !---TESTING--!
+                Effective_Magnification = 1.e0_double+2.e0_double*(SMD_SIS(Posterior(1,i), Distance_From_Mass_Center(c))/(Galaxy_Sigma_Critical*1.e18_double))
              case(3) !-NFW-!
                 if(Enforce_Weak_Lensing) then
-                   Effective_Magnification(c,i) = 1.e0_double + 2.e0_double*(SMD_NFW(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i))/(Sigma_Crit(c,z)*1.e18_double))
+                   Effective_Magnification = 1.e0_double + 2.e0_double*(SMD_NFW(Distance_From_Mass_Center(c), Lens_Redshift, Posterior(1,i))/(Galaxy_Sigma_Critical*1.e18_double))
                 else
-                   Effective_Magnification(c,i) = Magnification_Factor(3, Distance_From_Mass_Center, Posterior(1,i),  Lens_Redshift, Sigma_Crit(c,z)*1.e18_double)
+                   Effective_Magnification = Magnification_Factor(3, Distance_From_Mass_Center(c), Posterior(1,i),  Lens_Redshift, Galaxy_Sigma_Critical*1.e18_double)
                 end if
              case default
                 STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
              end select
 
-             if(isNaN(Effective_Magnification(c,i))) then
-                print *, 'Magnification Factor is a NaN:', Distance_From_Mass_Center, Posterior(1,i), Lens_Redshift, Sigma_Crit(c,z)*1.e18_double
+             if(isNaN(Effective_Magnification)) then
+                print *, 'Magnification Factor is a NaN:', Distance_From_Mass_Center(c), Posterior(1,i), Lens_Redshift, Galaxy_Sigma_Critical*1.e18_double
                 STOP
              end if
 
 
-!             if(Effective_Magnification(c,i) < 1.e0_double) print *, '** DE-AMPLIFICATION!', Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i), Distance_From_Mass_Center
-             if(Effective_Magnification(c,i) < minval(MagnificationGrid) .or. Effective_Magnification(c,i) > maxval(MagnificationGrid)) then
+             if(Effective_Magnification < minval(MagnificationGrid) .or. Effective_Magnification > maxval(MagnificationGrid)) then
                 !--Skipping as outside limits on which magnification was evaluated--!
-!                print *, 'Skipping since mu lie outside renormalisation limits (including < 1)', Effective_Magnification(c,i)
-                Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
+                Posterior_perGalaxy_Redshift(z) = 1.e-100_double
                 cycle
              end if
 
-             if(Effective_Magnification(c,i) <= 0.e0_double) then
-!                print *, 'Skipping since Mu is negative'
-!                Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
-!                cycle
+             if(Effective_Magnification <= 0.e0_double) then
                 !--This won't be picked up unless the above cycle is relaxed--!
-                print *, Effective_Magnification(c,i), SMD_NFW_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center, Lens_Redshift, Posterior(1,i)), Sigma_Crit(c,z)*1.e18_double, Posterior(1,i), Distance_From_Mass_Center
+                print *, Effective_Magnification, SMD_NFW_Scalar(Distance_From_Mass_Center(c), Lens_Redshift, Posterior(1,i)), Differential_SMD_Scalar(Distance_From_Mass_Center(c), Lens_Redshift, Posterior(1,i)), Galaxy_Sigma_Critical*1.e18_double, Posterior(1,i), Distance_From_Mass_Center(c)
                 STOP 'Effective Magnification invalid - negative. Stopping'
              end if
-
+             
+             !--Get RedshiftPDF which depends on the unlensed magnitude - this could possibly be interpolated, which would hopefully be faster
+             if(Known_Redshift) then
+                RedshiftPDF = 1.e0_double
+             else
+                RedshiftPDF = CH08_Redshift_Distribution_Scalar(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
+             end if
 
              !--Construct Joint Size-Magnitde Prior which is renormalised according to the convergence value--!
 
-             Renormalisation_Size_Limits = Survey_Size_Limits/dsqrt(Effective_Magnification(c,i))
-             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.5e0_double*dlog10(Effective_Magnification(c,i))
+             Renormalisation_Size_Limits = Survey_Size_Limits/dsqrt(Effective_Magnification)
+             Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.5e0_double*dlog10(Effective_Magnification)
 
              if(Cuts_Renormalise_Likelihood) then
                 if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED ON'
-                Renorm = Linear_Interp(Effective_Magnification(c,i), MagnificationGrid, Renormalisation_by_Magnification, ExValue = 1.e30_double)
+                Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, Renormalisation_by_Magnification, ExValue = 1.e30_double)
                 if(Renorm == 0) then
                    Kappa_Renormalised_Prior = 0.e0_double
                 else
@@ -928,10 +919,9 @@ contains
                 Kappa_Renormalised_MagPrior = Survey_Renormalised_MagPrior
              end if
 
-             
              select case (Galaxy_Posterior_Method)
              case(1) !--Size Only--!
-
+                
                 !--Evaluate p_{theta_0, m_0}*p_{z|m_0} for the whole magnitude grid
                 do m =  1, size(PriorMagGrid)
                    !--m_0, theta_0--!
@@ -950,16 +940,16 @@ contains
 
                 if(lnSize_Prior) then
                    STOP 'ln Size prior has been switched off since the conversion to strong lensing - check the theory carefully before use'
-                   if(dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i))) > maxval(PriorSizeGrid) .or. (dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i))) < minval(PriorSizeGrid))) then
+                   if(dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification)) > maxval(PriorSizeGrid) .or. (dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification)) < minval(PriorSizeGrid))) then
                       !--Extrapolation--!
-                      Posterior_perGalaxy_Redshift(c,i,z) = 0.e0_double
+                      Posterior_perGalaxy_Redshift(z) = 0.e0_double
                       cycle
                    end if
 
                    !--Find Boundary Indexs for the Size at which the Prior will be evaluated - Aims to improve run-tim by minimising the number of integrations required
                    allocate(Size_Only_Prior(2)); Size_Only_Prior = 0.e0_double
                    do j = 1, size(PriorSizeGrid)-1
-                      if( ( PriorSizeGrid(j)<= dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)))) .and. (  PriorSizeGrid(j+1) > dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i))))) then
+                      if( ( PriorSizeGrid(j)<= dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification))) .and. (  PriorSizeGrid(j+1) > dlog(Cat%Sizes(c)/dsqrt(Effective_Magnification)))) then
 !                      if( (PriorSizeGrid(j)<= dlog(Cat%Sizes(c))-Effective_Convergence(c,i)) .and. ( PriorSizeGrid(j+1) > dlog(Cat%Sizes(c))-Effective_Convergence(c,i)) ) then
                          Size_Only_Prior(1) = Integrate(PriorMagGrid, Size_Only_Mag_Prior(:,j), 2, lim = Renormalisation_Magnitude_Limits)
                          Size_Only_Prior(2) = Integrate(PriorMagGrid, Size_Only_Mag_Prior(:,j+1), 2, lim = Renormalisation_Magnitude_Limits)
@@ -969,17 +959,17 @@ contains
 
 !!$                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(dlog(Cat%Sizes(c))-Effective_Convergence(c,i), PriorSizeGrid(j:j+1), Size_Only_Prior(:), ExValue = 0.e0_double) !-Reinstate with SLensing--!
                 else
-                   if((Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)) > maxval(PriorSizeGrid)) .or. (Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)) < minval(PriorSizeGrid))) then
-!                   if(Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)) > maxval(PriorSizeGrid) .or. (Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)) < minval(PriorSizeGrid))) then !-WL-!
+                   if((Cat%Sizes(c)/dsqrt(Effective_Magnification) > maxval(PriorSizeGrid)) .or. (Cat%Sizes(c)/dsqrt(Effective_Magnification) < minval(PriorSizeGrid))) then
+                      !                   if(Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)) > maxval(PriorSizeGrid) .or. (Cat%Sizes(c)/(1.e0_double+Effective_Convergence(c,i)) < minval(PriorSizeGrid))) then !-WL-!
                       !--Extrapolation--!
-                      Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
+                      Posterior_perGalaxy_Redshift(z) = 1.e-100_double
                       cycle
                    else
                       
                       !--Find Boundary Indexs for the Size at which the Prior will be evaluated - Aims to improve run-time by minimising the number of integrations required
                       allocate(Size_Only_Prior(2)); Size_Only_Prior = 0.e0_double
                       do j = 1, size(PriorSizeGrid)-1
-                         if( (PriorSizeGrid(j)<= Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i))) .and. ( PriorSizeGrid(j+1) > Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i))) ) then
+                         if( (PriorSizeGrid(j)<= Cat%Sizes(c)/dsqrt(Effective_Magnification)) .and. ( PriorSizeGrid(j+1) > Cat%Sizes(c)/dsqrt(Effective_Magnification)) ) then
                             Size_Only_Prior(1) = Integrate(PriorMagGrid, Size_Only_Mag_Prior(:,j), 2, lim = Renormalisation_Magnitude_Limits)
                             Size_Only_Prior(2) = Integrate(PriorMagGrid, Size_Only_Mag_Prior(:,j+1), 2, lim = Renormalisation_Magnitude_Limits)
                             exit
@@ -987,21 +977,16 @@ contains
                       end do
 
                       
-                      Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)), PriorSizeGrid(j:j+1), Size_Only_Prior(:), ExValue =  1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification(c,i)))
+                      Posterior_perGalaxy_Redshift(z) = Linear_Interp(Cat%Sizes(c)/dsqrt(Effective_Magnification), PriorSizeGrid(j:j+1), Size_Only_Prior(:), ExValue =  1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))
 
                    end if
                 end if
                 deallocate(Size_Only_Prior)
              case(2)!-Size and Magnitude-!
-
-                if(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)) < 21.e0_double) then
+                
+                if(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification) < 21.e0_double) then
                    print *, 'Possible problem with de-lensed magnitude - falls outwith bright limit of Scrabback Fit (21)'
-                   print *, Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i))
-                end if
-                if(Known_Redshift) then
-                   RedshiftPDF(z) = 1.e0_double
-                else
-                   RedshiftPDF(z) = CH08_Redshift_Distribution_Scalar(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), RedshiftGrid(z))
+                   print *, Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification)
                 end if
                 if(lnSize_Prior) then
                    STOP 'DM_Profile_Variable_Posterior - lnSize with Size_Magnitude Method - I cannae do that captain!'
@@ -1009,7 +994,7 @@ contains
                    !--Uses distributions of the apparent size--!
                    !--Test for need for extrapolation---!
                    need_Extrapolate = .false.
-                   if(( (Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification(c,i)) > maxval(PriorMagGrid)) .or. (Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification(c,i)) < minval(PriorMagGrid)) ) .or. ((Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)) > maxval(PriorSizeGrid)) .or. (Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)) > maxval(PriorSizeGrid)) )) then
+                   if(( (Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification) > maxval(PriorMagGrid)) .or. (Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification) < minval(PriorMagGrid)) ) .or. ((Cat%Sizes(c)/dsqrt(Effective_Magnification) > maxval(PriorSizeGrid)) .or. (Cat%Sizes(c)/dsqrt(Effective_Magnification) > maxval(PriorSizeGrid)) )) then
                       need_Extrapolate = .true.
                    else
                       need_Extrapolate = .false.
@@ -1017,79 +1002,81 @@ contains
       
                    if((need_Extrapolate .and. do_KDE_Extrapolation) .or. do_KDE_OnTheFly) then !-.or. KDE_OnTheFly
                       !--KDE_Extrapolation / KDE_OnTheFly(? - What about entry of prior?)
-                      Posterior_perGalaxy_Redshift(c,i,z) = KDE_BiVariate_Gaussian_Scalar(PriorCatalogue%MF606W, PriorCatalogue%Sizes, Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification(c,i)), Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)), Inverse_Covar = KDE_Covariance_Inverse, Det_Covar = KDE_Covariance_Determinant)*(1.e0_double/dsqrt(Effective_Magnification(c,i)))*RedshiftPDF(z)                         
+                      Posterior_perGalaxy_Redshift(z) = KDE_BiVariate_Gaussian_Scalar(PriorCatalogue%MF606W, PriorCatalogue%Sizes, Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification), Cat%Sizes(c)/dsqrt(Effective_Magnification), Inverse_Covar = KDE_Covariance_Inverse, Det_Covar = KDE_Covariance_Determinant)*(1.e0_double/dsqrt(Effective_Magnification))*RedshiftPDF
                    elseif(need_Extrapolate .and. (do_KDE_Extrapolation == .false.)) then
                       !--Extrapolation, set to default, (zero)
-                      Posterior_perGalaxy_Redshift(c,i,z) = 1.e-100_double
+                      Posterior_perGalaxy_Redshift(z) = 1.e-100_double
                    else
                       !--Interpolation--!
-                      Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification(c,i)), Cat%Sizes(c)/dsqrt(Effective_Magnification(c,i)), PriorMagGrid, PriorSizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification(c,i)))*RedshiftPDF(z)
+                      Posterior_perGalaxy_Redshift(z) = Linear_Interp(Cat%MF606W(c)+2.5e0_double*dlog10(Effective_Magnification), Cat%Sizes(c)/dsqrt(Effective_Magnification), PriorMagGrid, PriorSizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))*RedshiftPDF
                    end if
-
-                      !--If no KDE Extrapolation, then this will set to a default value (effectively zero) outside the prior grid range
-                   end if
-                case(3) !--Magnitude Only--!
-                   !--Renoramlise Magnitude Prior Distribution--!
-
-                   if(Cuts_Renormalise_Likelihood) then
-                      Renorm = Linear_Interp(Effective_Magnification(c,i), MagnificationGrid, MagOnly_Renormalisation_by_Magnification, ExValue = 1.e30_double)                      
-                      if(Renorm == 0) then
-                         Kappa_Renormalised_MagPrior = 0.e0_double
-                      else
-                         Kappa_Renormalised_MagPrior = Survey_Renormalised_MagPrior/Renorm
-                      end if
-                   end if
-
-                   if(Known_Redshift) then
-                      RedshiftPDF(z) = 1.e0_double
+                   
+                   !--If no KDE Extrapolation, then this will set to a default value (effectively zero) outside the prior grid range
+                end if
+             case(3) !--Magnitude Only--!
+                !--Renormalise Magnitude Prior Distribution--!
+                
+                if(Cuts_Renormalise_Likelihood) then
+                   Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, ExValue = 1.e30_double)                      
+                   if(Renorm == 0) then
+                      Kappa_Renormalised_MagPrior = 0.e0_double
                    else
-                      RedshiftPDF(z) = CH08_Redshift_Distribution_Scalar(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), RedshiftGrid(z))
+                      Kappa_Renormalised_MagPrior = Survey_Renormalised_MagPrior/Renorm
                    end if
-                   !--Could be edited for KDE Extrapolation, not done yet--!
-
-                   !--Construct p_[m_0] as the magnitude distribution for a sample of galaxies between cuts-corrected survey size limits 
-                   !-MagRenorm
+                end if
+                
+                !--Could be edited for KDE Extrapolation, not done yet--!
+                
+                !--Construct p_[m_0] as the magnitude distribution for a sample of galaxies between cuts-corrected survey size limits 
+                !-MagRenorm
 !!$                   allocate(Mag_Only_Prior(2)); Mag_Only_Prior = 0.e0_double
 !!$                   !--Find point where de-lensed magnitude lie on intrinsic distribution - could also use locate.
 !!$                   do j = 1, size(PriorMagGrid)-1
-!!$                      if( ( PriorMagGrid(j)<=  Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)) ) .and. (  PriorMagGrid(j+1) > Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i))) ) then
+!!$                      if( ( PriorMagGrid(j)<=  Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification) ) .and. (  PriorMagGrid(j+1) > Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification)) ) then
 !!$                         Mag_Only_Prior(1) = Integrate(PriorSizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)
 !!$                         Mag_Only_Prior(2) = Integrate(PriorSizeGrid, Kappa_Renormalised_Prior(j+1,:), 2, lim = Renormalisation_Size_Limits)
 !!$                         exit
 !!$                      end if
 !!$                   end do
-!!$                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), PriorMagGrid(j:j+1), Mag_Only_Prior, ExValue =  1.e-100_double)*RedshiftPDF(z)
+!!$                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification), PriorMagGrid(j:j+1), Mag_Only_Prior, ExValue =  1.e-100_double)*RedshiftPDF(z)
 !!$                   deallocate(Mag_Only_Prior)
-                   !---------------------------------------------------------------------------------------------------------------------
+                !---------------------------------------------------------------------------------------------------------------------
+                
+                !--The following gives unbiased results if no size cuts are used, however is known to be biased in the presence of size cuts, I believe that this is due to the fact that the prior itself should depend on the size cuts in the presence of a size-magnitude correlation.
+                
+                Posterior_perGalaxy_Redshift(z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification), PriorMagGrid, Kappa_Renormalised_MagPrior, ExValue =  1.e-100_double)*RedshiftPDF
 
-                   !--The following gives unbiased results if no size cuts are used, however is known to be biased in the presence of size cuts, I believe that this is due to the fact that the prior itself should depend on the size cuts in the presence of a size-magnitude correlation.
-                   Posterior_perGalaxy_Redshift(c,i,z) = Linear_Interp(Cat%MF606W(c) + 2.5e0_double*dlog10(Effective_Magnification(c,i)), PriorMagGrid, Kappa_Renormalised_MagPrior, ExValue =  1.e-100_double)*RedshiftPDF(z)
              case default
                 STOP 'DM_Profile_Variable_Posterior - Error in choosing method of finding posterior'
              end select
-          end do
-       end do
+          end do !--End of Redshift Loop
+          
+          if(size(Posterior_perGalaxy_Redshift,1) == 1) then
+             !--Redshift was taken to be exact
+             Posterior_perGalaxy(c,i) = Posterior_perGalaxy_Redshift(1)
+          else
+             !--Integrate over the redshift Information--!
+             Posterior_perGalaxy(c,i) = TrapInt(RedshiftGrid, Posterior_perGalaxy_Redshift(:))
+          end if
+          deallocate(Posterior_perGalaxy_Redshift)
+          
+       end do !--End of galaxy loop       
 
+       !--Combination of galaxy posteriors could be done here, provided that the overall renomralisation of these individual posteriors is unimportant
+
+!       print *, 'Reading at end of posterior value loop'
+!       read(*,*)
+    end do !--End of Posterior Loop
+    
+    !~~Galaxy Posterior renormalisation and error checking
+    do c = 1, size(Posterior_perGalaxy,1)
        !--Get Posterior on Size for each galaxy by marginalising over the redshift distribution--!
-       if(size(RedshiftPDF) == 1) then
-          Posterior_perGalaxy(c,:) = Posterior_perGalaxy_Redshift(c,:,1)
-       else
-          !--Integrate over the redshift Information--!
-          do i = 1, size(Posterior_perGalaxy,2) !--Loop over SMD alpha--!
-             Posterior_perGalaxy(c,i) = TrapInt(RedshiftGrid, Posterior_perGalaxy_Redshift(c,i,:))
-          end do
-          if(all(Posterior_perGalaxy(c,:) == 0.e0_double)) then
-             print *,  'Posterior per galxy is zero! for galaxy no:', c
-             STOP
-          END if
-       end if
-       deallocate(Posterior_perGalaxy_Redshift, RedshiftPDF, Sigma_Crit)
-
+       
        IF(all(Posterior_perGalaxy(C,:) == 0.E0_DOUBLE)) then
           print *, 'Galxy ', c, ' has zero posterior'
           read(*,*)
        end IF
-
+       
        !--Renormalise the posterior per galaxy - could reasonably be removed.
        Renorm = 0.e0_double
        do j = 1, size(Posterior_perGalaxy,2)-1
@@ -1099,43 +1086,36 @@ contains
           PRINT *, 'DM_Profile_Variable_Posterior - Error Renormalising Galaxy posteriors - Posterior Empty', C
           !STOP
        END if
-
+       
        Posterior_perGalaxy(c,:) = Posterior_perGalaxy(c,:)/Renorm
        Renorm = 0.e0_double
     end do !--End of galaxy loop-!
     if(n_Default_Source_Redshift_Used > 0) write(*,'(A,I3,A)') '****** Used the default redshift for:', n_Default_Source_Redshift_Used, ' galaxies ********'
     if(nGal_Ignored_SizeLimits > 0) write(*,'(A,I3)') '****** Number of galxies ignored as they fell outside the survey size limits:', nGal_Ignored_SizeLimits
     if(nGal_Ignored_NaN > 0) write(*,'(A,I3)') '****** Number of galaxies ignored as they were NaNs:', nGal_Ignored_NaN
-
-
+    
+    
     print *, '-------------------------------------------------------------'
     print *, 'Constructed ', nSizePosterior, ' size-only posteriors'
     print *, 'Constructed ', nSizeMagPosterior, ' size-magnitude posteriors'
     print *, 'Constructed ', nMagPosterior, ' magnitude-only posteriors'
     print *, '-------------------------------------------------------------'
-
+    
     if(Debug_Mode .and. Output_Posterior_Per_Galaxy) then
-!!$       Filename = trim(adjustl(Output_Prefix))//'Convergence_Per_Cluster.dat'
-!!$       open(unit = 18, file = Filename)
-!!$       write(fmtstring,'(I1)') 3
-!!$       do i =1, size(Cat%RA)
-!!$          write(18, '(I5, x, '//trim(adjustl(fmtstring))//'(e14.7,x))') Cat%Galaxy_Number(i), Convergence_Per_Cluster(:,i)
-!!$       end do
-!!$      close(18)
-!!$      print *, 'Output Convergence per Cluster to: ', trim(adjustl(Filename))
-
+       
        Filename = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat'
        open(unit = 17, file = Filename)
        write(fmtstring,'(I7)') size(Posterior_perGalaxy,1)+1
        do i =1, size(Posterior,2)
           write(17, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior_perGalaxy(:,i)
        end do
-      close(17)
-      print *, 'Output Posterior per galaxy to: ', trim(adjustl(Filename))
-   end if
-
-   call Combine_Posteriors(Posterior(1,:), Posterior_perGalaxy(:,:), Combine_log_Posteriors, Posterior(2,:))
-
+       close(17)
+       print *, 'Output Posterior per galaxy to: ', trim(adjustl(Filename))
+    end if
+    
+    !--Get the total posterior for the source set by combining all galaxies in that source set
+    call Combine_Posteriors(Posterior(1,:), Posterior_perGalaxy(:,:), Combine_log_Posteriors, Posterior(2,:))
+    
     Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined_Renormalised.dat'
     open(unit = 82, file = Filename)
     write(fmtstring,'(I1)') 2
@@ -1144,30 +1124,30 @@ contains
     end do
     close(82)
     print *, 'Output Combined Posterior to: ', trim(adjustl(Filename))
-
+    
     if(any(isNAN(Posterior(2,:)))) then
        print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
        print *, 'Stopping'
        STOP
     END if
-
+    
     !--Remove any information less than a tolerance - Numerical Error--!
     where(Posterior(2,:) < 1.e-12_double)
        Posterior(2,:) = 0.e0_double
     end where
-
-    deallocate(Effective_Magnification, Posterior_perGalaxy)
+    
+    deallocate(Posterior_perGalaxy, Distance_From_Mass_Center)
     if(allocated(Kappa_Renormalised_Prior)) deallocate(Kappa_Renormalised_Prior)
     if(allocated(Survey_Renormalised_Prior)) deallocate(Survey_Renormalised_Prior)
     if(allocated(Size_Only_Mag_Prior)) deallocate(Size_Only_Mag_Prior)
-
+    
     !--On Successful Completion delete Poster per galaxy as large file--!
 !!$    inquire(file = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat', exist = here)
 !!$    if(here == .false.) STOP "Posterior per galaxy doesn't exist, stopping before accidental deletion"
 !!$    call system('rm '//trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat')
-
+    
   end subroutine DM_Profile_Variable_Posterior
-
+  
 
   subroutine return_Prior_Distributions(MagGrid, SizeGrid, Dist, MagDist, Dir, BFCat, do_KDE)
     use IO, only: readin; use Distributions, only: produce_Joint_Size_Magnitude_Distribution, produce_Magnitude_Distribution; use Integration; use Interpolaters, only: linear_Interp
