@@ -213,6 +213,8 @@ contains
        end subroutine Posterior_Statistics
     END INTERFACE
 
+    if(any(isNaN(PosteriorGrid)) .or. any(PosteriorGrid > huge(1.e0_double))) STOP 'Posterior_Statistics: NaNs or Inf in Posterior Grid'
+
     if(present(ModeVal)) ModeVal = mode_distribution(PosteriorGrid, Posterior)
     if(present(MeanVal)) MeanVal = mean(Posterior, PosteriorGrid)
     if(present(Error)) Error = dsqrt(variance_distribution(PosteriorGrid, Posterior))
@@ -354,8 +356,9 @@ contains
 
   subroutine DM_Profile_Variable_Posteriors_CircularAperture(Cat, Ap_Pos, Ap_Radius, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
     use Statistics, only: mean_discrete, mode_distribution, variance_distribution; use Mass_profiles
-    use Distributions; use Cosmology, only: angular_diameter_distance_fromRedshift;
+    use Distributions; use Cosmology, only: angular_diameter_distance_fromRedshift; use Interpolaters, only: Linear_Interp
     !--Main routine that returns the Posteriors on DM free parameter (alpha) over all apertures.
+    !--If the posterior construction is such that grid may vary, this interpolates onto a finer grid (linear interpolation). Thus returned posteriors on on the same grid
     !--Ap_Radius in DEGREES
     !--If Blank_Field_Catalogue is entered, then intrinsic distributions are produced form this Catalogue
     !--To Do: 
@@ -476,6 +479,8 @@ contains
 
     if(size(magBins,1) > 1) STOP 'I have had to disable Magnitude Binning for now, youll have to edit the code to get this to work, stopping'
 
+    
+
     Do Ap = 1, size(Ap_Cats)
        write(Output_File_Prefix,'(I2)') Ap
        Output_File_Prefix = trim(adjustl(Bayesian_Routines_Output_Directory))//'Aperture_'//trim(adjustl(Output_File_Prefix))//'_'
@@ -494,8 +499,20 @@ contains
           end if
        end if
 
-       if(Ap == 1) allocate(Posteriors(size(Ap_Cats), 2, size(Posterior_Single,2)))
-       Posteriors(Ap,:,:) = Posterior_Single
+!--The following removed to accomodate posteriors on seperate grids
+!       if(Ap == 1) allocate(Posteriors(size(Ap_Cats), 2, size(Posterior_Single,2)))
+!       Posteriors(Ap,:,:) = Posterior_Single
+
+       if(Ap == 1) then
+          allocate(Posteriors(size(Ap_Cats), 2, maxval((/500, 2*size(Posterior_Single,2)/)))); Posteriors = 0.e0_double
+          if(size(Posteriors,3) < size(Posterior_Single,2)) print *, 'WARNING - DM_Profile_Variable_Posteriors_CircularAperture - Posterior interpolated on COARSER grid than output'
+          !--Set up Posterior Grid
+          do i = 1, size(Posteriors,3)
+             Posteriors(:,1,i) = minval(Posterior_Single(1,:)) + (i-1)*((maxval(Posterior_Single(1,:))-minval(Posterior_Single(1,:)))/(size(Posteriors,3)-1))
+          end do
+       end if
+       Posteriors(Ap,2,:) = Linear_Interp(Posteriors(Ap,1,:), Posterior_Single(1,:), Posterior_Single(2,:))
+
        deallocate(Posterior_Single)
     end Do
     if(allocated(SizeGrid)) deallocate(SizeGrid)
@@ -529,9 +546,120 @@ contains
 
   end subroutine DM_Profile_Variable_Posteriors_CircularAperture
 
+
+  subroutine find_Maximum_by_Bisection(Likelihood, New_Point, tol, Keep_Going)
+    use derivatives_lib, only:derivative_2pt; use Common_Functions, only: setNaN
+    !--Assumes that the likelihood is well behaved and has a single maximum
+    !--Returns the Likelihood with the addition of the bisected point, and the index of that point
+    real(double), intent(inout),allocatable:: Likelihood(:,:)
+    integer, intent(out):: New_Point
+    real(double), intent(in)::tol
+    logical, intent(out):: Keep_Going
+
+    integer:: Maximum_Index
+    integer:: i
+
+    integer, save:: callcount, calltolerance = 100
+    integer:: Bracket(3)
+    logical::Bracket_Found
+
+    real(double),dimension(size(Likelihood,1), size(Likelihood,2)+1):: tLikelihood
+    real(double)::NewGridPoint
+
+    !--Attemptd means using derivatives, but I am not convinced this works, therefroe obsolete
+!!$    iMaximum_Boundary = (/1, size(Likelihood,2)/)
+!!$    if(present(Maximum_Boundary)) then
+!!$       iMaximum_Boundary = Maximum_Boundary
+!!$    end if
+!!$
+!!$    !--Find maximum between boundary points - possibly do this using maxloc?
+!!$    Maximum_Index = -1
+!!$    do i = Maximum_Boundary(1), Maximum_Boundary(2)
+!!$       if((derivative_2pt(Likelihood(2,i-1), Likelihood(2,i), Likelihood(1,i)-Likelihood(1,i-1)) > 0.e0_double) .and. (derivative_2pt(Likelihood(2,i+1), Likelihood(2,i+2), Likelihood(1,i+2)-Likelihood(1,i+1))< 0.e0_double)) Maximum_Index = i
+!!$       !-Maximum_Index marks the lower boundary of the interval in which the maximum is exptect to occur
+!!$    end do
+!!$    if(Maximum_Index < 0) STOP 'find_Maximum_by_Bisection - FAILED TO FIND MAXIMUM'
+!!$ 
+!!$    print *, 'Maximum found to be between:', Likelihood(1,i), Likelihood(1,i+1)
+
+    !--If call count too high, output warning, assign flag and output (flag can be used toeither stop the code or use the result as it stands)
+    if(callcount > calltolerance) then
+    print *, 'WARNING: CALL TOLERANCE FOR MAXIMUM FINDING IS TOO HIGH, EXITING'
+       CALLCOUNT = 0
+       Keep_Going = .false.
+       return
+    end if
+
+    !--Find Bracket of maximum on original course grid
+    !----This could potentially be sped up by keeping the previous braceting interval and only updating within some region of it
+    Bracket_Found = .false.; Bracket = 0.
+    do i = 2, size(Likelihood,2)-1
+       if(Likelihood(2,i-1)<Likelihood(2,i) .and. Likelihood(2,i)>=Likelihood(2,i+1)) then
+          if(Bracket_Found) then
+             !--Compare the brackets to find the smallest (overcoming local minima
+             print *, 'Multiple Mimina found!', Likelihood(:,i), ':', Likelihood(:,Bracket(2))
+             if(Likelihood(2,i) > Likelihood(2, Bracket(2))) then
+                cycle
+             end if
+             print *, 'NEW MAXIMA SET!'
+          end if
+
+          !--Bracket Found-!
+          Bracket = (/i-1, i, i+1/) !--Middle of bracket is best guess at the minimum
+          Bracket_Found = .true.
+       end if
+    end do
+
+    if(Bracket(1) == 0 .or. Bracket(3) == size(Likelihood,2)) then
+       print *, 'Maximum found to be intolerably close to the limits of the original grid, exiting without result'
+       callcount = 0
+       Keep_Going = .false.
+       return
+    end if
+
+    !--Found within tolerance
+    if( maxval((/Likelihood(1,Bracket(2))-Likelihood(1,Bracket(1)),Likelihood(1,Bracket(3))-Likelihood(1,Bracket(2))/)) <= tol ) then
+       print *, 'Found Maximum to within a tolerance, expected to be:', Likelihood(1,Bracket(2))
+       callcount = 0
+       Keep_Going = .false.
+       return
+    end if
+
+    !--Bisect the Grid and add this point onto the posterior 
+!    NewGridPoint = 0.5e0_double*(Likelihood(1,Bracket(2))+Likelihood(1,Bracket(2+((-1)**callcount)))) !--1 allows for alternate sampling to left and right of entered bracket
+ 
+    !--Add new point using golden ratio
+    !--(which sets the new point at 0.38197 into the larger of the intervals)
+    if( (Likelihood(1,Bracket(2))-Likelihood(1,Bracket(1))) >= (Likelihood(1,Bracket(3))-Likelihood(1,Bracket(2))) ) then
+       NewGridPoint = Likelihood(1,Bracket(2)) - 0.38197e0_double*(Likelihood(1,Bracket(2))-Likelihood(1,Bracket(1)))
+       Maximum_Index = Bracket(1)
+    else
+       NewGridPoint = Likelihood(1,Bracket(2)) + 0.38197e0_double*(Likelihood(1,Bracket(3))-Likelihood(1,Bracket(2)))
+       Maximum_Index = Bracket(2)
+    end if
+
+!-- Use this if not using golden ratio--!
+!!$    if( (-1)**callcount > 0) then
+!!$       Maximum_Index = Bracket(2)
+!!$    else
+!!$       Maximum_Index = Bracket(1)
+!!$    END if
+    !--Assign new point
+    tLikelihood(:,:Maximum_Index) = Likelihood(:,:Maximum_Index)
+    tLikelihood(1,Maximum_Index+1) = NewGridPoint; tLikelihood(2,Maximum_Index+1) = setNaN()
+    tLikelihood(:,Maximum_Index+2:) = Likelihood(:,Maximum_Index+1:)
+
+    New_Point = Maximum_Index+1
+
+
+    deallocate(Likelihood)
+    allocate(Likelihood(size(tLikelihood,1), size(tLikelihood,2))); Likelihood = tLikelihood
+
+  end subroutine find_Maximum_by_Bisection
+
   subroutine DM_Profile_Variable_Posterior(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorCatalogue, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
     use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles; use Distributions, only: ch08_redshift_distribution_Array, CH08_Redshift_Distribution_Scalar; use Interpolaters, only: Linear_Interp
-    use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete;
+    use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete; use Common_Functions, only: setNaN
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
     !-For Mass_Profile = 1 (Flat): Sigma_0
     !-                   2 (SIS) : Velocity_Dispersion**2
@@ -564,7 +692,7 @@ contains
     !--Size_Only_Mag_Prior contains the prior for size which evaluated over the mag grid, which will be integrated over. Contains p_[theta_0, m_0|z]*p[z|m_0] for all m in grid
     real(double),dimension(:,:),allocatable::  Kappa_Renormalised_Prior, Survey_Renormalised_Prior, Size_Only_Mag_Prior
     real(double),dimension(:),allocatable::Kappa_Renormalised_MagPrior, Survey_Renormalised_MagPrior
-    real(double),allocatable::Posterior_perGalaxy(:,:) !-Galaxy, Posterior-! - Uses Same Grid as overall Posterior -
+    real(double),allocatable::Posterior_perGalaxy(:) !-Galaxy, Posterior-! - Uses Same Grid as overall Posterior -
     real(double):: Effective_Magnification !- Only Model Dependant
 
     logical:: MC_Sigma_Critical = .false.
@@ -607,6 +735,14 @@ contains
     integer:: IntegrationFlag = -1000
 
     integer:: nMagPosterior, nSizePosterior, nSizeMagPosterior
+
+    !--Maximum Search Options
+    logical:: Continue_To_Evaluate
+    integer:: Alpha_Loop
+    logical:: Search_For_Maximum = .true.
+    !~~ Initial Grid Size and Tolerance to which the maximum are found set the error on confidence limits, and mode respectively, as well as setting minimum time for run
+    integer:: Search__Coarse_Grid_Size = 100
+    real(double):: Find_Maximum_Tolerance = 1.e-2_double
 
     !--Testing Declarations--!
     real(double),dimension(3,size(Cat%RA)):: Convergence_per_Cluster
@@ -672,12 +808,17 @@ contains
        nGrid = 10000 !--This needs to be sigma_v^2--!
        VGrid_Lower= -2.5e5_double; VGrid_Higher = 9.e6_double    !--------------------------!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     case(3)
-       nGrid = 500
+       if(Search_for_Maximum) then
+          !--Set initial grid to a smaller value since the search for the maximum will reduce the number of points needed
+          nGrid = Search__Coarse_Grid_Size
+       else
+          nGrid = 500
+       end if
        VGrid_Lower= 0.05e0_double; VGrid_Higher = 3.e0_double
     case default
        STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
     end select
-    allocate(Posterior(2, nGrid)); Posterior = 1.e0_double !*!
+    allocate(Posterior(2, nGrid)); Posterior = setNaN() !*!
     do i =1, nGrid
        Posterior(1,i) = VGrid_Lower + (i-1)*((VGrid_Higher-VGrid_Lower)/(nGrid-1))
     end do
@@ -777,7 +918,7 @@ contains
     write(*,'(2(A))') 'File output: ', trim(adjustl(Output_Prefix))//'Renormalisation_by_Magnification.dat'
 
     !--Start of Posterior Routines--!
-    allocate(Posterior_perGalaxy(size(Cat%RA), size(Posterior,2))); Posterior_perGalaxy = 1.e-100_double
+    allocate(Posterior_perGalaxy(size(Cat%RA))); Posterior_perGalaxy = 1.e-100_double
     Effective_Magnification = 0.e0_double
     Convergence_Per_Cluster = 0.e0_double
 
@@ -800,8 +941,26 @@ contains
     nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
     Time1 = 0.; Time2 = 0.
 
-    do i = 1, size(Posterior_perGalaxy,2) !--Loop over posterior values--!
-       if(i == size(Posterior_perGalaxy,2)/2) print *, 'Halfway done for this Aperture..'          
+    i = 0; Alpha_Loop = 0
+    Continue_To_Evaluate = .true.
+    do while (Continue_To_Evaluate)
+       Posterior_perGalaxy = setNaN()
+       !--Alpha_Loop counts the number of times the Alpha value has been looped over
+       Alpha_Loop = Alpha_Loop+1
+       i = i+1
+
+       !--Set exit strategy in normal case
+       if(Search_For_Maximum == .false. .and. Alpha_Loop > size(Posterior,2)) Continue_To_Evaluate = .false.
+       if(Search_For_Maximum .and. Alpha_Loop>size(Posterior,2)) then
+          !--Find the Maximum. In this case, i will be set to the new grid point (added to grid), and exit case will be set when either tolerance or call limits are met 
+          call  find_Maximum_by_Bisection(Posterior, i, Find_Maximum_Tolerance, Continue_To_Evaluate)
+       end if
+
+       !--Exit here to remove need to evaluate an extra point when maximum has been found
+       if(Continue_to_Evaluate == .false.) exit
+
+       Posterior(2,i) = 1.e0_double
+       if(Alpha_Loop == Size(Posterior,2)/2) print *, 'Approximately halfway done for this Aperture..'          
        do c = 1, size(Posterior_perGalaxy,1) !-Loop over galaxies-!
           !             print *, 'Doing Galaxy Loop:', c, size(Posterior_pergalaxy,1)
           
@@ -1102,10 +1261,10 @@ contains
           
           if(size(Posterior_perGalaxy_Redshift,1) == 1) then
              !--Redshift was taken to be exact
-             Posterior_perGalaxy(c,i) = Posterior_perGalaxy_Redshift(1)
+             Posterior_perGalaxy(c) = Posterior_perGalaxy_Redshift(1)
           else
              !--Integrate over the redshift Information--!
-             Posterior_perGalaxy(c,i) = TrapInt(RedshiftGrid, Posterior_perGalaxy_Redshift(:))
+             Posterior_perGalaxy(c) = TrapInt(RedshiftGrid, Posterior_perGalaxy_Redshift(:))
           end if
           deallocate(Posterior_perGalaxy_Redshift)
           
@@ -1113,10 +1272,19 @@ contains
 
        !--Combination of galaxy posteriors could be done here, provided that the overall renomralisation of these individual posteriors is unimportant
        !~~Return lnP to ensure that we can renormalise in an alpha-independent way in teh combined posterior, and to ensure that the PDF is correctly recovered even with ronding error (large negative lnP across all alphas). The renormalisation is done after the outer loop is finished
-       call Combine_Posteriors(Posterior(1,i), Posterior_perGalaxy(:,i), Combine_log_Posteriors, Renormalise = .false., Return_lnP = Combine_log_Posteriors, Combined_Posterior = Posterior(2,i))
+       call Combine_Posteriors(Posterior(1,i), Posterior_perGalaxy(:), Combine_log_Posteriors, Renormalise = .false., Return_lnP = Combine_log_Posteriors, Combined_Posterior = Posterior(2,i))
 
     end do !--End of Posterior Loop
-    
+    deallocate(Posterior_perGalaxy)
+
+    if(any(dabs(Posterior) > huge(1.e0_double)) .or. any(isNaN(Posterior))) then
+       print *, 'NaNs or infinities found in posterior:'
+       do i =1, size(Posterior,2)
+          print *, Posterior(:,i)
+       end do
+       STOP
+    end if
+
     !--Convert from lnP to P for posterior, renormalise so that max(P) = 1, to avoid rounding errors
     if(Combine_log_Posteriors) Posterior(2,:) = dexp(Posterior(2,:) - maxval(Posterior(2,:)))
 
@@ -1130,22 +1298,20 @@ contains
     print *, 'Constructed ', nSizeMagPosterior, ' size-magnitude posteriors'
     print *, 'Constructed ', nMagPosterior, ' magnitude-only posteriors'
     print *, '-------------------------------------------------------------'
+
+    !---DO NOT DELETE THIS. Instead, come up with a way to store the posterior per galaxy on a general grid for output
+!!$    if(Debug_Mode .and. Output_Posterior_Per_Galaxy) then
+!!$       
+!!$       Filename = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat'
+!!$       open(unit = 17, file = Filename)
+!!$       write(fmtstring,'(I7)') size(Posterior_perGalaxy,1)+1
+!!$       do i =1, size(Posterior,2)
+!!$          write(17, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior_perGalaxy(:,i)
+!!$       end do
+!!$       close(17)
+!!$       print *, 'Output Posterior per galaxy to: ', trim(adjustl(Filename))
+!!$    end if
     
-    if(Debug_Mode .and. Output_Posterior_Per_Galaxy) then
-       
-       Filename = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat'
-       open(unit = 17, file = Filename)
-       write(fmtstring,'(I7)') size(Posterior_perGalaxy,1)+1
-       do i =1, size(Posterior,2)
-          write(17, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior_perGalaxy(:,i)
-       end do
-       close(17)
-       print *, 'Output Posterior per galaxy to: ', trim(adjustl(Filename))
-    end if
-    
-    !--Get the total posterior for the source set by combining all galaxies in that source set
-    !--Removed as part of work to combine per alpha value, in the hope of reducing the number of alpha values necessary to get result
-!!$    call Combine_Posteriors(Posterior(1,:), Posterior_perGalaxy(:,:), Combine_log_Posteriors, Renormalise = .true., Combined_Posterior = Posterior(2,:))
     
     Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined_Renormalised.dat'
     open(unit = 82, file = Filename)
@@ -1156,6 +1322,7 @@ contains
     close(82)
     print *, 'Output Combined Posterior to: ', trim(adjustl(Filename))
     
+
     if(any(isNAN(Posterior(2,:)))) then
        print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
        print *, 'Stopping'
@@ -1167,7 +1334,7 @@ contains
        Posterior(2,:) = 0.e0_double
     end where
     
-    deallocate(Posterior_perGalaxy, Distance_From_Mass_Center)
+    deallocate(Distance_From_Mass_Center)
     if(allocated(Kappa_Renormalised_Prior)) deallocate(Kappa_Renormalised_Prior)
     if(allocated(Survey_Renormalised_Prior)) deallocate(Survey_Renormalised_Prior)
     if(allocated(Size_Only_Mag_Prior)) deallocate(Size_Only_Mag_Prior)

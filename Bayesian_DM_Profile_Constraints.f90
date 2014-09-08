@@ -855,9 +855,11 @@ contains
        write(apString, '(I1)') Ap
        print *, '!----------------------------------------------------------------------------------!'
        call Convert_Alpha_Posteriors_to_VirialMass(Surface_Mass_Profile, Returned_Cluster_Posteriors(Ap,:,:), Mass_Posterior(Ap,:,:), Clusters_In%Redshift(Ap), trim(Bayesian_Routines_Output_Directory)//'Mass_Posterior_Aperture_'//trim(apString))
- 
+
+       print *, 'Getting Posterior Statistics:'
        call Posterior_Statistics(Returned_Cluster_Posteriors(Ap,1,:), Returned_Cluster_Posteriors(Ap,2,:), Cluster_Mean(Ap), Cluster_Mode(Ap), Cluster_Variance(Ap), AntiSymm_Variance(Ap,:))
        call Posterior_Statistics(Mass_Posterior(Ap,1,:), Mass_Posterior(Ap,2,:), ModeVal = Virial_Mass, AntiSymm_Error = Virial_Mass_Error)
+       print *, 'Got Posterior Statisitcs'
 
        if(Surface_Mass_Profile == 1) then
           !--Convert into the correct units (i.e. Msun/h)--!                                                                                                                                                       
