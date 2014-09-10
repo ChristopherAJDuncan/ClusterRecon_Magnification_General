@@ -38,17 +38,15 @@ module Mass_Profiles
       end select
 
     end function Magnification_Factor
-
-
-
-
+      
     real(double) function Total_MagnificationFactor_MultipleClusters(Profile, Position, Source_Redshift, Cluster_Pos, Param, Redshift)
-      !--Does not work--!
+      !--Edit to require Sigma_Critical Input
       use Cosmology, only: angular_diameter_distance_fromRedshift
       integer, intent(in):: Profile
-      real(double), intent(in)::Param(:), Redshift(:),  Source_Redshift
+      real(double), intent(in)::Param(:), Redshift(:)
       real(double),intent(in):: Cluster_Pos(:,:) !-Cluster, Position (RA,Dec)-!
       real(double), intent(in):: Position(2) !-RA, Dec-!
+      real(double), intent(in):: Source_Redshift!, Sigma_Crit
 
       real(double):: dRA, dDec, Theta, Radius, Sigma_Critical, D_l, D_ls, D_s
       integer:: C, nCl
@@ -63,27 +61,40 @@ module Mass_Profiles
       KappaT = 0.e0_double; Gamma1T = 0.e0_double; Gamma2T = 0.e0_double
       nCl = size(Cluster_Pos,1)
 
+      if(Source_Redshift < 0.e0_double) STOP 'Total_MagnificationFactor_MultipleClusters - Source Redshift Entered invalid (negative)'
+
       D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
       do C = 1, nCl
+
+         !--Skip if Source Redshift is less than the lens redshift
+         if(Source_Redshift <= Redshift(C)) cycle
+
          !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
          dRA = dabs(Position(1)-Cluster_Pos(C, 1))
          dDec = dabs(Position(2) - Cluster_Pos(C,2))
-         Theta = acos(dDec/dRA)
+         Theta = atan(dDec/dRA)
          
          !--Get Sigma_Critical--!
          D_l = angular_diameter_distance_fromRedshift(0.e0_double, Redshift(C))
          D_ls = angular_diameter_distance_fromRedshift(Redshift(C), Source_Redshift)
          Sigma_Critical = 1.66492e18_double*(D_s/(D_l*D_ls))
 
+         if(isNaN(Sigma_Critical)) print *, 'Sigma_Critical is a NaN:', Sigma_Critical, Redshift(C), Source_Redshift
+
          Radius = dsqrt( dRA*dRA + dDec*dDec ) !-in Degrees-!
          Radius = D_l*Radius*(3.142e0_double/180.e0_double) !-In Mpc/h-!
          !-Get Gamma Tangential
-         Gamma = Differential_SMD_Scalar(Radius, Redshift(C), Param(C))/Sigma_Critical
-         Kappa = SMD_NFW_Scalar(Radius, Redshift(C), Param(C))/Sigma_Critical
+         Gamma = Differential_SMD_Scalar(Radius, Redshift(C), Param(C))
+         Gamma = Gamma/Sigma_Critical
+         Kappa = SMD_NFW_Scalar(Radius, Redshift(C), Param(C))
+         Kappa = Kappa/Sigma_Critical
          
-         !--Convert to Shear Components on Cartesian Frame
-         Gamma1 = Gamma*dcos(2.e0_double*Theta)
-         Gamma2 = Gamma*dsin(2.e0_double*Theta)
+         !--Convert to Shear Components on Cartesian Frame, which is universal to all lensing clusters
+         Gamma1 = -1.e0_double*Gamma*dcos(2.e0_double*Theta)
+         Gamma2 = -1.e0_double*Gamma*dsin(2.e0_double*Theta)
+
+         if(isNaN(Gamma1)) print *, 'Gamma1 is a NaN:', Gamma, dcos(2.e0_double*Theta), Theta
+         if(isNaN(Gamma2)) print *, 'Gamma2 is a NaN:', Gamma, dsin(2.e0_double*Theta), Theta
 
          !--Get Summed Quantities
          KappaT = KappaT + Kappa
@@ -93,7 +104,14 @@ module Mass_Profiles
 
       !--Calculate Magnification Factor from total quantities
       GammaT = dsqrt(Gamma1T*Gamma1T + Gamma2T*Gamma2T)
+      if(isNaN(GammaT)) then
+         print *, 'Multiple Clusters: GammaT is a NaN:', Gamma1T, Gamma2T, KappaT, Radius, Sigma_Critical, Theta
+      end if
       Total_MagnificationFactor_MultipleClusters = 1.e0_double/( ((1.e0_double-KappaT)**2.e0_double) - GammaT*GammaT)
+      
+      if(isNaN(Total_MagnificationFactor_MultipleClusters)) then
+         print *, 'Total Magnification is a NaN:', KappaT, GammaT
+      end if
 
     end function Total_MagnificationFactor_MultipleClusters
 
