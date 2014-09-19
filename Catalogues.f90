@@ -142,7 +142,7 @@ module Catalogues
       check_Catalogue_Existence = here
     end function check_Catalogue_Existence
 
-    subroutine Concatonate_Clusters(Master, Child)
+    subroutine Concatonate_Catalogues(Master, Child)
       type(Catalogue):: Master, Child
 
       type(Catalogue):: tMaster
@@ -163,7 +163,7 @@ module Catalogues
 
       call Catalogue_Destruct(tMaster)
 
-    end subroutine Concatonate_Clusters
+    end subroutine Concatonate_Catalogues
 
     subroutine Mask_Circular_Aperture(Cat, Ap_Pos, Ap_Radius)
       !--Cuts out galaxies which fall inside an aperture radius, where the radius is in DEGREES

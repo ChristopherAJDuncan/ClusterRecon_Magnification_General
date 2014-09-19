@@ -20,9 +20,9 @@ program Bayesian_DM_Profile_Constraints
    real(double):: Masked_Survey_Area = 822.5666e0_double !- Defaults: 1089 (Mocks), 822.566577778 (Data)
 
    type(Foreground):: Clusters
-!   real(double)::Lens_Redshift = 0.165e0_double
 
-   
+   !--Nominated_Fitting_Type sets the default means for fitting the Clusters. 0: Individually; 1: 2Cluster on coarse grid; 2: MCMC
+   integer:: Nominated_Fitting_Type = 2
 
     !----Mock Parameters-------!
     integer:: nSources = 70000
@@ -107,18 +107,19 @@ program Bayesian_DM_Profile_Constraints
      Blank_Field_Catalogue_Identifier = (/-4,-5/)
   end if
 
-
-   call get_Clusters(Clusters, Cluster_Filename)
-   allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
-   write(*,'(A)') 'Aperture Radius HAS BEEN SET TO 2 ARCMINUTE'
-   call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
+  !_____________________Get Aperture Details__________________________________________________________________________________________________!
+  call get_Clusters(Clusters, Cluster_Filename)
+  allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
 
 
-
-  !--Set the Blank Field Catalogue to the Data Catalogue if invalid value (>0) entered--!
-!!$  where((Blank_Field_Catalogue_Identifier > 0))
-!!$     Blank_Field_Catalogue_Identifier = Catalogue_Identifier
-!!$  end where
+  write(*,'(A)') 'Aperture Radius HAS BEEN SET TO 5 ARCMINUTE'
+  call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
+  
+  !-Set Simultaneous Fitting Method According to cluster input. If all memebers of fit group are distinct, then use the individual fitting.
+  !--If more than two clusters share the same group, then use the MCMC method
+  
+  !________________________________________________________________________________________________________________________________________!
+   
 
   if(Run_Type ==3) then
      !--Set Defaults for this Run Type--!
@@ -389,6 +390,7 @@ contains
 
   subroutine Posterior_Maximum_Likelihood_Bias_Error(Cat_Ident, Directory, Blank_Field_Cat_Ident, Input_Clusters_Filename, Aperture_Radius, Bias_Mode_Out, Mode_Error_Out)
     use Cosmology; use Statistics, only:mean_discrete, variance_discrete; use Matrix_methods, only:Subset; use Bayesian_Routines, only:Surface_Mass_Profile; use Mass_Profiles, only:integrated_mass_within_radius
+    use Bayesian_Posterior_Evaluation, only: Combine_posteriors
     !--Produces multiple Posteriors for many different mock catalogue realisations, to calculate the ML-point bias and variance--!
     !--Unlensed distribution is calculated from the Blank_Field_Catlaogue for the first run, and then read in on consecutive runs--!
     integer, intent(in)::Cat_Ident(:)
@@ -436,7 +438,10 @@ contains
     !--Directory formats must be referenced with respect to teh run directory, and these catalogues must be stored with the same level structure wrt to program--!
     character(500)::Mock_Output = 'Output/', Mock_Input, Mock_Input_Parent = 'Mock_Catalogues/'
 
+    real(double):: Time_Start, Time_End
 
+    call cpu_time(Time_Start)
+    
     !--Temporary Storage of User-entered variable--!
     tPhysical_Size = Analyse_with_Physical_Sizes
 
@@ -682,6 +687,9 @@ contains
     deallocate(Posteriors)
     call Foreground_Destruct(iClusters)
 
+    call cpu_time(Time_End)
+    print *, 'Run Time (s)[Total/SubRun]:', Time_End, Time_End-Time_Start
+
     !--Remove the mock catalogue file
     print *, 'Deleting Mock Catalogues:'
     call system('rm -r '//trim(Mock_Output))
@@ -718,6 +726,8 @@ contains
     real(double),allocatable:: Mass_Posterior(:,:,:) !-Aperture, Grid/Posterior, Value-!
     integer::Ap
 
+    real(double):: Time_Start, Time_End
+
     INTERFACE
        subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, reconstruct_Prior, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
          use Param_Types; use Foreground_Clusters; use Catalogues
@@ -732,6 +742,8 @@ contains
          type(Catalogue), intent(in),optional:: inCat, inBFCat
        END subroutine Mass_Estimate_Single_Run
     END INTERFACE
+
+    call cpu_time(Time_Start)
 
     inquire(directory = trim(run_Output_Dir), exist = here)
     if(here == .false.) call system('mkdir '//trim(adjustl(run_Output_Dir)))
@@ -812,10 +824,19 @@ contains
        print *, '--Cuts on Prior:'
        call Cut_By_PhotoMetricRedshift(BFCatt, Lower_Redshift_Cut) !--Cut out foreground-
        print *, '**Applying Masks to Prior Catalogue:'
-       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
+       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
        print *, ' '
 
-       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
+       select case (Nominated_Fitting_Type)
+       case(0) !--Individual
+          call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
+       case(1) !-2Cluster on coarse grid
+          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, (/0.05e0_double,2.5e0_double/), (/(0.03e0_double, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
+       case(2) !-MCMC
+          call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
+       case default
+          STOP 'INVALID Fitting Method has been entered'
+       end select
     else
 
        !--Cuts on data catalogue--!
@@ -827,7 +848,17 @@ contains
        PRINT *, ' '
 
        !--If no Blank Field Information, then attempt a read in--!
-       call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
+       select case (Nominated_Fitting_Type)
+       case(0) !--Individual
+          call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
+       case(1) !-2Cluster on coarse grid
+          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, .false.,  Clusters_In%Fitting_Group, (/0.05e0_double,2.e0_double/), (/(0.03e0_double, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)))
+       case(2) !-MCMC
+          call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)))
+       case default
+          STOP 'INVALID Fitting Method has been entered'
+       end select
+
     end if
 
     print *, 'Catalogue Check:'
@@ -893,6 +924,8 @@ contains
     close(51)
 !!$
 
+    call cpu_time(Time_End)
+    print *, 'RunTime (s)[SingleRun]:', Time_End, Time_End-Time_Start
 
     print *, 'Finished Single Run Normally'
 
