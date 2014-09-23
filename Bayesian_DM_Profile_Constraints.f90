@@ -18,6 +18,8 @@ program Bayesian_DM_Profile_Constraints
    !--Eventually want these to be passed in
    logical:: Set_Foreground_Masks = .false.
    real(double):: Masked_Survey_Area = 822.5666e0_double !- Defaults: 1089 (Mocks), 822.566577778 (Data)
+   real(double):: Aperture_Radius_ArcMin = 2.e0_double
+   real(double),allocatable:: Mask_Position(:,:)
 
    type(Foreground):: Clusters
 
@@ -109,10 +111,10 @@ program Bayesian_DM_Profile_Constraints
 
   !_____________________Get Aperture Details__________________________________________________________________________________________________!
   call get_Clusters(Clusters, Cluster_Filename)
-  allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = 2.e0_double/60.e0_double !-Degrees-! Default - 1/60
+  allocate(Cluster_Aperture_Radius(size(Clusters%Position,1))); Cluster_Aperture_Radius = Aperture_Radius_ArcMin/60.e0_double !-Degrees-! Default - 1/60
 
 
-  write(*,'(A)') 'Aperture Radius HAS BEEN SET TO 5 ARCMINUTE'
+  write(*,'(A, x, e12.5)') 'Aperture Radius HAS BEEN SET TO (Arcminute):', Aperture_Radius_ArcMin
   call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
   
   !-Set Simultaneous Fitting Method According to cluster input. If all memebers of fit group are distinct, then use the individual fitting.
@@ -176,15 +178,18 @@ contains
     use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits
     character(*), intent(in):: Input_File
 
+    !--Internal Declarations
+    real(double), dimension(100):: Mask_Positions, Mask_Aperture_Radius
+
     !Global Declarations! (see above)
     !--Cluster_Filename, Run_Type, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier--!
 
     logical:: here
 
-    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Core_Cut_Radius, Set_Foreground_Masks
+    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File
-
     namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits
+    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter
 
     !--Check for existence of Input File
     inquire(file = Input_File, exist = Here)
@@ -193,13 +198,28 @@ contains
        STOP 'Input File not present'
     end if
 
+    !--Set default for internal declarations
+    Mask_Positions = dsqrt(-1.e0_double) !-Set to NaN
+    Mask_Aperture_Radius = dsqrt(-1.e0_double)
+
     open(unit = 92, file = Input_File)
 
     read(92, nml = Run)
     read(92, nml = Mocks)
     read(92, nml = Distribution)
+    read(92, nml = Simultaneous_Fit)
 
     close(92)
+
+    !--Set internal versions of input
+    allocate(Core_Cut_Position(size(Mask_Aperture_Radius,1) - count(isNaN(Mask_Aperture_Radius)),2)); Core_Cut_Position = 0.e0_double
+    allocate(Core_Cut_Radius(size(Core_Cut_Position,1))); Core_Cut_Radius = 0.5e0_double
+    do i =1 , size(Core_Cut_Radius)
+       if(any(isNaN(Mask_Positions(2*i-1:2*i)))) STOP 'Parameter_Input - Error in setting internal storage of Mask Positions, NaNs present'
+       if((isNaN(Mask_Aperture_Radius(i)))) STOP 'Parameter_Input - Error in setting internal storage of Mask Aperture Radius, NaNs present'
+       Core_Cut_Position(i,:) = (/Mask_Positions(2*i-1), Mask_Positions(2*i) /)
+       Core_Cut_Radius(i) = Mask_Aperture_Radius(i)
+    end do
 
     !--Copy Input File to output directory--!
     call system('cp '//trim(Input_File)//' '//trim(Output_Directory)//'Input_File.ini')
@@ -724,7 +744,8 @@ contains
     real(double):: Virial_Mass_Input, Virial_Mass, Virial_Mass_Error(2), Discardable(2)
     character(10):: Mass_String, Error_Mass_String_Positive, Error_Mass_String_Negative, apString
     real(double),allocatable:: Mass_Posterior(:,:,:) !-Aperture, Grid/Posterior, Value-!
-    integer::Ap
+    integer::Ap, j
+    character(20)::fmtstring
 
     real(double):: Time_Start, Time_End
 
@@ -792,6 +813,10 @@ contains
 
        print *, '**Testing for Cluster contamination in the Data Catalogue'
        call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir), Masked_Survey_Area)
+
+       !--Apply Input Core Cuts
+       print *, 'Masking apertures on data:', Core_Cut_Radius
+       call Mask_Circular_Aperture(Catt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
 
        if(Set_Foreground_Masks) then
           write(*,'(A)') '!---------------------------------------------------------------------------------------------------------'
@@ -870,6 +895,15 @@ contains
     call catalogue_destruct(Catt); call catalogue_destruct(BFCatt)
 
     !--Output--!
+    open(unit = 51, file = trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat')
+    write(fmtstring,'(I2)') size(Returned_Cluster_Posteriors,1)+1 !-Assumes all posteriors described by the same posterior grid-!
+    do j = 1, size(Returned_Cluster_Posteriors,3)
+       write(51, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Returned_Cluster_Posteriors(1,1,j), Returned_Cluster_Posteriors(:,2,j)
+    end do
+    close(51)
+    print *,'Output file to: ', trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat'
+
+
 !!$
     allocate(Cluster_Mean(size(Returned_Cluster_Posteriors,1))); Cluster_Mean = 0.e0_double
     allocate(Cluster_Mode(size(Returned_Cluster_Posteriors,1))); Cluster_Mode = 0.e0_double

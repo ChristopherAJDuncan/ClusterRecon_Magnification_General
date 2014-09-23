@@ -22,8 +22,7 @@ module  Bayesian_Routines
   integer:: Posterior_Method = 2
 
   logical:: Enforce_Weak_Lensing = .false.
-  real(double):: Core_Cut_Radius(4) = 0.5e0_double !--Default
-!  real(double):: Core_Cut_Radius(4) = (/1.50e0_double,1.50e0_double,0.5e0_double, 0.9e0_double/) !-In Arcminutes-! Data
+  real(double),allocatable:: Core_Cut_Position(:,:), Core_Cut_Radius(:)
 
   logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false., allow_KDE_Extrapolation = .false.
   logical::use_lnSize_Prior = .false.
@@ -31,6 +30,14 @@ module  Bayesian_Routines
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
   real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
   real(double),parameter:: Lower_Redshift_Cut = 0.21
+
+  !----MCMC Declarations-----!
+  integer:: nBurnin = 50
+  integer:: nChains = 6, nChainOut = 6, nMinChain = 1050
+  logical:: tune_MCMC = .false.
+  logical:: output_Burnin = .true.
+  !---Free Parameter declaration - shold be passed in eventually
+  integer::fit_Parameter(3) = (/1,0,0/) !-r_200, concentration, position
 
 
   !--Overload function for Combine Posteriors
@@ -412,14 +419,9 @@ contains
     logical:: Acceptance
     integer:: nConvergenceTestPoint = 10
     real(double),allocatable:: ConvergenceStatistic(:)
+    integer:: nMaxChain = 1000000
 
     !----Eventually to be passed in
-    integer:: nChains = 4, nChainOut = 4, nMaxChain = 1000000
-    integer:: nBurnin = 10
-    logical:: tune_MCMC = .false.
-    logical:: output_Burnin = .true.
-    !---Free Parameter declaration - shold be passed in eventually
-    integer::fit_Parameter(3) = (/1,0,0/) !-r_200, concentration, position
     logical, dimension(size(fit_Parameter)+1):: ifree_Parameter !used as a handle to tell convergence routine which parameter to check
 
     !--Temporary Posterior construction
@@ -487,8 +489,6 @@ contains
              exit
           end if
        end if
-       !--Exit if the grouping is too large. This is limited mainly by the inability to write a simultaneous fitting routine for a generally sized array - BOLLOCKS TO FORTRAN
-       if(size(Group_Index) > 2) STOP 'DM_Profile_Fitting_Simultaneous - I have not been written to deal with the simultaneous fitting of more than two clusters at once, stopping.'
 
        print *, ' '
        print *, 'Joint Fitting Cluster Group ', G, ' of ', maxval(Fit_Group),'....'
@@ -504,8 +504,8 @@ contains
 
        !--Identify the source sample as the combination of sources in each aperture
        do C = 1, size(Group_Index)
-          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
-          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+!          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
+          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
           call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) !--This may not work on first loop
           call Catalogue_Destruct(TSource_Catalogue)
        end do
@@ -549,7 +549,7 @@ contains
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/148.7707e0_double, 149.3524e0_double/) !-RA
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/-10.291e0_double, -9.748e0_double/) !-Dec
 
-          ChainWidths((C-1)*nParameter_per_Cluster+1) = 1.0e0_double !-r200
+          ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.8e0_double !-r200
           ChainWidths((C-1)*nParameter_per_Cluster+2) = 0.0e0_double !-Concentration (not coded up yet)
           ChainWidths((C-1)*nParameter_per_Cluster+3) = 0.03e0_double !-RA (no good reason to set this value yet)
           ChainWidths((C-1)*nParameter_per_Cluster+4) = 0.03e0_double !-Dec (ditto)
@@ -593,6 +593,8 @@ contains
        !________________________________________________Proceed with chain_______________________________________________________________!
 
        !----Open output files
+       !------Ensure no attempt is made to output more chains than exists
+       nChainOut = minval((/nChains, nChainOut/))
        do out = 1, nChainOut
           open(unit = 30+out, file = ChainsOutput_Filename(out))
           write(*,'(2(A))') '---Outputting Chain to file: ', ChainsOutput_Filename(out)
@@ -610,11 +612,17 @@ contains
        write(conv_fmt, '(I3)') size(ChainArray(1)%Chain,2)
        conv_fmt = '('//trim(adjustl(conv_fmt))//'(e12.5,x))'
 
+       !--Set minimum chain length so that it is at least 20 times the burnin
+       nMinChain = maxval((/nMinChain, 20*nBurnin/))
+
+       write(*,'(A,x,I4,x,A)') 'A minimum of:', nMinChain, ' chain links will be evaluated.'
+
        !--Initialise counters
        chainCount = 0; allocate(Likelihood(size(ChainArray),nMaxChain)); Acceptance_Rate = 0.e0_double
        chains_Converged = .false.
        do
-          if(Chains_Converged) exit
+          !--Exit Conditions
+          if(Chains_Converged .and. chainCount >= nMinChain) exit
           chainCount = chainCount + 1
 
           if(chainCount > nMaxChain) then
@@ -624,6 +632,10 @@ contains
 
           do M = 1, size(ChainArray)
 !TESTING             print *, 'Considering chain:', M, chainCount
+
+             !--Take new point (skip on first run to allow for evaluation of first point
+             if(chainCount > 1) call MCMC_Propose_Point_TopHat(ChainArray(M)%Chain, ChainWidths)
+
              !--Set up temporary arrays to pass in free parameters
              allocate(tAlpha(size(Group_Index))); allocate(tAp_Pos(size(Group_Index),2))
              do C = 1, size(Group_Index)
@@ -634,7 +646,7 @@ contains
              !--Evaluate Posterior
              !--Priors on Parameters
              !---If using position, to avoid degeneracy need alpha1>alpha2>...., and then 1 not longer necessarily labels the 1st cluster, but the largest (identifiable by location)
-             if(any(tAlpha < 0.05)) then
+             if(any(tAlpha <= 0.05)) then
                 !--Put a low probability on such low values of alpha so they are never accepted
                 Likelihood(M,chainCount) = -100000
              else
@@ -644,14 +656,22 @@ contains
              deallocate(tAlpha, tAp_Pos)
              
              !--Test for acceptance
-             if(chainCount > 1) call MCMC_accept_reject_Point_Metropolis(ChainArray(M)%Chain(chainCount-1:chainCount,:), Likelihood(M,chainCount-1:chainCount), acceptance, .true., Acceptance_Rate(M), chainCount)
+             if(chainCount > 1) then
+                call MCMC_accept_reject_Point_Metropolis(ChainArray(M)%Chain(chainCount-1:chainCount,:), Likelihood(M,chainCount-1:chainCount), acceptance, .true., Acceptance_Rate(M), chainCount)
+
+                !--Test Behaviour of priors
+                if(any( (/(ChainArray(M)%Chain(chainCount, (C-1)*nParameter_per_Cluster+1), C = 1, size(Group_Index))/) < 0.e0_double) .and. Likelihood(M,chainCount) > -100000) then
+                   print *, 'Group, Chain, chainLink:', G, M, chainCount
+                   STOP 'MCMC- Fatal- A negative Value of Alpha has been accepted!'
+                end if
+             end if
 
              if(chainCount > 1 .and. tune_MCMC) print *, 'Chain, ChainLink, Acceptance Rate: ', M, chainCount, Acceptance_Rate(M)
              
-             !--Take new point
-             call MCMC_Propose_Point_TopHat(ChainArray(M)%Chain, ChainWidths)
 
           end do
+
+
           !--Output Point to file
           if(output_Burnin .or. chainCount > nBurnin) then
              do out = 1, nChainOut
@@ -664,7 +684,7 @@ contains
 
           !--Every nConvergenceTestPoint test for convergence across the chains
           if(chainCount > nBurnin .and. mod(chainCount-nBurnin, nConvergenceTestPoint) == 0) then
-             Chains_Converged = convergence_Test_GelmanRubin(ChainArray, (/nBurnin/), ConvergenceStatistic, ifree_Parameter)
+             Chains_Converged = convergence_Test_GelmanRubin(ChainArray, (/nBurnin/), ConvergenceStatistic, ifree_Parameter, 1.03e0_double)
              write(28,conv_fmt) ConvergenceStatistic
           end if
           if(allocated(ConvergenceStatistic)) deallocate(ConvergenceStatistic)
@@ -881,8 +901,8 @@ contains
 
        !--Identify the source sample as the combination of sources in each aperture
        do C = 1, size(Group_Index)
-          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
-          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+!          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
+          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
           print *, 'Identified source sample'
           call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) !--This may not work on first loop
           call Catalogue_Destruct(TSource_Catalogue)
@@ -1119,8 +1139,8 @@ contains
        print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
 !       call Maximise_Convergence_byShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
 
-       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), ' arcminutes for aperture:', i
-       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i), Core_Radius = Core_Cut_Radius(i)/60.e0_double)
+!       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), ' arcminutes for aperture:', i
+       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i))!, Core_Radius = Core_Cut_Radius(i)/60.e0_double)
        
        print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
     end do
@@ -1190,13 +1210,14 @@ contains
 
 
     !--Output Posterior--!
-    open(unit = 51, file = trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat')
-    write(fmtstring,'(I2)') size(Posteriors,1)+1 !-Assumes all posteriors described by the same posterior grid-!
-    do j = 1, size(Posteriors,3)
-       write(51, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posteriors(1,1,j), Posteriors(:,2,j)
-    end do
-    close(51)
-    print *,'Output file to: ', trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat'
+    !--Moved to Single Run Routine
+!!$    open(unit = 51, file = trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat')
+!!$    write(fmtstring,'(I2)') size(Posteriors,1)+1 !-Assumes all posteriors described by the same posterior grid-!
+!!$    do j = 1, size(Posteriors,3)
+!!$       write(51, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posteriors(1,1,j), Posteriors(:,2,j)
+!!$    end do
+!!$    close(51)
+!!$    print *,'Output file to: ', trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat'
 
 
   end subroutine DM_Profile_Variable_Posteriors_CircularAperture
