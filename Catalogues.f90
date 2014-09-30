@@ -52,6 +52,10 @@ module Catalogues
      module procedure Catalogue_Assign_byGalaxy_byIndex, Catalogue_Assign_byGalaxy_byCatalogue 
   end interface Catalogue_Assign_byGalaxy
 
+  INTERFACE Mask_Circular_Aperture
+     MODULE PROCEDURE Mask_Multiple_Circular_Aperture, Mask_Single_Circular_Aperture
+  end INTERFACE Mask_Circular_Aperture
+
   contains
 
     !---Catalogue Inforamtion Storage----!
@@ -165,7 +169,23 @@ module Catalogues
 
     end subroutine Concatonate_Catalogues
 
-    subroutine Mask_Circular_Aperture(Cat, Ap_Pos, Ap_Radius)
+    subroutine Mask_Single_Circular_Aperture(Cat, Ap_Pos, Ap_Radius)
+      !--Cuts out galaxies which fall inside an aperture radius, where the radius is in DEGREES
+      type(Catalogue), intent(inout)::Cat
+      real(double), intent(in):: Ap_Pos(:)
+      real(double), intent(in):: Ap_Radius
+
+      real(double):: tAp_Pos(1,2)
+
+      if(size(Ap_Pos) /= 2) STOP 'Mask_Single_Circular_Aperture - Aperture Position entered is not of the correct size'
+
+      tAp_Pos(1,:) = Ap_Pos
+
+      call Mask_Multiple_Circular_Aperture(Cat, tAp_Pos, (/Ap_Radius/))
+
+    end subroutine Mask_Single_Circular_Aperture
+      
+    subroutine Mask_Multiple_Circular_Aperture(Cat, Ap_Pos, Ap_Radius)
       !--Cuts out galaxies which fall inside an aperture radius, where the radius is in DEGREES
       type(Catalogue), intent(inout)::Cat
       real(double), intent(in):: Ap_Pos(:,:)
@@ -198,7 +218,7 @@ module Catalogues
          call Catalogue_Destruct(Temp_Cat)
       end do
 
-    end subroutine Mask_Circular_Aperture
+    end subroutine Mask_Multiple_Circular_Aperture
       
     subroutine Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos, Ap_Radius, Ap_Cat, Core_Radius)!, verbose)
       !--Returns a reduced catalogue containing only the galaxies in the aperture

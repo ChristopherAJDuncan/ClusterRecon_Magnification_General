@@ -355,6 +355,29 @@ contains
   end subroutine Convert_Alpha_Posteriors_to_VirialMass
 
 
+  function Select_Source_Sample(Cat, Ap_Pos, Ap_Radius)
+    !--Ap Radius must be in degrees
+    type(Catalogue), intent(in):: Cat
+    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+    type(Catalogue):: Select_Source_Sample
+
+    integer:: C
+    type(Catalogue):: tCat, tSource_Catalogue
+
+    !--Identify the source sample as the combination of sources in each aperture
+    tCat = Cat
+    do C = 1, size(Ap_Pos,1)
+       !          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
+       call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(C,:), Ap_Radius(C), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+       call Concatonate_Catalogues(Select_Source_Sample, TSource_Catalogue) 
+       call Catalogue_Destruct(TSource_Catalogue)
+       !--Mask Source Galaxies for that aperture to ensure no double counting
+       call Mask_Circular_Aperture(tCat, Ap_Pos(C,:),  Ap_Radius(C))          
+    end do
+    call Catalogue_Destruct(tCat)
+    
+  end function Select_Source_Sample
+
   !----------------------------------------------------------POSTERIOR PRODUCTION ROUTINES-------------------------------------------------------------------------------------------------------------!
 
   subroutine DM_Profile_Fitting_Simultaneous_MCMC(Cat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Output_Prefix, Blank_Field_Catalogue)
@@ -372,7 +395,7 @@ contains
     integer:: Fit_Group(:)
     character(*),intent(in):: Output_Prefix
 
-    type(Catalogue):: tSource_Catalogue
+    type(Catalogue):: tSource_Catalogue, tCat
     type(Catalogue):: Group_Cat
     real(double), dimension(Size(Ap_Pos,1))::iAp_Radius
     integer, allocatable:: Group_Index(:)
@@ -387,8 +410,10 @@ contains
     integer::nAlpha_Out = 500
     real(double):: AlphaLimit_Out(2) = (/0.05e0_double, 3.e0_double/)
 
-    character(25):: fmt, conv_fmt
+    character(500):: Combined_Chain_Output, Convergence_Test_Output, Acceptance_Rate_Output
+    character(25):: fmt, conv_fmt, acc_fmt
     character(100):: Filename
+
 
     !--Distribution Declarations
     real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:)
@@ -422,13 +447,15 @@ contains
     integer:: nMaxChain = 1000000
 
     !----Eventually to be passed in
-    logical, dimension(size(fit_Parameter)+1):: ifree_Parameter !used as a handle to tell convergence routine which parameter to check
+    logical, dimension(:),allocatable:: ifree_Parameter !used as a handle to tell convergence routine which parameter to check
 
     !--Temporary Posterior construction
     real(double),allocatable:: tMarginalised_Posterior_Grid(:), tMarginalised_Posterior(:)
     real(double), allocatable:: Combined_Chain(:,:), Combined_Likelihood(:)
-    character(500):: Combined_Chain_Output, Convergence_Test_Output
 
+    !--Testing Declarations:
+    real(double):: Time1, Time2
+    
     if(size(Ap_Radius)==1) then
        iAp_Radius = Ap_Radius(1)
     else
@@ -503,13 +530,18 @@ contains
        end do
 
        !--Identify the source sample as the combination of sources in each aperture
+       tCat = Cat
        do C = 1, size(Group_Index)
 !          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
-          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
-          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) !--This may not work on first loop
+          call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
           call Catalogue_Destruct(TSource_Catalogue)
+          !--Mask Source Galaxies for that aperture to ensure no double counting
+          call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
        end do
+       call Catalogue_Destruct(tCat)
 
+       print *, 'Source Catalogue contains:', size(Group_Cat%RA), ' of ', size(Cat%RA), 'galaxies'
 
        if(allocated(Source_Positions)) deallocate(Source_Positions)
        allocate(Source_Positions(size(Group_Cat%RA),2));
@@ -532,6 +564,7 @@ contains
        write(ChainsOutput_Filename(1), '(I3)') G
        Combined_Chain_Output = trim(adjustl(Output_Prefix))//'Group'//trim(adjustl(ChainsOutput_Filename(1)))//'_MCMC_CombinedChain.dat'
        Convergence_Test_Output = trim(adjustl(Output_Prefix))//'Group'//trim(adjustl(ChainsOutput_Filename(1)))//'_MCMC_ConvergenceTest_R.dat'
+       Acceptance_Rate_Output = trim(adjustl(Output_Prefix))//'Group'//trim(adjustl(ChainsOutput_Filename(1)))//'_MCMC_AcceptanceRate.dat'
        ChainsOutput_Filename = trim(adjustl(Output_Prefix))//'Group'//trim(adjustl(ChainsOutput_Filename(1)))//'_MCMC_Chain_'
        do M = 1, size(ChainArray)
           write(ChainsOutput_Filename(M),'(A,I1,A)') trim(adjustl(ChainsOutput_Filename(M))),M,'.dat'
@@ -540,21 +573,39 @@ contains
 
        !-Set Parameter_Start_Limits, which also sets which parameters are being varied
        !--Chain is set up to include all parameters by default, however if they are not marginalised over then the proposal distribution has width zero in that parameters direction
+       !--Chain Width specifies the typical width of the proposal distribution in that axis of parameter space
+       !--ifree_Parameter labels whether all parameters in chain are free (true) or fixed (false). When fixed, chain width is set to zero, and further in code, starting point is set to the fixed value
        nParameter_per_Cluster = size(fit_Parameter)+1 !-Increment as position requires two parameters
        allocate(Parameter_Start_Limits(size(Group_Index)*nParameter_per_Cluster, 2)); Parameter_Start_Limits = 0.e0_double
        allocate(ChainWidths(size(Group_Index)*nParameter_per_Cluster)); ChainWidths = 0.e0_double
+       allocate(ifree_Parameter(size(Group_Index)*nParameter_per_Cluster)); ifree_Parameter = .true.
        do C = 1, size(Group_Index)
+          !--Set initial values
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+1,:) = (/0.05e0_double, 2.5e0_double/) !-r200
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+2,:) = (/0.0e0_double, 0.0e0_double/) !-Concentration
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/148.7707e0_double, 149.3524e0_double/) !-RA
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/-10.291e0_double, -9.748e0_double/) !-Dec
 
-          ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.8e0_double !-r200
+          !-1.0 works well for 1 Cluster.
+          ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.1e0_double !-r200
           ChainWidths((C-1)*nParameter_per_Cluster+2) = 0.0e0_double !-Concentration (not coded up yet)
           ChainWidths((C-1)*nParameter_per_Cluster+3) = 0.03e0_double !-RA (no good reason to set this value yet)
           ChainWidths((C-1)*nParameter_per_Cluster+4) = 0.03e0_double !-Dec (ditto)
+
+          !--Set values when not free
+          if(fit_Parameter(1)==0) then !--r200
+             ifree_Parameter((C-1)*nParameter_per_Cluster+1) = .false.
+          end if
+          if(fit_Parameter(2)==0) then !--Concentration
+             ifree_Parameter((C-1)*nParameter_per_Cluster+2) = .false.
+          end if
+          if(fit_Parameter(2)==0) then !--Position
+             ifree_Parameter((C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = .false.
+             ChainWidths((C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = 0.e0_double
+          end if
        end do
 
+       !--Set starting link for chain, by randomly placing within set parameter limits
        do M = 1,size(ChainArray)
           call MCMC_StartChain_Random(Parameter_Start_Limits, ChainArray(M)%Chain)
        end do
@@ -565,11 +616,9 @@ contains
        if(fit_Parameter(1) == 0) then
           !-r200
           STOP 'Whilst r200 may not necessarily need to be fit, I cant see why one wouldnt. Therefore, I am stopping'
-          ifree_Parameter(1) = .false.
        end if
        if(fit_Parameter(2) == 0) then
           !-Concentration
-          ifree_Parameter(2) = .false.
        end if
        if(fit_Parameter(3) == 0) then
           !--Position
@@ -577,9 +626,7 @@ contains
              do M = 1, size(ChainArray)
                 ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = Ap_pos(Group_Index(C),:)
              end do
-             ChainWidths((C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = 0.e0_double
           end do
-          ifree_Parameter(3:4) = .false.
        end if
 
        !--Testing
@@ -612,6 +659,11 @@ contains
        write(conv_fmt, '(I3)') size(ChainArray(1)%Chain,2)
        conv_fmt = '('//trim(adjustl(conv_fmt))//'(e12.5,x))'
 
+       open(unit = 27, file = Acceptance_Rate_Output)
+       write(27, '(A)') '# Chain Link; Acceptance Rate by chain'
+       write(acc_fmt,'(I4)') size(Acceptance_Rate)
+       acc_fmt = '(I5,x,'//trim(adjustl(acc_fmt))//'(e10.3,x))'
+
        !--Set minimum chain length so that it is at least 20 times the burnin
        nMinChain = maxval((/nMinChain, 20*nBurnin/))
 
@@ -629,6 +681,9 @@ contains
              print *, 'WARNING: Reached the maximum number of allowed chains without convergence, exiting ~~~~~~~~~'
              exit
           end if
+          
+          !--Reset Acceptance Rate after burnin
+          if(chainCount == nBurnin) Acceptance_Rate = 0.e0_double
 
           do M = 1, size(ChainArray)
 !TESTING             print *, 'Considering chain:', M, chainCount
@@ -646,18 +701,22 @@ contains
              !--Evaluate Posterior
              !--Priors on Parameters
              !---If using position, to avoid degeneracy need alpha1>alpha2>...., and then 1 not longer necessarily labels the 1st cluster, but the largest (identifiable by location)
+!!$             call cpu_time(time1)
              if(any(tAlpha <= 0.05)) then
                 !--Put a low probability on such low values of alpha so they are never accepted
                 Likelihood(M,chainCount) = -100000
              else
                 Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), Group_Cat%Sizes, Group_Cat%MF606W, Group_Cat%Redshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
              end if
+!!$             call cpu_time(Time2)
+
+!!$             print *, 'Time per likelihood evalutation:', Time2-Time1
 
              deallocate(tAlpha, tAp_Pos)
              
              !--Test for acceptance
              if(chainCount > 1) then
-                call MCMC_accept_reject_Point_Metropolis(ChainArray(M)%Chain(chainCount-1:chainCount,:), Likelihood(M,chainCount-1:chainCount), acceptance, .true., Acceptance_Rate(M), chainCount)
+                call MCMC_accept_reject_Point_Metropolis(ChainArray(M)%Chain(chainCount-1:chainCount,:), Likelihood(M,chainCount-1:chainCount), acceptance, .true., Acceptance_Rate(M), chainCount-1)
 
                 !--Test Behaviour of priors
                 if(any( (/(ChainArray(M)%Chain(chainCount, (C-1)*nParameter_per_Cluster+1), C = 1, size(Group_Index))/) < 0.e0_double) .and. Likelihood(M,chainCount) > -100000) then
@@ -666,11 +725,15 @@ contains
                 end if
              end if
 
-             if(chainCount > 1 .and. tune_MCMC) print *, 'Chain, ChainLink, Acceptance Rate: ', M, chainCount, Acceptance_Rate(M)
-             
+             if(chainCount > 1 .and. tune_MCMC) then
+                write(*,'(A,x,I2,x,I5,x,e12.5,x, A)') 'Chain, ChainLink, Acceptance Rate: ', M, chainCount, Acceptance_Rate(M), acceptance
+                if(M == size(ChainArray)) print *, ' '
+             end if
 
           end do
 
+          !--Output acceptance rate to file
+          if(chainCount > 1) write(27, acc_fmt) chainCount, Acceptance_Rate
 
           !--Output Point to file
           if(output_Burnin .or. chainCount > nBurnin) then
@@ -696,6 +759,7 @@ contains
           close(unit = 30+out)
        end do
        close(28)
+       close(27)
 
        !--Combine all chains onto on large chain
        allocate(Combined_Chain(size(ChainArray)*size(ChainArray(1)%Chain(nBurnin+1:,1),1), size(ChainArray(1)%Chain,2))); Combined_Chain = dsqrt(-1.e0_double)
@@ -767,7 +831,7 @@ contains
 
     
     real(double),dimension(2*size(Ap_Pos,1)):: iAlpha_Limit
-    type(Catalogue):: tSource_Catalogue
+    type(Catalogue):: tSource_Catalogue, tCat
     type(Catalogue):: Group_Cat
     real(double), dimension(Size(Ap_Pos,1))::iAp_Radius
     integer, allocatable:: Group_Index(:)
@@ -899,14 +963,16 @@ contains
           end if
        end do
 
-       !--Identify the source sample as the combination of sources in each aperture
+       tCat = Cat
        do C = 1, size(Group_Index)
 !          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
-          call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
-          print *, 'Identified source sample'
-          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) !--This may not work on first loop
+          call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
           call Catalogue_Destruct(TSource_Catalogue)
+          !--Mask Source Galaxies for that aperture to ensure no double counting
+          call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
        end do
+       call Catalogue_Destruct(tCat)
        print *, 'Got source sample'
 
        if(allocated(Source_Positions)) deallocate(Source_Positions)
@@ -1137,7 +1203,7 @@ contains
     !--Identify Reduced Catalogue for each aperture--!
     do i =1, size(Ap_Cats)
        print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
-!       call Maximise_Convergence_byShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
+!       call Maximise_Convergenceb_yShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
 
 !       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), ' arcminutes for aperture:', i
        call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i))!, Core_Radius = Core_Cut_Radius(i)/60.e0_double)
