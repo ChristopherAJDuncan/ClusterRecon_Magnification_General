@@ -82,7 +82,7 @@ module Mass_Profiles
          Sigma_Critical = Sigma_Crit
       else
          if(present(Source_Redshift) == .false.) STOP 'Total_MagnificationFactor_MultipleClusters - Sigma_Crit or Source Redshift Must be entered'
-         Sigma_Critical(C) = dsqrt(-1.e0_double)
+         Sigma_Critical = dsqrt(-1.e0_double)
          D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
          do C = 1, nCl
             if(Source_Redshift <= Redshift(C)) cycle

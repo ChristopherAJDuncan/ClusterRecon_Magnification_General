@@ -1,6 +1,3 @@
-!~~To DO: Adaptive method ofr finding mode of posterior, moving towards peak, checking gradient on wither side until peak is found to within a ceertain tolerance. Would require that each cluster is evaluated on a different grid range (of alpha), and possbile complications in setting the order fo the grid
-!~~This would need to address the issue on whether renormalisation of the posterior for each galaxy is important, aseach point would need combined individually
-
 module  Bayesian_Routines
   !--Uses Bayesian Means to Calculate Posterior for the Dark Matter Profile variables--!
   !--Method must have redshifts for every galaxy (20Jan2014)--!
@@ -30,6 +27,9 @@ module  Bayesian_Routines
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
   real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
   real(double),parameter:: Lower_Redshift_Cut = 0.21
+
+  !--Parallisation Decalaration (To Be Passed In)
+  integer:: nOMPThread = 1
 
   !----MCMC Declarations-----!
   integer:: nBurnin = 50
@@ -445,13 +445,15 @@ contains
     integer:: nConvergenceTestPoint = 10
     real(double),allocatable:: ConvergenceStatistic(:)
     integer:: nMaxChain = 1000000
-
-    !----Eventually to be passed in
     logical, dimension(:),allocatable:: ifree_Parameter !used as a handle to tell convergence routine which parameter to check
 
     !--Temporary Posterior construction
     real(double),allocatable:: tMarginalised_Posterior_Grid(:), tMarginalised_Posterior(:)
     real(double), allocatable:: Combined_Chain(:,:), Combined_Likelihood(:)
+
+    !--Paralleisation Declarations
+    real(double), dimension(:), allocatable:: tSizes, tMF606W, tRedshift
+    integer:: nOpenThreads, OMP_GET_NUM_THREADS
 
     !--Testing Declarations:
     real(double):: Time1, Time2
@@ -637,7 +639,7 @@ contains
        end do
        print *, '------------------------------------------------------------------'
 
-       !________________________________________________Proceed with chain_______________________________________________________________!
+       !_____________________________________________________Proceed with chain_______________________________________________________________!
 
        !----Open output files
        !------Ensure no attempt is made to output more chains than exists
@@ -669,6 +671,15 @@ contains
 
        write(*,'(A,x,I4,x,A)') 'A minimum of:', nMinChain, ' chain links will be evaluated.'
 
+       !--Set Paralellisation definitions
+       if(nOMPThread <= 0) then
+          nOpenThreads = size(ChainArray)
+          !nOpenThreads = minval((/OMP_GET_NUM_THREADS(), size(ChainArray)/))
+       else
+          nOpenThreads = nOMPThread
+       end if
+       write(*,'(A,I3,A)') '!---- Running Parallelisation over: ', nOpenThreads, ' threads.'
+
        !--Initialise counters
        chainCount = 0; allocate(Likelihood(size(ChainArray),nMaxChain)); Acceptance_Rate = 0.e0_double
        chains_Converged = .false.
@@ -685,11 +696,24 @@ contains
           !--Reset Acceptance Rate after burnin
           if(chainCount == nBurnin) Acceptance_Rate = 0.e0_double
 
+          !_______________________Propose New Point for each chain_____________________________________________________!
+          if(chainCount > 1) then
+             do M = 1, size(ChainArray)
+                !--Take new point (skip on first run to allow for evaluation of first point
+                call MCMC_Propose_Point_TopHat(ChainArray(M)%Chain, ChainWidths)
+             end do
+          end if
+
+          !______________________EVALUATE LIKELIHOOD AT NEW CHAIN POINT________________________________________________!
+          !--Set up Temporary Source Sample array (Parallelisation does not like derived types)
+          allocate(tMF606W(size(Group_Cat%MF606W))); tMF606W = Group_Cat%MF606W
+          allocate(tRedshift(size(Group_Cat%Redshift))); tRedshift = Group_Cat%Redshift
+          allocate(tSizes(size(Group_Cat%Sizes))); tSizes = Group_Cat%Sizes
+          call OMP_SET_NUM_THREADS(nOpenThreads)
+          !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(M, tAlpha, tAp_Pos)
+          !$OMP DO
           do M = 1, size(ChainArray)
 !TESTING             print *, 'Considering chain:', M, chainCount
-
-             !--Take new point (skip on first run to allow for evaluation of first point
-             if(chainCount > 1) call MCMC_Propose_Point_TopHat(ChainArray(M)%Chain, ChainWidths)
 
              !--Set up temporary arrays to pass in free parameters
              allocate(tAlpha(size(Group_Index))); allocate(tAp_Pos(size(Group_Index),2))
@@ -701,19 +725,20 @@ contains
              !--Evaluate Posterior
              !--Priors on Parameters
              !---If using position, to avoid degeneracy need alpha1>alpha2>...., and then 1 not longer necessarily labels the 1st cluster, but the largest (identifiable by location)
-!!$             call cpu_time(time1)
              if(any(tAlpha <= 0.05)) then
                 !--Put a low probability on such low values of alpha so they are never accepted
                 Likelihood(M,chainCount) = -100000
              else
-                Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), Group_Cat%Sizes, Group_Cat%MF606W, Group_Cat%Redshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+                Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+                !DELETE- Does not work for parallelisation: Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), Group_Cat%Sizes, Group_Cat%MF606W, Group_Cat%Redshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
              end if
-!!$             call cpu_time(Time2)
-
-!!$             print *, 'Time per likelihood evalutation:', Time2-Time1
-
              deallocate(tAlpha, tAp_Pos)
-             
+          end do
+          !$OMP END PARALLEL
+          deallocate(tMF606W, tRedshift, tSizes)
+
+          !___________________________________ACCEPT/REJECT NEW POINT ON EACH CHAIN_________________________________________________!
+          do M = 1, size(ChainArray)
              !--Test for acceptance
              if(chainCount > 1) then
                 call MCMC_accept_reject_Point_Metropolis(ChainArray(M)%Chain(chainCount-1:chainCount,:), Likelihood(M,chainCount-1:chainCount), acceptance, .true., Acceptance_Rate(M), chainCount-1)
@@ -807,8 +832,8 @@ contains
   end subroutine DM_Profile_Fitting_Simultaneous_MCMC
 
 
-  recursive subroutine DM_Profile_Fitting_Simultaneous_2Cluster(Cat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Alpha_Limit, Grid_Tolerance, Alpha_Tolerance, Output_Prefix, Blank_Field_Catalogue)
-    use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors
+  subroutine DM_Profile_Fitting_Simultaneous_2Cluster(Cat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Alpha_Limit, Grid_Tolerance, Alpha_Tolerance, Output_Prefix, Blank_Field_Catalogue)
+    use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors, lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample
     use gridintervals, only: equalscale; use Integration, only: Integrate; use Interpolaters, only: Linear_Interp
     !-Routine that produces posteriors on dark matter profile free parameters, by simultaneously fitting to all clusters that belong to the same 'Fit_Group'.
     !--Fit_Group should be in assending order starting from 1, with no numerical gaps, and should hold a value for each aperture considered. The number of free parameters for each fit is therefore determined by the number of clusters considered in each group.
@@ -862,6 +887,8 @@ contains
 
     !--Temporary Allocations--!
     real(double), allocatable:: tSigma_Crit(:,:), tAp_Pos(:,:)
+    !----As Part of OPENMP
+    real(double), allocatable:: tMF606W(:), tRedshift(:), tSizes(:)
 
     !--Likelihood Evaluation Precursor Declarations
     real(double),dimension(:,:),allocatable:: Survey_Renormalised_Prior
@@ -878,6 +905,9 @@ contains
 
     !--Single Cluster Fitting Declarations
     real(double),allocatable:: Posterior_Single(:,:)
+
+    !-- Parallelisation
+    integer:: OMP_GET_NUM_THREADS
 
     if(size(Ap_Radius)==1) then
        iAp_Radius = Ap_Radius(1)
@@ -993,6 +1023,7 @@ contains
        
        if(size(Group_Index) == 1) then
           !--Do single fitting of cluster
+          print *, 'Just attempting a single fit...'
           allocate(Posterior_Single(2,size(AlphaGrid1))); Posterior_Single = dsqrt(-1.e0_double); Posterior_Single(1,:) = AlphaGrid1
           call DM_Profile_Variable_Posterior_SingleFit(Group_Cat, Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Group_Index(1),:), Posterior_Single, Output_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)
           Marginalised_Posteriors(Group_Index(1),2,:) = Linear_Interp(Marginalised_Posteriors(Group_Index(1),1,:), Posterior_Single(1,:), Posterior_Single(2,:), ExValue =1.e-100_double)
@@ -1004,17 +1035,37 @@ contains
 
        call equalscale(IAlpha_Limit(2*Group_index(2)-1), IAlpha_Limit(2*Group_index(2)), nAlpha(2), AlphaGrid2)
        
+       print *, ' '
+       write(*,'(A,2(e9.2,x),A,I4,A,I1,A)') '--Alpha is being evaluated between:', minval(AlphaGrid1), maxval(AlphaGrid1), ', in ', nAlpha(1), ' grid points (Cluster ', Group_index(1), ')'
+       write(*,'(A,2(e9.2,x),A,I4,A,I1,A)') '--Alpha is being evaluated between:', minval(AlphaGrid2), maxval(AlphaGrid2), ', in ', nAlpha(2), ' grid points (Cluster ', Group_index(2), ')'
+       print *, ' '
+
        allocate(Likelihood(nAlpha(1), nAlpha(2))); Likelihood = 0.e0_double
        
        allocate(tSigma_Crit(2,size(Sigma_Crit,2))); tSigma_Crit(1,:) = Sigma_Crit(Group_index(1),:); tSigma_Crit(2,:) = Sigma_Crit(Group_index(2),:) 
        allocate(tAp_Pos(2, 2)); tAp_pos(1,:) = Ap_Pos(Group_index(1),:); tAp_Pos(2,:) = Ap_Pos(Group_index(2),:)
-       
+
+       !-----Evaluate Posterior - Parallelisation used, however can be switched off by setting the number of threads to 1. All varabiables passed to likelihood evaluation need to be intent(in) only, and be careful of library calls which depend on global declarations.
+       allocate(tMF606W(size(Group_Cat%MF606W))); tMF606W = Group_Cat%MF606W
+       allocate(tRedshift(size(Group_Cat%Redshift))); tRedshift = Group_Cat%Redshift
+       allocate(tSizes(size(Group_Cat%Sizes))); tSizes = Group_Cat%Sizes
        !--Evaluate Posterior
+
+       call OMP_SET_NUM_THREADS(nOMPThread)
+!       call OMP_SET_NUM_THREADS(minval((/OMP_GET_NUM_THREADS(), nOMPThread/)))
+       write(*,'(A,I2,A)') '---Paralellising over:', nOMPThread, ' threads.'
+       !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(i,j)
+       !--OMP DO parallelises the *outer loop only*- is nalpha(1) == nalpha(2), this could be collapsed using collapse(2)
+       !$OMP DO
        do i = 1, nAlpha(1)
           do j = 1, nAlpha(2)
-             Likelihood(i,j) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample((/AlphaGrid1(i),AlphaGrid2(j)/), Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/Lens_Redshift,Lens_Redshift/), Group_Cat%Sizes, Group_Cat%MF606W, Group_Cat%Redshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+             Likelihood(i,j) = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/AlphaGrid1(i),AlphaGrid2(j)/), Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/Lens_Redshift,Lens_Redshift/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+             print *, 'Done:', i, j,  Likelihood(i,j)
           end do
        end do
+       !$OMP END PARALLEL
+       deallocate(tRedshift, tMF606W, tSizes)
+
        !--Convert from lnP to P
        Likelihood = dexp(Likelihood - maxval(Likelihood))
        

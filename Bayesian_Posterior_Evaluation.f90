@@ -58,12 +58,12 @@ contains
     use Interpolaters, only: Linear_Interp; use Integration
     real(double),intent(in):: Alpha(:)
     !--Mass Model Declarations
-    integer:: Profile
+    integer, intent(in):: Profile
     real(double), intent(in)::  Lens_Redshift(:), Cluster_Position(:,:) !-Cluster, RA/Dec-!
     !--Galaxy Data Input
     real(double), intent(in):: Theta(:), Magnitude(:), Source_Redshift(:), Position(:,:) !-RA,Dec-!
     !--Supplementary
-    integer:: Method
+    integer, intent(in):: Method
     real(double), intent(in):: Pr_MagGrid(:), Pr_SizeGrid(:), SM_Prior(:,:), M_Prior(:)
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
@@ -339,6 +339,7 @@ contains
              allocate(Size_Only_Prior(2)); Size_Only_Prior = 0.e0_double
              do j = 1, size(PR_SizeGrid)-1
                 if( (PR_SizeGrid(j)<= Theta/dsqrt(Effective_Magnification)) .and. ( PR_SizeGrid(j+1) > Theta/dsqrt(Effective_Magnification)) ) then
+                   print *, 'Calling Integrate'
                    Size_Only_Prior(1) = Integrate(Pr_MagGrid, Size_Only_Mag_Prior(:,j), 2, lim = Renormalisation_Magnitude_Limits)
                    Size_Only_Prior(2) = Integrate(Pr_MagGrid, Size_Only_Mag_Prior(:,j+1), 2, lim = Renormalisation_Magnitude_Limits)
                    exit

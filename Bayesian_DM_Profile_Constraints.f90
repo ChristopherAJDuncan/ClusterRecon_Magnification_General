@@ -26,6 +26,10 @@ program Bayesian_DM_Profile_Constraints
    !--Nominated_Fitting_Type sets the default means for fitting the Clusters. 0: Individually; 1: 2Cluster on coarse grid; 2: MCMC
    integer:: Nominated_Fitting_Type = 2
 
+   !--Limits on Parameter evaluation: (Applys only to two cluster so far)
+   real(double):: Parameter_Limit_Alpha(2)
+   real(double):: Parameter_Tolerance_Alpha = 0.1e0_double
+
     !----Mock Parameters-------!
     integer:: nSources = 70000
     real(double)::frac_z = 0.1e0_double
@@ -175,7 +179,7 @@ program Bayesian_DM_Profile_Constraints
 contains
 
   subroutine Parameter_Input(Input_File)
-    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits
+    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits, nOMPThread
     character(*), intent(in):: Input_File
 
     !--Internal Declarations
@@ -189,7 +193,7 @@ contains
     namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File
     namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits
-    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter
+    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter, nOMPThread, Parameter_Limit_Alpha, Parameter_Tolerance_Alpha
 
     !--Check for existence of Input File
     inquire(file = Input_File, exist = Here)
@@ -856,7 +860,7 @@ contains
        case(0) !--Individual
           call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
        case(1) !-2Cluster on coarse grid
-          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, (/0.05e0_double,2.5e0_double/), (/(0.03e0_double, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
+          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
        case(2) !-MCMC
           call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
        case default
@@ -877,7 +881,7 @@ contains
        case(0) !--Individual
           call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
        case(1) !-2Cluster on coarse grid
-          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, .false.,  Clusters_In%Fitting_Group, (/0.05e0_double,2.e0_double/), (/(0.03e0_double, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)))
+          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, .false.,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)))
        case(2) !-MCMC
           call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)))
        case default
