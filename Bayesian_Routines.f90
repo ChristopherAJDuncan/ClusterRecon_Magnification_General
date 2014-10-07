@@ -588,8 +588,8 @@ contains
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/148.7707e0_double, 149.3524e0_double/) !-RA
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/-10.291e0_double, -9.748e0_double/) !-Dec
 
-          !-1.0 works well for 1 Cluster.
-          ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.1e0_double !-r200
+          !-0.1 works well for 6 Cluster (r200 only).
+          ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.04e0_double !-r200
           ChainWidths((C-1)*nParameter_per_Cluster+2) = 0.0e0_double !-Concentration (not coded up yet)
           ChainWidths((C-1)*nParameter_per_Cluster+3) = 0.03e0_double !-RA (no good reason to set this value yet)
           ChainWidths((C-1)*nParameter_per_Cluster+4) = 0.03e0_double !-Dec (ditto)
@@ -713,7 +713,6 @@ contains
           !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(M, tAlpha, tAp_Pos)
           !$OMP DO
           do M = 1, size(ChainArray)
-!TESTING             print *, 'Considering chain:', M, chainCount
 
              !--Set up temporary arrays to pass in free parameters
              allocate(tAlpha(size(Group_Index))); allocate(tAp_Pos(size(Group_Index),2))
@@ -735,6 +734,7 @@ contains
              deallocate(tAlpha, tAp_Pos)
           end do
           !$OMP END PARALLEL
+
           deallocate(tMF606W, tRedshift, tSizes)
 
           !___________________________________ACCEPT/REJECT NEW POINT ON EACH CHAIN_________________________________________________!
