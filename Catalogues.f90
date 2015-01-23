@@ -67,7 +67,10 @@ module Catalogues
 
       logical::here
 
-      character(200)::Base_Directory = '/disk1/cajd/Size_Magnification/'
+      character(200)::Base_Directory != '/disk1/ps1/cajd/STAGES_SimultaneousFit/'!'/disk1/cajd/Size_Magnification/'
+
+      call getcwd(Base_Directory)
+      Base_Directory = trim(Base_Directory)//'/'
 
       if(allocated(Columns)) deallocate(Columns)
       allocate(Columns(15)); Columns = 0

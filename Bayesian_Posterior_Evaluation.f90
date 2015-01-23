@@ -223,13 +223,15 @@ contains
        Galaxy_Posterior_Method = 3
     case(4) !-Size mag above size data limit, Mag-Only below size data limit-!                                                                                                                              
 !DELETE       if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only under size limit, but no magnitde prior entered, stopping'
-       STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distriution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
+       STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distribution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
        !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies                                             
        if(Theta < Size_Limits(1)) then
+          !--Use Magnitude information only--!
           !MagRenorm             iSize_Limits = (/0.e0_double, Size_Limits(1)/)                                                                                                               
           Galaxy_Posterior_Method = 3
           nMagPosterior = nMagPosterior + 1
        else
+          !--Use full magnitude-size information--!
           !MagRenorm             iSize_Limits = Size_Limits
           Galaxy_Posterior_Method = 2
           nSizeMagPosterior = nSizeMagPosterior + 1

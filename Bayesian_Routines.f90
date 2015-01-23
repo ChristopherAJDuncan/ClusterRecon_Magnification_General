@@ -35,10 +35,11 @@ module  Bayesian_Routines
   integer:: nBurnin = 50
   integer:: nChains = 6, nChainOut = 6, nMinChain = 1050
   logical:: tune_MCMC = .false.
+  logical:: allow_Automatic_Exit_MCMC = .false.
   logical:: output_Burnin = .true.
-  !---Free Parameter declaration - shold be passed in eventually
-  integer::fit_Parameter(3) = (/1,0,0/) !-r_200, concentration, position
-
+  integer:: fit_Parameter(3) = (/1,0,0/) !-r_200, concentration, position
+  real(double):: centroid_Prior_Width = 0.03e0_double
+  real(double), dimension(4):: MCMC_Proposal_Width = (/0.04e0_double, 0.0e0_double, 0.0015e0_double, 0.0015e0_double/) !-r200, c, RA, Dec-!
 
   !--Overload function for Combine Posteriors
 !!$  interface Combine_Posteriors
@@ -382,7 +383,7 @@ contains
 
   subroutine DM_Profile_Fitting_Simultaneous_MCMC(Cat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Output_Prefix, Blank_Field_Catalogue)
     use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors
-    use Interpolaters, only: Linear_Interp; use MCMC; use Statistics, only: create_Histogram
+    use Interpolaters, only: Linear_Interp; use MCMC; use Statistics, only: create_Histogram; use Common_Functions, only: Pyth_distance_between_Points
     !-Routine that produces posteriors on dark matter profile free parameters, by simultaneously fitting to all clusters that belong to the same 'Fit_Group'.
     !--Fit_Group should be in assending order starting from 1, with no numerical gaps, and should hold a value for each aperture considered. The number of free parameters for each fit is therefore determined by the number of clusters considered in each group. 
 
@@ -420,7 +421,7 @@ contains
     real(double),allocatable::SizeGrid(:), MagGrid(:)
 
     !--Temporary Allocations--!
-    real(double), allocatable:: tSigma_Crit(:,:), tAp_Pos(:,:)
+    real(double), allocatable:: tSigma_Crit(:,:)
 
     !--Likelihood Evaluation Precursor Declarations
     real(double),dimension(:,:),allocatable:: Survey_Renormalised_Prior
@@ -440,7 +441,7 @@ contains
     real(double),allocatable:: Likelihood(:,:)
     real(double),allocatable:: Acceptance_Rate(:)
     logical:: Chains_Converged
-    real(double),allocatable:: tAlpha(:)
+    real(double),allocatable:: tAlpha(:), tAp_Pos(:,:), centroid_Prior_Offset(:)
     logical:: Acceptance
     integer:: nConvergenceTestPoint = 10
     real(double),allocatable:: ConvergenceStatistic(:)
@@ -585,14 +586,14 @@ contains
           !--Set initial values
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+1,:) = (/0.05e0_double, 2.5e0_double/) !-r200
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+2,:) = (/0.0e0_double, 0.0e0_double/) !-Concentration
-          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/148.7707e0_double, 149.3524e0_double/) !-RA
-          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/-10.291e0_double, -9.748e0_double/) !-Dec
+          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/maxval((/Ap_Pos(Group_Index(C),1)-centroid_Prior_Width, 148.7707e0_double/)), minval((/Ap_Pos(Group_Index(C),1)+centroid_Prior_Width, 149.3524e0_double/))/) !-RA
+          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/maxval((/Ap_Pos(Group_Index(C),2)-centroid_Prior_Width, -10.291e0_double/)), minval((/Ap_Pos(Group_Index(C),2)+centroid_Prior_Width, -9.748e0_double/))/) !-Dec
 
           !-0.1 works well for 6 Cluster (r200 only).
-          ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.04e0_double !-r200
-          ChainWidths((C-1)*nParameter_per_Cluster+2) = 0.0e0_double !-Concentration (not coded up yet)
-          ChainWidths((C-1)*nParameter_per_Cluster+3) = 0.03e0_double !-RA (no good reason to set this value yet)
-          ChainWidths((C-1)*nParameter_per_Cluster+4) = 0.03e0_double !-Dec (ditto)
+          ChainWidths((C-1)*nParameter_per_Cluster+1) = MCMC_Proposal_Width(1) !-r200
+          ChainWidths((C-1)*nParameter_per_Cluster+2) = MCMC_Proposal_Width(2) !-Concentration (not coded up yet)
+          ChainWidths((C-1)*nParameter_per_Cluster+3) = MCMC_Proposal_Width(3) !-RA
+          ChainWidths((C-1)*nParameter_per_Cluster+4) = MCMC_Proposal_Width(4) !-Dec
 
           !--Set values when not free
           if(fit_Parameter(1)==0) then !--r200
@@ -601,15 +602,26 @@ contains
           if(fit_Parameter(2)==0) then !--Concentration
              ifree_Parameter((C-1)*nParameter_per_Cluster+2) = .false.
           end if
-          if(fit_Parameter(2)==0) then !--Position
+          if(fit_Parameter(3)==0) then !--Position
              ifree_Parameter((C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = .false.
              ChainWidths((C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = 0.e0_double
           end if
        end do
 
+
        !--Set starting link for chain, by randomly placing within set parameter limits
        do M = 1,size(ChainArray)
           call MCMC_StartChain_Random(Parameter_Start_Limits, ChainArray(M)%Chain)
+          !--Start chain postions seperately, since prior is defined on an aperture (Reset over those positions set in previous step)
+          print *, 'WARNING, starting position set very small indeed to test acceptance rate, THIS NEEDS FIXED'
+          if(fit_Parameter(3) == 1) then
+             do C = 1, size(Group_Index)
+                ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = Start_MCMC_Chain_TopHatAperture(Ap_Pos(Group_Index(C),:), minval( (/0.25e0_double,0.25e0_double*centroid_Prior_Width/))) !-maximum width of 0.25 ensures that arbitrarily large  centroid_Prior can be used without placing apeture too far from center, prefactor on centroid prior notes that usually the entered position is well known
+                !--Ensure that centroid is not positioned outside survey limits
+                !-(Ignored for now, as probably shouldn't affec the result, however this would need relaxed if prior on survey RA/Dec limits imposed)
+                if(Pyth_distance_between_Points(ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4), Ap_Pos(Group_Index(C),:)) > centroid_Prior_Width) STOP 'Error in setting initial starting position for cluster'
+             end do
+          end if
        end do
 
        deallocate(Parameter_Start_Limits)
@@ -617,6 +629,13 @@ contains
        !--If a certain parameter is not being fit, set to input values (never true for r200, but possibly true for position and concentration)
        if(fit_Parameter(1) == 0) then
           !-r200
+          print *, 'Default r200 value has been set by hand, THIS SHOULD BE EDITED'
+          do C = 1, size(Group_Index)
+             ChainWidths((C-1)*nParameter_per_Cluster+1) = 0.e0_double
+             do M = 1, size(ChainArray)
+                ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+1) = 1.2e0_double
+             END do
+          END do
           STOP 'Whilst r200 may not necessarily need to be fit, I cant see why one wouldnt. Therefore, I am stopping'
        end if
        if(fit_Parameter(2) == 0) then
@@ -639,6 +658,10 @@ contains
        end do
        print *, '------------------------------------------------------------------'
 
+       print *, 'Chain width used:'
+       print *, ChainWidths
+       print *, ' '
+
        !_____________________________________________________Proceed with chain_______________________________________________________________!
 
        !----Open output files
@@ -652,7 +675,7 @@ contains
           if(output_Burnin) write(30+out, '(A)') '# Burnin is included.'
        end do
        write(fmt, '(I3)') size(ChainArray(1)%Chain,2) + 1
-       fmt = '(I7,x,'//trim(adjustl(fmt))//'(e12.5,x))'
+       fmt = '(I7,x,'//trim(adjustl(fmt))//'(e16.9,x))'
        
        !-Convergence_Test
        open(unit = 28, file = Convergence_Test_Output)
@@ -685,8 +708,9 @@ contains
        chains_Converged = .false.
        do
           !--Exit Conditions
-          if(Chains_Converged .and. chainCount >= nMinChain) exit
+          if(Chains_Converged .and. chainCount >= nMinChain .and. allow_Automatic_Exit_MCMC) exit
           chainCount = chainCount + 1
+
 
           if(chainCount > nMaxChain) then
              print *, 'WARNING: Reached the maximum number of allowed chains without convergence, exiting ~~~~~~~~~'
@@ -709,10 +733,12 @@ contains
           allocate(tMF606W(size(Group_Cat%MF606W))); tMF606W = Group_Cat%MF606W
           allocate(tRedshift(size(Group_Cat%Redshift))); tRedshift = Group_Cat%Redshift
           allocate(tSizes(size(Group_Cat%Sizes))); tSizes = Group_Cat%Sizes
+
           call OMP_SET_NUM_THREADS(nOpenThreads)
-          !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(M, tAlpha, tAp_Pos)
+          !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(M, tAlpha, tAp_Pos, centroid_Prior_Offset)
           !$OMP DO
           do M = 1, size(ChainArray)
+             if(allocated(tAlpha)) deallocate(tAlpha); if(allocated(tAp_Pos)) deallocate(tAp_Pos)
 
              !--Set up temporary arrays to pass in free parameters
              allocate(tAlpha(size(Group_Index))); allocate(tAp_Pos(size(Group_Index),2))
@@ -721,21 +747,55 @@ contains
                 tAp_Pos(C,:) = ChainArray(M)%Chain(chainCount, (C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4)
              end do
 
-             !--Evaluate Posterior
+             !__________________________________________Evaluate Posterior
              !--Priors on Parameters
              !---If using position, to avoid degeneracy need alpha1>alpha2>...., and then 1 not longer necessarily labels the 1st cluster, but the largest (identifiable by location)
              if(any(tAlpha <= 0.05)) then
                 !--Put a low probability on such low values of alpha so they are never accepted
-                Likelihood(M,chainCount) = -100000
-             else
-                Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
-                !DELETE- Does not work for parallelisation: Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), Group_Cat%Sizes, Group_Cat%MF606W, Group_Cat%Redshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+                Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)!-100000
+                cycle
              end if
-             deallocate(tAlpha, tAp_Pos)
+             if(fit_Parameter(3) == 1) then
+                !--If fitting centroid position....
+                                
+                !--Apply prior on position of centroid. Note: Care must be taken here when two clusters can share the same parameter space, as this will lead to degeneracies which should be accounted for by setting an ordering prior on alpha
+                if(allocated(centroid_Prior_Offset)) deallocate(centroid_Prior_Offset)
+                allocate(centroid_Prior_Offset(size(Group_Index))); centroid_Prior_Offset = 0.e0_double
+                centroid_Prior_Offset = (/ (Pyth_distance_between_Points(tAp_Pos(C,:), Ap_Pos(Group_Index(C),:)), C = 1, size(Group_Index)) /)
+                if(any(centroid_Prior_Offset > centroid_Prior_Width)) then
+                   !--If any of the cntroids fall outside a circular top hat centered on the entered aperture position, with width given by centroid_Prior_Width...
+                   Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)
+                   cycle
+                end if
+                
+!!$                if(real_Ordered_Array_Decreasing(tAlpha) == .false.) then
+!!$                   !--If fitting position, and Cluster N is larger than N-1 then set probability to zero
+!!$                   !----This allows parameters to be fit over the whole field space, where labelling of cluster is not conserved (i.e. returned cluster 1 is the most massive)
+!!$                   Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)
+!!$                   cycle
+!!$                end if
+             end if
+
+             !--Likelihood evaluation provided priors have been passed
+             Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+
+             if(allocated(centroid_Prior_Offset)) deallocate(centroid_Prior_Offset)
+             if(allocated(tAlpha)) deallocate(tAlpha); if(allocated(tAp_Pos)) deallocate(tAp_Pos)
           end do
           !$OMP END PARALLEL
-
           deallocate(tMF606W, tRedshift, tSizes)
+
+          !--Check that initial value of the chain has not been placed outside priors
+          if(chainCount == 1 .and. any(Likelihood(:,chainCount) <= -(huge(1.e0_double)+100.e0_double))) then
+             print *, 'MCMC - Possible error with initial positioning of chain, outside prior limits. FATAL.'
+             do M = 1, size(Likelihood,1)
+                if(Likelihood(M,1) <= (huge(1.e0_double)+100.e0_double)) then
+                   print *, '!--Chain:', M, ChainArray(M)%Chain(1,:)
+                   print *, ' '
+                end if
+             end do
+             read(*,*)
+          end if
 
           !___________________________________ACCEPT/REJECT NEW POINT ON EACH CHAIN_________________________________________________!
           do M = 1, size(ChainArray)
@@ -751,7 +811,7 @@ contains
              end if
 
              if(chainCount > 1 .and. tune_MCMC) then
-                write(*,'(A,x,I2,x,I5,x,e12.5,x, A)') 'Chain, ChainLink, Acceptance Rate: ', M, chainCount, Acceptance_Rate(M), acceptance
+                write(*,'(A,x,I2,x,I5,x,e12.5,x,L)') 'Chain, ChainLink, Acceptance Rate: ', M, chainCount, Acceptance_Rate(M), acceptance
                 if(M == size(ChainArray)) print *, ' '
              end if
 
@@ -777,7 +837,6 @@ contains
           end if
           if(allocated(ConvergenceStatistic)) deallocate(ConvergenceStatistic)
 
-          if(Chains_Converged) exit
        end do !--End of chain loop
        print *, 'Finished Chain' !--Could output maximum value using maxloc, maybe average across chains
        do out = 1, nChainOut
@@ -831,6 +890,33 @@ contains
 
   end subroutine DM_Profile_Fitting_Simultaneous_MCMC
 
+  function Start_MCMC_Chain_TopHatAperture(Ap_Center, Width)
+    use Common_Functions, only: return_Random_Set
+    real(double), intent(in):: Ap_Center(:)
+    real(double), intent(in):: Width
+
+    real(double), dimension(size(Ap_Center)):: Start_MCMC_Chain_TopHatAperture
+    real(double),dimension(size(Ap_Center)):: Ran
+    real(double):: Sum2, Pen_Width
+    integer::i
+
+    Ran = return_Random_Set(size(Ran))
+    !--Shift random onto interval [-1,1]
+    Ran = 2.e0_double*(Ran-0.5e0_double)
+
+    !--Randomly set 1st N-1 parameters
+    Sum2 = 0.e0_double
+    do i = 1, size(Ap_Center)-1
+       Start_MCMC_Chain_TopHatAperture(i) = Ap_Center(i) + Ran(i)*Width
+       Sum2 = Sum2 + (Start_MCMC_Chain_TopHatAperture(i)-Ap_Center(i))**2.e0_double
+    end do
+
+    !--Set width of penultimate co-ordinate as y = sqrt(Width - sum(x^2))
+    Pen_Width = dsqrt(Width*Width - Sum2)
+    i = size(Start_MCMC_Chain_TopHatAperture)
+    Start_MCMC_Chain_TopHatAperture(i) = Ap_Center(i) + Ran(i)*Pen_Width
+
+  end function Start_MCMC_Chain_TopHatAperture
 
   subroutine DM_Profile_Fitting_Simultaneous_2Cluster(Cat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Alpha_Limit, Grid_Tolerance, Alpha_Tolerance, Output_Prefix, Blank_Field_Catalogue)
     use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors, lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample

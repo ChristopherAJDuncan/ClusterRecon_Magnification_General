@@ -179,7 +179,7 @@ program Bayesian_DM_Profile_Constraints
 contains
 
   subroutine Parameter_Input(Input_File)
-    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits, nOMPThread
+    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits, nOMPThread, centroid_Prior_Width
     character(*), intent(in):: Input_File
 
     !--Internal Declarations
@@ -193,7 +193,7 @@ contains
     namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File
     namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits
-    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter, nOMPThread, Parameter_Limit_Alpha, Parameter_Tolerance_Alpha
+    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter, nOMPThread, Parameter_Limit_Alpha, Parameter_Tolerance_Alpha, centroid_Prior_Width
 
     !--Check for existence of Input File
     inquire(file = Input_File, exist = Here)
@@ -224,6 +224,10 @@ contains
        Core_Cut_Position(i,:) = (/Mask_Positions(2*i-1), Mask_Positions(2*i) /)
        Core_Cut_Radius(i) = Mask_Aperture_Radius(i)
     end do
+
+    !--Convert centroid_Prior_Width from arcminutes to degrees
+    centroid_Prior_Width = centroid_Prior_Width/60.e0_double
+
 
     !--Copy Input File to output directory--!
     call system('cp '//trim(Input_File)//' '//trim(Output_Directory)//'Input_File.ini')
@@ -810,17 +814,22 @@ contains
 !!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
 !!$       end if
 
-       print *, '--Cuts on Catalogue: REMOVED - NEEDS REINSTATED'
+       print *, ' '
+       print *, '-----Cutting Source Catalogue:'
        call Cut_By_PhotoMetricRedshift(Catt, Lower_Redshift_Cut) !--Cut out foreground-
        call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2))  
        call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+       print *, '------------------------------'
+       print *, ' '
 
        print *, '**Testing for Cluster contamination in the Data Catalogue'
        call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir), Masked_Survey_Area)
 
        !--Apply Input Core Cuts
-       print *, 'Masking apertures on data:', Core_Cut_Radius
+       print *, ' '
+       print *, '---Masking apertures on data:', Core_Cut_Radius
        call Mask_Circular_Aperture(Catt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
+       print *, ' '
 
        if(Set_Foreground_Masks) then
           write(*,'(A)') '!---------------------------------------------------------------------------------------------------------'

@@ -13,6 +13,8 @@ contains
 
 
   subroutine randomly_Sample_From_Distribution(Grid, PDF, Res)
+    use Common_Functions, only: return_Random_Set
+    !--This could easily be modifed to use library routines, but this has not been done (19 Dec 2014)
     !--Populates the array Res by Randomly Sampling from the PDF described by Grid and PDF--!
     !--Assumes that the grid is equally binned, and the PDF is renormalised--!
     real(double), intent(in)::Grid(:), PDF(:)
@@ -46,6 +48,9 @@ contains
     
     call RANDOM_NUMBER(Ran)
 
+!!$    allocate(Ran(nRandom)); Ran = 0.0e0_ldp
+!!$    Ran = return_Random_Set(nRandom) !#Method = 0
+
     if(size(Grid) < 4) STOP 'randomly_Sample_From_Distribution - Grid is too small, something is possibly up'
     dGrid =  Grid(2)-Grid(1)!0.5e0_double*(Grid(4)-Grid(2))
 
@@ -74,10 +79,6 @@ contains
 
     if(dabs(CumulativePDF(size(CUmulativePDF))-1.e0_double) <= 1.e-6_double) then
        CumulativePDF(size(CUmulativePDF)) = 1.e0_double
-!!$       if(CumulativePDF(size(CUmulativePDF)-1)-CumulativePDF(size(CUmulativePDF)) > 0.e0_double) then
-!!$          print *, CumulativePDF(size(CUmulativePDF)-1), CumulativePDF(size(CUmulativePDF)), CumulativePDF(size(CUmulativePDF)-1)-CumulativePDF(size(CUmulativePDF))
-!!$          STOP 'randomly_Sample_From_Distribution - Error in adjusting for rounding error - Cumulative PDF not increasing near upper limit...'
-!!$       end if
     end if
 
     if(any(Ran < 0.e0_double) .or. any(Ran > 1.e0_double)) STOP 'randomly_Sample_From_Distribution - FATAL ERROR - Random array values lies outside bounds (0,1)'
