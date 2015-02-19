@@ -535,7 +535,6 @@ contains
        !--Identify the source sample as the combination of sources in each aperture
        tCat = Cat
        do C = 1, size(Group_Index)
-!          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
           call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
           call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
           call Catalogue_Destruct(TSource_Catalogue)
@@ -761,9 +760,10 @@ contains
                 !--Apply prior on position of centroid. Note: Care must be taken here when two clusters can share the same parameter space, as this will lead to degeneracies which should be accounted for by setting an ordering prior on alpha
                 if(allocated(centroid_Prior_Offset)) deallocate(centroid_Prior_Offset)
                 allocate(centroid_Prior_Offset(size(Group_Index))); centroid_Prior_Offset = 0.e0_double
+                !--Set offset as the distance between the centroid and the centroid position entered as a first guess
                 centroid_Prior_Offset = (/ (Pyth_distance_between_Points(tAp_Pos(C,:), Ap_Pos(Group_Index(C),:)), C = 1, size(Group_Index)) /)
                 if(any(centroid_Prior_Offset > centroid_Prior_Width)) then
-                   !--If any of the cntroids fall outside a circular top hat centered on the entered aperture position, with width given by centroid_Prior_Width...
+                   !--If any of the centroids fall outside a circular top hat centered on the entered aperture position, with width given by centroid_Prior_Width...
                    Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)
                    cycle
                 end if
@@ -1889,6 +1889,7 @@ contains
     
        call Catalogue_Destruct(Cut_Catalogue)
 
+       !----Construct the prior magnitude distribution by integrating it between the entered entered size limits for the prior, NOT the survey limits
        print *, 'Producing magnitude Distribution using Integration Method'
        allocate(MagDist(size(MagGrid))); MagDist = 0.e0_double
        do i= 1, size(SizeGrid)
@@ -1916,7 +1917,7 @@ contains
        write(*,'(2(A))') 'Output to: ', trim(Output_Filename)
        
 
-    else
+    else !---Prior Read in from file---!
        Input_Filename = trim(Dir)//trim(Filename)
 
        write(*,'(2A)') 'Reading In Size-Magnitude Distribution from:', trim(Input_Filename)
@@ -1945,38 +1946,6 @@ contains
        do i= 1, size(SizeGrid)
           MagDist(i) = Integrate(SizeGrid, Dist(i,:), 2, lim = (/minval(SizeGrid), maxval(SizeGrid)/))
        end do
-
-!!$
-!!$       Input_Filename = trim(Dir)//trim(MagFilename)
-!!$
-!!$       write(*,'(2A)') 'Reading In Magnitude Distribution from:', trim(Input_Filename)
-!!$       inquire(file = Input_Filename, exist = here)
-!!$       if(here == .false.) STOP 'return_Prior_Distributions - Magnitude Distribution File does not exist, stopping...'
-!!$
-!!$       call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
-!!$       !--Output of ReadIn is (Col, Row)  
-!!$
-!!$       print *, 'Input_Array has:', size(Input_Array,1), size(Input_Array,2)
-!!$
-!!$       allocate(tMagGrid(size(Input_Array,2))); tMagGrid = 0.e0_double
-!!$       allocate(tMagDist(size(tMagGrid))); MagDist = 0.e0_double
-!!$
-!!$       tMagGrid = Input_Array(1,:)
-!!$       tMagDist = Input_Array(2,:)
-!!$
-!!$       deallocate(Input_Array)
-!!$       !--Linearly Interpolate onto Joint Size-Magnitude Distribution (this shouldn't be a problem since the output is the same as the input)--!
-!!$       allocate(MagDist(size(MagGrid))); MagDist = 0.e0_double
-!!$       call Linear_Interp(MagGrid, MagDist, tMagGrid, tMagDist)
-
-       !--Test output--!
-       Output_Filename = trim(Dir)//'Magnitude_Distribution_Prior_ReadinTest_DELETE.dat'
-       open(unit = 46, file = Output_Filename)
-       do i= 1, size(magGrid)
-          write(46, '(2(e14.7,x))') MagGrid(i), MagDist(i)
-       end do
-       close(46)
-       write(*,'(2(A))') 'Output to: ', trim(Output_Filename)
        
     end if
 

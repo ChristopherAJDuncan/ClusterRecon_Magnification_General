@@ -90,7 +90,7 @@ module Catalogues
 !!$         Columns = (/-1,10,11,-1,-1,8,12,-1,-1,-1,14,16,17,5/) !-12 (ST_Mag) could alos be 3 (ST_Mag_Best)
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
-         Filename =  'STAGES_KSBf90_RRG.cat'
+         Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib'
          Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'

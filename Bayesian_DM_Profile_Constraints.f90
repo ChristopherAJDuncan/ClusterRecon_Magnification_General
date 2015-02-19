@@ -35,7 +35,7 @@ program Bayesian_DM_Profile_Constraints
     real(double)::frac_z = 0.1e0_double
     integer:: nRealisations = 10
     !-These should be passed in-!
-    logical:: Mock_Do_SL = .true., Mock_Do_Cluster_Contamination = .true.
+    logical:: Mock_Do_SL = .true., Mock_Do_Cluster_Contamination = .false.
     integer:: Mock_Contaminant_Cluster_Single = 2
     character(500):: Mock_Contaminant_File = 'THISFILE'
 
