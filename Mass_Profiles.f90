@@ -3,6 +3,10 @@ module Mass_Profiles
   use Param_Types
   implicit none
 
+  INTERFACE get_Lensing_Quantities
+     module procedure get_Lensing_Quantities_SingleSource
+  END INTERFACE get_Lensing_Quantities
+
   INTERFACE SMD_SIS
      module procedure SMD_SIS_Array, SMD_SIS_Scalar
   END INTERFACE SMD_SIS
@@ -54,6 +58,8 @@ module Mass_Profiles
       integer:: C, nCl
       real(double):: Gamma1, Gamma2, Kappa, Gamma
       real(double):: KappaT, Gamma1T, Gamma2T, GammaT
+      
+      real(double):: mag_Factor
 
       integer, save:: callcount = 0
 
@@ -69,14 +75,50 @@ module Mass_Profiles
          end function Total_MagnificationFactor_MultipleClusters
       END INTERFACE
 
-      if(Profile /=3) STOP 'Total_MagnificationFactor_MultipleClusters - I can only do this for NFW for now'
+      if(present(Sigma_Crit)) then
+         call get_Lensing_Quantities_SingleSource(Profile, Position, Cluster_Pos, Param, Redshift, Sigma_Crit = Sigma_Crit, magnification_Factor = mag_Factor)
+      elseif(present(Source_Redshift)) then
+         call get_Lensing_Quantities_SingleSource(Profile, Position, Cluster_Pos, Param, Redshift, Source_Redshift = Source_Redshift, magnification_Factor = mag_Factor)
+      else
+         STOP 'Total_MagnificationFactor_MultipleClusters - Sigma_Critical or Source_Redshift must be entered'
+      end if
+
+      Total_MagnificationFactor_MultipleClusters = mag_Factor
+
+    end function Total_MagnificationFactor_MultipleClusters
+
+    subroutine get_Lensing_Quantities_SingleSource(Profile, Position, Cluster_Pos, Param, Redshift, Source_Redshift, Sigma_Crit, reduced_Shear, shear, convergence, magnification_Factor, tangential_Shear)
+      !----THIS SHOULD BE THE GO-TO ROUTINE FOR LENSING QUANTITIES.
+      !--Returns all lensing quantities for a single source and multiple lens system.
+      !--Author: cajd
+      !--Date: 23Feb2015
+      !--Tested 23Feb2015 and good to numerical error (amplitude of shear signal untested. Mag Factor (including shear amplitude) agrees with previous routines [which this has replaced], and they were well tested)
+
+      use Cosmology, only: angular_diameter_distance_fromRedshift
+      integer, intent(in):: Profile
+      real(double), intent(in)::Param(:), Redshift(:)
+      real(double),intent(in):: Cluster_Pos(:,:) !-Cluster, Position (RA,Dec)-!                                                                                                                                   
+      real(double), intent(in):: Position(2) !-RA, Dec-!
+                                                                                                                                                          
+      real(double), intent(in),optional:: Source_Redshift, Sigma_Crit(:)
+      real(double), intent(out), optional:: reduced_Shear(2), shear(2), convergence, magnification_Factor, tangential_Shear
+
+      real(double):: dRA, dDec, Theta, Radius,  D_l, D_ls, D_s, DR
+      real(double):: sin2Theta, cos2Theta
+      real(double), dimension(size(Cluster_Pos,1)):: Sigma_Critical
+      integer:: C, nCl
+      real(double):: Gamma1, Gamma2, Kappa, Gamma
+      real(double):: KappaT, Gamma1T, Gamma2T, GammaT, MGammaT !-T = Total Quantities
+
+      integer, save:: callcount = 0
+
+      if(Profile /=3) STOP 'get_Lensing_Quantities_SingleSource - I can only do this for NFW for now'
 
       if(size(Redshift) /= size(Cluster_Pos,1)) STOP 'Total_MagnificationFactor_MultipleClusters - Error in redshift - not correct size'
       if(size(Param) /= size(Cluster_Pos,1)) STOP 'Total_MagnificationFactor_MultipleClusters - Error in DM Profile Param - not correct size'
 
-      KappaT = 0.e0_double; Gamma1T = 0.e0_double; Gamma2T = 0.e0_double
+      KappaT = 0.e0_double; Gamma1T = 0.e0_double; Gamma2T = 0.e0_double; MGammaT = 0.e0_double; GammaT = 0.e0_double;
       nCl = size(Cluster_Pos,1)
-
 
       !--Get Sigma_Critical
       if(present(Sigma_Crit)) then
@@ -98,51 +140,157 @@ module Mass_Profiles
       callcount = callcount + 1
 
       do C = 1, nCl
-
          !--Skip if Source Redshift is less than the lens redshift
          if(isNaN(Sigma_Critical(C)) .or. dabs(Sigma_Critical(C)) > huge(1.e0_double) .or. (Sigma_Critical(C) < 0.e0_double)) cycle
 
-         !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
-         dRA = dabs(Position(1)-Cluster_Pos(C, 1))
-         dDec = dabs(Position(2) - Cluster_Pos(C,2))
-         !--Theta needs edited to account for four quadrants (ok for just the magnification part)
-         Theta = atan(dDec/dRA)
-         
+         dRA = (Position(1)-Cluster_Pos(C, 1))
+         dDec = (Position(2) - Cluster_Pos(C,2))
+         dR = dsqrt( dRA*dRA + dDec*dDec ) !-in Degrees-!
+
          D_l = angular_diameter_distance_fromRedshift(0.e0_double, Redshift(C))
-         Radius = dsqrt( dRA*dRA + dDec*dDec ) !-in Degrees-!
-         Radius = D_l*Radius*(3.142e0_double/180.e0_double) !-In Mpc/h-!
-         !-Get Gamma Tangential
-         Gamma = Differential_SMD_Scalar(Radius, Redshift(C), Param(C))
-         Gamma = Gamma/Sigma_Critical(C)
-         Kappa = SMD_NFW_Scalar(Radius, Redshift(C), Param(C))
-         Kappa = Kappa/Sigma_Critical(C)
-         
-         !--Convert to Shear Components on Cartesian Frame, which is universal to all lensing clusters
-         Gamma1 = -1.e0_double*Gamma*dcos(2.e0_double*Theta)
-         Gamma2 = -1.e0_double*Gamma*dsin(2.e0_double*Theta)
+         Radius = D_l*dR*(3.14159265359e0_double/180.e0_double) !-In Mpc/h-!
 
-         if(isNaN(Gamma1)) print *, 'Gamma1 is a NaN:', Gamma, dcos(2.e0_double*Theta), Theta, Redshift(C), Sigma_Critical(C), Kappa, Param(C), Radius, D_l
-         if(isNaN(Gamma2)) print *, 'Gamma2 is a NaN:', Gamma, dsin(2.e0_double*Theta), Theta, Redshift(C), Sigma_Critical(C), Kappa, Param(C), Radius, D_l
+         !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
+         if(present(reduced_Shear) .or. present(shear) .or. present(magnification_Factor) .or. present(tangential_Shear)) then
 
-         !--Get Summed Quantities
-         KappaT = KappaT + Kappa
-         Gamma1T = Gamma1T + Gamma1
-         Gamma2T = Gamma2T + Gamma2
+            !-Get Gamma Tangential
+            Gamma = Differential_SMD_Scalar(Radius, Redshift(C), Param(C))
+            Gamma = Gamma/Sigma_Critical(C)
+
+            !--Get angular transformation
+            sin2Theta = 2.e0_double*((dDec*dRA)/(dR*dR))
+            cos2Theta = 2.e0_double*((dRA*dRA)/(dR*dR)) - 1.e0_double
+                        
+            !--Convert to Shear Components on Cartesian Frame, which is universal to all lensing clusters
+            Gamma1 = -1.e0_double*Gamma*cos2Theta
+            Gamma2 = -1.e0_double*Gamma*sin2Theta
+
+            if(isNaN(Gamma1)) print *, 'Gamma1 is a NaN:', Gamma, Redshift(C), Sigma_Critical(C), Param(C), Radius, D_l
+            if(isNaN(Gamma2)) print *, 'Gamma2 is a NaN:', Gamma, Redshift(C), Sigma_Critical(C), Param(C), Radius, D_l
+            
+            !--Get Summed Quantities (sum over all clusters)
+            Gamma1T = Gamma1T + Gamma1
+            Gamma2T = Gamma2T + Gamma2
+
+            GammaT = GammaT + Gamma
+         end if
+
+         if(present(reduced_Shear) .or. present(convergence) .or. present(magnification_Factor)) then
+            !--Get Convergence Part--!
+            Kappa = SMD_NFW_Scalar(Radius, Redshift(C), Param(C))
+            Kappa = Kappa/Sigma_Critical(C)
+            KappaT = KappaT + Kappa
+         end if
       end do
 
-      !--Calculate Magnification Factor from total quantities
-      GammaT = dsqrt(Gamma1T*Gamma1T + Gamma2T*Gamma2T)
-      if(isNaN(GammaT)) then
-         print *, 'Multiple Clusters: GammaT is a NaN (Gamma1T, Gamma2T, KappaT, Radius, Sigma_Critical, Theta, (/Param/)):', Gamma1T, Gamma2T, KappaT, Radius, Sigma_Critical, Theta, Param
+      !---Set Outputs
+      if(present(shear)) then
+         shear = (/Gamma1T, Gamma2T/)
       end if
 
-      Total_MagnificationFactor_MultipleClusters = 1.e0_double/( ((1.e0_double-KappaT)**2.e0_double) - GammaT*GammaT)
-      
-      if(isNaN(Total_MagnificationFactor_MultipleClusters)) then
-         print *, 'Total Magnification is a NaN:', KappaT, GammaT
+      if(present(reduced_Shear)) then
+         reduced_Shear = (/Gamma1T, Gamma2T/)/(1.e0_double- KappaT)
       end if
 
-    end function Total_MagnificationFactor_MultipleClusters
+      if(present(convergence)) then
+         convergence = KappaT
+      end if
+
+      if(present(magnification_Factor)) then
+         MGammaT = dsqrt(Gamma1T*Gamma1T + Gamma2T*Gamma2T)
+         magnification_Factor = 1.e0_double/( ((1.e0_double-KappaT)**2.e0_double) - MGammaT*MGammaT)
+      end if
+
+      if(present(tangential_Shear)) then
+         tangential_Shear = GammaT
+      end if
+
+    end subroutine get_Lensing_Quantities_SingleSource
+
+!!$    function get_Cartesian_Shear_NFW(Profile, Position, Cluster_Pos, Param, Redshift, Source_Redshift, Sigma_Crit, get_Reduced_Shear)
+!!$      !--Gets the tangential shear analytically, rotates to cartesian co-ordiantes.
+!!$      !--Returns 2-element real(double) array containing gamma_1, gamma_2, (or g_1, g_2 if get_Reduced_Shear == True)
+!!$      integer, intent(in):: Profile
+!!$      real(double), intent(in)::Param(:), Redshift(:)
+!!$      real(double),intent(in):: Cluster_Pos(:,:) !-Cluster, Position (RA,Dec)-!                                                                                                                                   
+!!$      real(double), intent(in):: Position(2) !-RA, Dec-!                                                                                                                                                          
+!!$      real(double), intent(in),optional:: Source_Redshift, Sigma_Crit(:)
+!!$
+!!$      logical:: optional:: get_Reduced_Shear
+!!$
+!!$
+!!$      if(Profile /=3) STOP 'Total_MagnificationFactor_MultipleClusters - I can only do this for NFW for now'
+!!$
+!!$      if(size(Redshift) /= size(Cluster_Pos,1)) STOP 'Total_MagnificationFactor_MultipleClusters - Error in redshift - not correct size'
+!!$      if(size(Param) /= size(Cluster_Pos,1)) STOP 'Total_MagnificationFactor_MultipleClusters - Error in DM Profile Param - not correct size'
+!!$
+!!$      KappaT = 0.e0_double; Gamma1T = 0.e0_double; Gamma2T = 0.e0_double
+!!$      nCl = size(Cluster_Pos,1)
+!!$
+!!$
+!!$      !--Get Sigma_Critical
+!!$      if(present(Sigma_Crit)) then
+!!$         if(size(Sigma_Crit) /= nCl) STOP 'Total_MagnificationFactor_MultipleClusters - Sigma_Crit entered not of the correct size'
+!!$         Sigma_Critical = Sigma_Crit
+!!$      else
+!!$         if(present(Source_Redshift) == .false.) STOP 'Total_MagnificationFactor_MultipleClusters - Sigma_Crit or Source Redshift Must be entered'
+!!$         Sigma_Critical = dsqrt(-1.e0_double)
+!!$         D_s = angular_diameter_distance_fromRedshift(0.e0_double, Source_Redshift)
+!!$         do C = 1, nCl
+!!$            if(Source_Redshift <= Redshift(C)) cycle
+!!$            if(Source_Redshift < 0.e0_double) STOP 'Total_MagnificationFactor_MultipleClusters - Source Redshift Entered invalid (negative)'
+!!$            D_l = angular_diameter_distance_fromRedshift(0.e0_double, Redshift(C))
+!!$            D_ls = angular_diameter_distance_fromRedshift(Redshift(C), Source_Redshift)
+!!$            Sigma_Critical(C) = 1.66492e18_double*(D_s/(D_l*D_ls))
+!!$         end do
+!!$      end if
+!!$
+!!$      callcount = callcount + 1
+!!$
+!!$      do C = 1, nCl
+!!$         !--Skip if Source Redshift is less than the lens redshift
+!!$         if(isNaN(Sigma_Critical(C)) .or. dabs(Sigma_Critical(C)) > huge(1.e0_double) .or. (Sigma_Critical(C) < 0.e0_double)) cycle
+!!$
+!!$         !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
+!!$         dRA = dabs(Position(1)-Cluster_Pos(C, 1))
+!!$         dDec = dabs(Position(2) - Cluster_Pos(C,2))
+!!$         !--Theta needs edited to account for four quadrants (ok for just the magnification part)
+!!$         Theta = atan(dDec/dRA)
+!!$         
+!!$         D_l = angular_diameter_distance_fromRedshift(0.e0_double, Redshift(C))
+!!$         Radius = dsqrt( dRA*dRA + dDec*dDec ) !-in Degrees-!
+!!$         Radius = D_l*Radius*(3.142e0_double/180.e0_double) !-In Mpc/h-!
+!!$
+!!$         !-Get Gamma Tangential
+!!$         Gamma = Differential_SMD_Scalar(Radius, Redshift(C), Param(C))
+!!$         Gamma = Gamma/Sigma_Critical(C)
+!!$         
+!!$         !--Convert to Shear Components on Cartesian Frame, which is universal to all lensing clusters
+!!$         Gamma1 = -1.e0_double*Gamma*dcos(2.e0_double*Theta)
+!!$         Gamma2 = -1.e0_double*Gamma*dsin(2.e0_double*Theta)
+!!$
+!!$         if(isNaN(Gamma1)) print *, 'Gamma1 is a NaN:', Gamma, dcos(2.e0_double*Theta), Theta, Redshift(C), Sigma_Critical(C), Kappa, Param(C), Radius, D_l
+!!$         if(isNaN(Gamma2)) print *, 'Gamma2 is a NaN:', Gamma, dsin(2.e0_double*Theta), Theta, Redshift(C), Sigma_Critical(C), Kappa, Param(C), Radius, D_l
+!!$
+!!$         !--Get Summed Quantities
+!!$         Gamma1T = Gamma1T + Gamma1
+!!$         Gamma2T = Gamma2T + Gamma2
+!!$
+!!$         if(get_Reduced_Shear) then
+!!$            Kappa = SMD_NFW_Scalar(Radius, Redshift(C), Param(C))
+!!$            Kappa = Kappa/Sigma_Critical(C)
+!!$            KappaT = KappaT + Kappa
+!!$         end if
+!!$      end do
+!!$
+!!$      if(get_Reduced_Shear) then
+!!$         Gamma1T = Gamma1T/(1.e0_double- KappaT)
+!!$         Gamma2T = Gamma2T/(1.e0_double- KappaT)
+!!$      end if
+!!$
+!!$      get_Cartesian_Shear_NFW = (/Gamma1T, Gamma2T/)
+!!$
+!!$    end function get_Cartesian_Shear_NFW
 
     subroutine Halo_Mass(Profile, Param, Param_Error, Integrated_Mass, Mass_Error, Redshift)
       !--Gets Virial Radius for SMD type and returns Halo Mass--!
