@@ -91,7 +91,7 @@ contains
           nGal_Ignored_NaN = nGal_Ignored_NaN + 1
           cycle
        end if
-
+       
        Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit)
     end do
 
@@ -177,6 +177,7 @@ contains
     !--Internal Decalrations that could eventually be set/passed in
     logical:: Enforce_Weak_Lensing = .false., Cuts_Renormalise_Likelihood = .true.
 
+
     !--Error Catching on Input---!
     if(size(Alpha) /= size(Distance_From_Mass_Center) .or. (size(Alpha) /= size(Lens_Redshift))) then
        print *,  'Likelihood_Evaluation_atVirialRadius - Error on input of Mass Profile variables:'
@@ -259,7 +260,7 @@ contains
     do z = 1, nZ !-Vary source redshift
        !--Set Sigma Critical for that galaxy, across all lenses
        if(Known_Redshift) then
-          Do l = 1, size(Sigma_Crit,1)
+          Do l = 1, size(Sigma_Crit,1) !--Get Sigma_Critical for all lenses by interpolation
              Galaxy_Sigma_Critical(l) = Linear_Interp(Source_Redshift, RedshiftGrid, Sigma_Crit(l,:))
           end Do
        else
@@ -288,7 +289,6 @@ contains
           STOP 'DM_Profile_Variable_Posterior - fatal error - Invalid Profile value entered'
        end select
 
-       
        if(isNaN(Effective_Magnification)) then
           print *, 'Magnification Factor is a NaN:', Distance_From_Mass_Center, Alpha, Lens_Redshift, Galaxy_Sigma_Critical*1.e18_double
           STOP
@@ -307,7 +307,6 @@ contains
           RedshiftPDF = CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if
        
-
        !--Construct the correctly renormalised prior
        Renormalisation_Size_Limits = iSize_Limits/dsqrt(Effective_Magnification)
        Renormalisation_Magnitude_Limits = iMag_Limits + 2.5e0_double*dlog10(Effective_Magnification)
@@ -327,7 +326,6 @@ contains
           Kappa_Renormalised_MagPrior = M_Prior
        end if
        
-
        select case(Galaxy_Posterior_Method)
        case(1) !--Size-Only--!
           !--Evaluate p_{theta_0, m_0}*p_{z|m_0} for the whole magnitude grid                                                                                                                                
@@ -507,10 +505,15 @@ contains
        RedshiftGrid(z) = Redshift_Lower + (z-1)*((Redshift_Higher-Redshift_Lower)/(nRedshift_Sampling-1))
     end do
 
-    !--Get Sigma_Critical for each point on the Redshift PDF grid--!                                                                                                                     
+    !--Get Sigma_Critical for each point on the Redshift PDF grid--!                                        
+
     allocate(Sigma_Crit(size(Lens_Redshift),size(RedshiftGrid))); Sigma_Crit = 0.e0_double
     do C = 1, size(Lens_Redshift)
        do z = 1, size(RedshiftGrid)
+          if(RedshiftGrid(z) <= Lens_Redshift(C)) then
+             Sigma_Crit(C,z) = 1.e100_double !as multiplied by 10^18 before passing to mass profile code
+             cycle
+          end if
           D_l = angular_diameter_distance_fromRedshift(0.e0_double, Lens_Redshift(C))
           D_s = angular_diameter_distance_fromRedshift(0.e0_double, RedshiftGrid(z))
           D_ls = angular_diameter_distance_fromRedshift(Lens_Redshift(C), RedshiftGrid(z))

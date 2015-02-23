@@ -38,8 +38,11 @@ module  Bayesian_Routines
   logical:: allow_Automatic_Exit_MCMC = .false.
   logical:: output_Burnin = .true.
   integer:: fit_Parameter(3) = (/1,0,0/) !-r_200, concentration, position
-  real(double):: centroid_Prior_Width = 0.03e0_double
-  real(double), dimension(4):: MCMC_Proposal_Width = (/0.04e0_double, 0.0e0_double, 0.0015e0_double, 0.0015e0_double/) !-r200, c, RA, Dec-!
+  real(double), allocatable:: centroid_Prior_Width(:)
+  real(double), dimension(4):: MCMC_Proposal_Width = (/0.02e0_double, 0.0e0_double, 0.0005e0_double, 0.0005e0_double/) !-r200, c, RA, Dec-!
+  !----Proposal Width:
+  !--- 4 Cluster: (/0.04e0_double, 0.0e0_double, 0.0015e0_double, 0.0015e0_double/)
+  !--- 6 Cluster: (/0.02e0_double, 0.0e0_double, 0.0005e0_double, 0.0005e0_double/)
 
   !--Overload function for Combine Posteriors
 !!$  interface Combine_Posteriors
@@ -381,14 +384,15 @@ contains
 
   !----------------------------------------------------------POSTERIOR PRODUCTION ROUTINES-------------------------------------------------------------------------------------------------------------!
 
-  subroutine DM_Profile_Fitting_Simultaneous_MCMC(Cat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Output_Prefix, Blank_Field_Catalogue)
+  subroutine DM_Profile_Fitting_Simultaneous_MCMC(Cat, Ap_Pos, Ap_Radius, Lens_Redshift, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Output_Prefix, Blank_Field_Catalogue)
     use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors
+    use Foreground_Clusters, only: get_distance_between_Clusters
     use Interpolaters, only: Linear_Interp; use MCMC; use Statistics, only: create_Histogram; use Common_Functions, only: Pyth_distance_between_Points
     !-Routine that produces posteriors on dark matter profile free parameters, by simultaneously fitting to all clusters that belong to the same 'Fit_Group'.
     !--Fit_Group should be in assending order starting from 1, with no numerical gaps, and should hold a value for each aperture considered. The number of free parameters for each fit is therefore determined by the number of clusters considered in each group. 
 
     type(Catalogue), intent(in)::Cat
-    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:), Lens_Redshift(:)
     real(double),intent(out),allocatable::Marginalised_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-! 
     character(*), intent(in):: Distribution_Directory
     logical, intent(in):: reproduce_Prior
@@ -406,6 +410,7 @@ contains
     character(500):: Group_Output_Prefix
 
     real(double),allocatable:: Source_Positions(:,:)
+    real(double), dimension(size(Ap_Pos,1), size(Ap_Pos,1)):: angularDistance_betweenClusters
 
     !--Result Output Decalrations
     integer::nAlpha_Out = 500
@@ -421,7 +426,7 @@ contains
     real(double),allocatable::SizeGrid(:), MagGrid(:)
 
     !--Temporary Allocations--!
-    real(double), allocatable:: tSigma_Crit(:,:)
+    real(double), allocatable:: tSigma_Crit(:,:), tLens_Redshift(:)
 
     !--Likelihood Evaluation Precursor Declarations
     real(double),dimension(:,:),allocatable:: Survey_Renormalised_Prior
@@ -429,7 +434,6 @@ contains
     real(double),allocatable:: RedshiftGrid(:)
     real(double),allocatable::Sigma_Crit(:,:)    
     real(double),allocatable:: MagnificationGrid(:), Renormalisation_by_Magnification(:), MagOnly_Renormalisation_by_Magnification(:)
-    real(double)::Lens_Redshift = 0.165e0_double    
 
     !--MCMC routines
     type(Array_of_MCMCChains),allocatable::ChainArray(:)
@@ -469,6 +473,8 @@ contains
     !--Error Catching on Fit Group
     if(size(Fit_Group) /= size(Ap_Pos,1)) STOP 'DM_Profile_Fitting_Simultaneous - Fit_Group entered is not of the correct size.'
     if(minval(Fit_Group) /= 1) STOP 'DM_Profile_Fitting_Simultaneous - Fit_Group entered does not satisfy minimum value conditions (should be 1)'
+    
+    if(size(Lens_Redshift) /= size(Ap_Pos,1)) STOP 'DM_Profile_Fitting_Simultaneous - Lens Redshift Entered not of correct size:, one redshift per cluster should be supplied'
 
     !_____________________________________________________________________________Process of Posterior Evaluation_____________________________________________________________________________!
     !--Construct/Read in prior distribution
@@ -496,7 +502,7 @@ contains
     end if
 
     !--Get Precursor
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, (/(Lens_Redshift,i=1,size(Fit_Group))/), Lower_Redshift_Cut, Output_Prefix)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix)
 
     deallocate(Joint_Size_Magnitude_Distribution, Magnitude_Distribution)
 
@@ -506,7 +512,10 @@ contains
        Marginalised_Posteriors(:,1,i) = (/(AlphaLimit_Out(1) + (i-1)*((AlphaLimit_Out(2)-AlphaLimit_Out(1))/(nAlpha_Out-1)),j=1,size(Marginalised_Posteriors,1))/)
     end do
 
-    do G = 1, 100 !-Assume no more than 100 group will be present
+    !--Get the angular distance between clusters being considered
+    angularDistance_betweenClusters = get_distance_between_Clusters(Ap_Pos)
+
+    do G = 1, 100 !-Assume no more than 100 groups will be present
        !--Find all clusters with that grouping
        !---Group Index contains the index of the clusters within that group, and can be used to access the correct Aperture Location and Radius. Size of Group_Index is the number of free parameters being used
        allocate(Group_Index(count(Fit_Group == G)));
@@ -551,8 +560,10 @@ contains
 
        !--Set up temporary arrays of Sigma_Critical (usually aperture position)
        allocate(tSigma_Crit(size(Group_Index),size(Sigma_Crit,2))); !tSigma_Crit(1,:) = Sigma_Crit(Group_index(1),:); tSigma_Crit(2,:) = Sigma_Crit(Group_index(2),:) 
+       allocate(tLens_Redshift(size(Group_Index)));
        do C = 1, size(Group_index)
           tSigma_Crit(C,:) = Sigma_Crit(Group_Index(C),:)
+          tLens_Redshift(C) = Lens_Redshift(Group_Index(C))
        end do
 
        !--Check for overlap between clusters
@@ -572,6 +583,26 @@ contains
           write(ChainsOutput_Filename(M),'(A,I1,A)') trim(adjustl(ChainsOutput_Filename(M))),M,'.dat'
        end do
 
+
+       !---Edit centroid_Prior_Width to avoid overalp between nearby clusters
+       if(allocated(centroid_Prior_Width) == .false.) then
+          STOP '\n DM_Profile_Fitting_Simultaneous_MCMC - FATAL ERROR - centroid_Prior_Width is not allocated. Exiting.'
+       end if
+!!$       if(count(centroid_Prior_Width >= 0) /= 1 .and. count(centroid_Prior_Width >= 0) /= size(Ap_Pos,1)) then
+!!$          STOP '\n DM_Profile_Fitting_Simultaneous_MCMC - FATAL ERROR - centroid_Prior_Width is allocated, but does not have the correct size (1 or nCluster). Exiting.'
+!!$       end if
+
+       do i = 1, size(Group_Index)
+          do j = 1, size(Group_Index)
+             if (i == j) cycle
+             if((angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < centroid_Prior_Width(Group_Index(i))) .or. (angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < centroid_Prior_Width(Group_Index(j)))) then !-If overlap then
+                !--Set priorWidth for one cluster to half the distance between clusters, only if that is smaller than the input
+                centroid_Prior_Width(Group_Index(i)) = min(centroid_Prior_Width(Group_Index(i)), 0.5e0_double*angularDistance_betweenClusters(Group_Index(i),Group_Index(j)))
+                !-- set other clusters priorWidth to the remaining distance between the clusters
+                centroid_Prior_Width(Group_Index(j)) = min(centroid_Prior_Width(Group_Index(j)),angularDistance_betweenClusters(Group_Index(i),Group_Index(j))-centroid_Prior_Width(Group_Index(i)))
+             end if
+          end do
+       end do
 
        !-Set Parameter_Start_Limits, which also sets which parameters are being varied
        !--Chain is set up to include all parameters by default, however if they are not marginalised over then the proposal distribution has width zero in that parameters direction
@@ -613,12 +644,12 @@ contains
           call MCMC_StartChain_Random(Parameter_Start_Limits, ChainArray(M)%Chain)
           !--Start chain postions seperately, since prior is defined on an aperture (Reset over those positions set in previous step)
           print *, 'WARNING, starting position set very small indeed to test acceptance rate, THIS NEEDS FIXED'
-          if(fit_Parameter(3) == 1) then
+          if(fit_Parameter(3) == 1) then !--If fitting centroid position
              do C = 1, size(Group_Index)
-                ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = Start_MCMC_Chain_TopHatAperture(Ap_Pos(Group_Index(C),:), minval( (/0.25e0_double,0.25e0_double*centroid_Prior_Width/))) !-maximum width of 0.25 ensures that arbitrarily large  centroid_Prior can be used without placing apeture too far from center, prefactor on centroid prior notes that usually the entered position is well known
+                ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = Start_MCMC_Chain_TopHatAperture(Ap_Pos(Group_Index(C),:), minval( (/0.25e0_double,0.25e0_double*centroid_Prior_Width(Group_Index(C))/))) !-maximum width of 0.25 ensures that arbitrarily large  centroid_Prior can be used without placing apeture too far from center, prefactor on centroid prior notes that usually the entered position is well known
                 !--Ensure that centroid is not positioned outside survey limits
                 !-(Ignored for now, as probably shouldn't affec the result, however this would need relaxed if prior on survey RA/Dec limits imposed)
-                if(Pyth_distance_between_Points(ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4), Ap_Pos(Group_Index(C),:)) > centroid_Prior_Width) STOP 'Error in setting initial starting position for cluster'
+                if(Pyth_distance_between_Points(ChainArray(M)%Chain(1,(C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4), Ap_Pos(Group_Index(C),:)) > centroid_Prior_Width(Group_Index(C))) STOP 'Error in setting initial starting position for cluster'
              end do
           end if
        end do
@@ -711,6 +742,8 @@ contains
           chainCount = chainCount + 1
 
 
+          print *, 'Considering Chain Link:', chainCount
+
           if(chainCount > nMaxChain) then
              print *, 'WARNING: Reached the maximum number of allowed chains without convergence, exiting ~~~~~~~~~'
              exit
@@ -777,7 +810,7 @@ contains
              end if
 
              !--Likelihood evaluation provided priors have been passed
-             Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift, i = 1, size(tAlpha))/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+             Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, tLens_Redshift, tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
 
              if(allocated(centroid_Prior_Offset)) deallocate(centroid_Prior_Offset)
              if(allocated(tAlpha)) deallocate(tAlpha); if(allocated(tAp_Pos)) deallocate(tAp_Pos)
@@ -873,7 +906,7 @@ contains
 
        deallocate(Combined_Chain, Combined_Likelihood)
 
-       deallocate(ChainsOutput_Filename, Likelihood, Source_Positions, tSigma_Crit, Group_Index, ChainWidths)
+       deallocate(ChainsOutput_Filename, Likelihood, Source_Positions, tSigma_Crit, Group_Index, ChainWidths, tLens_Redshift)
        call Catalogue_Destruct(Group_Cat)
 
        do M = 1, size(ChainArray)

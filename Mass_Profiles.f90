@@ -55,6 +55,8 @@ module Mass_Profiles
       real(double):: Gamma1, Gamma2, Kappa, Gamma
       real(double):: KappaT, Gamma1T, Gamma2T, GammaT
 
+      integer, save:: callcount = 0
+
       INTERFACE 
          real(double) function Total_MagnificationFactor_MultipleClusters(Profile, Position, Cluster_Pos, Param, Redshift, Source_Redshift, Sigma_Crit)
            use Param_Types
@@ -93,6 +95,8 @@ module Mass_Profiles
          end do
       end if
 
+      callcount = callcount + 1
+
       do C = 1, nCl
 
          !--Skip if Source Redshift is less than the lens redshift
@@ -101,6 +105,7 @@ module Mass_Profiles
          !--Get angle wrt centre of cluster, on cartesian co-ordinate frame
          dRA = dabs(Position(1)-Cluster_Pos(C, 1))
          dDec = dabs(Position(2) - Cluster_Pos(C,2))
+         !--Theta needs edited to account for four quadrants (ok for just the magnification part)
          Theta = atan(dDec/dRA)
          
          D_l = angular_diameter_distance_fromRedshift(0.e0_double, Redshift(C))
@@ -116,8 +121,8 @@ module Mass_Profiles
          Gamma1 = -1.e0_double*Gamma*dcos(2.e0_double*Theta)
          Gamma2 = -1.e0_double*Gamma*dsin(2.e0_double*Theta)
 
-         if(isNaN(Gamma1)) print *, 'Gamma1 is a NaN:', Gamma, dcos(2.e0_double*Theta), Theta
-         if(isNaN(Gamma2)) print *, 'Gamma2 is a NaN:', Gamma, dsin(2.e0_double*Theta), Theta
+         if(isNaN(Gamma1)) print *, 'Gamma1 is a NaN:', Gamma, dcos(2.e0_double*Theta), Theta, Redshift(C), Sigma_Critical(C), Kappa, Param(C), Radius, D_l
+         if(isNaN(Gamma2)) print *, 'Gamma2 is a NaN:', Gamma, dsin(2.e0_double*Theta), Theta, Redshift(C), Sigma_Critical(C), Kappa, Param(C), Radius, D_l
 
          !--Get Summed Quantities
          KappaT = KappaT + Kappa
@@ -399,6 +404,8 @@ module Mass_Profiles
       else
          SMD_NFW_Scalar = ( (2.e0_double*rs*delta_c*rho_c)/(x*x - 1.e0_double) )*(1.e0_double - (2.e0_double/dsqrt(x*x-1.e0_double))*atan(dsqrt((x-1.e0_double)/(1.e0_double+x))) )
       end if
+
+
 
     end function SMD_NFW_Scalar
 

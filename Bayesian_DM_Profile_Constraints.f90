@@ -119,7 +119,7 @@ program Bayesian_DM_Profile_Constraints
 
 
   write(*,'(A, x, e12.5)') 'Aperture Radius HAS BEEN SET TO (Arcminute):', Aperture_Radius_ArcMin
-  call distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
+  call print_distance_between_Clusters(Clusters%Position, Clusters%Redshift(1))
   
   !-Set Simultaneous Fitting Method According to cluster input. If all memebers of fit group are distinct, then use the individual fitting.
   !--If more than two clusters share the same group, then use the MCMC method
@@ -205,6 +205,7 @@ contains
     !--Set default for internal declarations
     Mask_Positions = dsqrt(-1.e0_double) !-Set to NaN
     Mask_Aperture_Radius = dsqrt(-1.e0_double)
+    allocate(centroid_Prior_Width(100)); centroid_Prior_Width = -1.
 
     open(unit = 92, file = Input_File)
 
@@ -226,6 +227,7 @@ contains
     end do
 
     !--Convert centroid_Prior_Width from arcminutes to degrees
+    if(count(centroid_Prior_Width >= 0) == 1) centroid_Prior_Width = centroid_Prior_Width(1)
     centroid_Prior_Width = centroid_Prior_Width/60.e0_double
 
 
@@ -871,7 +873,7 @@ contains
        case(1) !-2Cluster on coarse grid
           call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
        case(2) !-MCMC
-          call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
+          call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
        case default
           STOP 'INVALID Fitting Method has been entered'
        end select
@@ -892,7 +894,7 @@ contains
        case(1) !-2Cluster on coarse grid
           call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, .false.,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)))
        case(2) !-MCMC
-          call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)))
+          call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)))
        case default
           STOP 'INVALID Fitting Method has been entered'
        end select
