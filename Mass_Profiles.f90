@@ -735,7 +735,7 @@ module Mass_Profiles
       !Omega_matter = 1.e0_double
       Omega_matter = (rho_c0*0.3e0_double*((1+z)**3.e0_double)/rho_c)
 
-      M200 = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(r200**3.e0_double) * rho_c * Omega_Matter !-Could also use rho_bar = rho_crit * Omega_matter(z) (eg CH08)
+      M200 = ( (800e0_double*3.142e0_double)/(3.e0_double) )*(r200**3.e0_double) * rho_c * Omega_Matter
 
       !--Get Concentration/rs
       if(present(r_s)) then

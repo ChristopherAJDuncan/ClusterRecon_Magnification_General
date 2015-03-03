@@ -1183,7 +1183,7 @@ module Catalogues
       character(len = *),intent(in)::Output_filename
       logical,intent(in),optional::Pad
 
-      logical::iPad
+      logical::iPad !--Pad with zeros?--!
       integer::i
 
       if(present(Pad)) then
@@ -1193,6 +1193,7 @@ module Catalogues
       end if
 
       open(unit = 30, file =  trim(adjustl(Output_Filename)))
+      write(30, '(A)') '## 1:nTile; 2:RA; 3:Dec; 4:x; 5:y; 6:Magnitude; 7:MagError; 8: Flux; 9: FluxError; 10: Size; 11:g1; 12:g2'
       do i = 1, size(Cat%Sizes)
          if(iPad) then
             if(trim(adjustl(Cat%Sizes_Label))=='FWHM') then
