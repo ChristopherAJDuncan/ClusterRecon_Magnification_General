@@ -91,7 +91,7 @@ module Catalogues
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 32, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'

@@ -9,6 +9,17 @@ INTERFACE CH08_redshift_distribution
    module procedure CH08_redshift_distribution_Scalar, CH08_redshift_distribution_Array
 END INTERFACE CH08_redshift_distribution
 
+INTERFACE redshift_Distribution_byLookup
+   module procedure redshift_Distribution_byLookup_Array, redshift_Distribution_byLookup_Scalar
+END INTERFACE redshift_Distribution_byLookup
+
+type LookupTable
+   real(double),allocatable:: xGrid(:), yGrid(:)
+   real(double), allocatable:: LT(:,:)
+end type LookupTable
+type(LookupTable), private:: LT_RedshiftDistribution
+
+
 contains
 
 
@@ -127,6 +138,146 @@ contains
 
 
   !---------------REDSHIFT DISTRIBUTIONS--------------------------------------------------------!
+
+  function redshift_Distribution_byLookup_Scalar(Apparent_Magnitude, Redshift)
+    real(double), intent(in)::Apparent_Magnitude, Redshift
+    real(double):: redshift_Distribution_byLookup_Scalar
+
+    real(double):: PDF(1)
+
+    PDF = redshift_Distribution_byLookup_Array(Apparent_Magnitude, (/Redshift/))
+
+    redshift_Distribution_byLookup_Scalar = PDF(1)
+
+  end function redshift_Distribution_byLookup_Scalar
+    
+
+  function redshift_Distribution_byLookup_Array(Apparent_Magnitude, Grid) RESULT(PDF)
+    !--Wrapper Routine for use of redshift distribution lookup. If lookup does not exisit/ has not been created, then this will create it
+    use Interpolaters, only: Linear_Interp
+    real(double), intent(in)::Apparent_Magnitude
+    real(double), intent(in)::Grid(:)
+    real(double)::PDF(size(Grid))
+
+    !--Internal Declarations
+    integer:: nM, nZ, Z
+
+    !--Lookup Declarations
+    integer:: Index
+    real(double):: Width
+
+    !--Create Lookup on fine redshift Grid
+    if(allocated(LT_RedshiftDistribution%LT) == .false.) then
+       STOP 'redshift_Distribution_byLookup_Array: FATAL: Lookup Table not initialised'
+    end if
+
+    !--Error Catching
+    if(allocated(LT_RedshiftDistribution%xGrid) == .false. .or. allocated(LT_RedshiftDistribution%yGrid) == .false.) then
+       STOP 'redshift_Distribution_byLookup_Array - Error in setting lookup table use: Grids not allocated'
+    end if
+
+    if(size(LT_RedshiftDistribution%xGrid) /= size(LT_RedshiftDistribution%LT,1) .or. size(LT_RedshiftDistribution%yGrid) /= size(LT_RedshiftDistribution%LT,2)) STOP 'redshift_Distribution_byLookup_Array - Error in setting lookup table use: Grids not conformal with Table'
+
+    if(Apparent_Magnitude > maxval(LT_RedshiftDistribution%xGrid) .or. Apparent_Magnitude < minval(LT_RedshiftDistribution%xGrid)) then
+       print *, 'Input, Range:', Apparent_Magnitude, minval(LT_RedshiftDistribution%xGrid), maxval(LT_RedshiftDistribution%xGrid)
+       STOP 'redshift_Distribution_byLookup_Array - FATAL - Apparent Magnitude entered falls outside range of lookup table'
+    end if
+
+    !--Find Magnitude on Grid
+    Width =  LT_RedshiftDistribution%xGrid(2)- LT_RedshiftDistribution%xGrid(1)
+    Index = nint((Apparent_Magnitude-LT_RedshiftDistribution%xGrid(1))/Width) + 1
+
+    if(Index < 1 .or. Index > size(LT_RedshiftDistribution%xGrid)) then
+       STOP 'LookupTable: Error getting apparent magnitude of grid'
+    end if
+
+    !--Interpolate on redshift grid
+    !--Linear Interpolate on 1D array
+    PDF = Linear_Interp(Grid, LT_RedshiftDistribution%yGrid, LT_RedshiftDistribution%LT(Index,:), ExValue = 0.e0_double)
+
+    !--2D interpolation - More accurate (but different only < 1% when dm = 0.01 over index approach), but marginally slower
+!!$    do z = 1, size(Grid)
+!!$       PDF(z) = Linear_Interp(Apparent_Magnitude, Grid(z), LT_RedshiftDistribution%xGrid, LT_RedshiftDistribution%yGrid, LT_RedshiftDistribution%LT, ExValue = 0.e0_double)
+!!$    end do
+
+  end function redshift_Distribution_byLookup_Array
+
+
+  subroutine create_redshiftDistribution_LookupTable(MagLimits, zLimits, OutputDirectory)
+    !___--- Construct the redshift distribution lookup table (stored as a private global parameter)
+    real(double), intent(in):: MagLimits(3), zLimits(3) !--Lower, Upper, Width
+    character(*), intent(in),optional:: OutputDirectory
+
+    real(double), allocatable:: tPDF(:)
+
+    integer:: nZ, nM, M
+    character(500):: fmt, filename
+
+    INTERFACE 
+       subroutine create_redshiftDistribution_LookupTable(MagLimits, zLimits, OutputDirectory)
+         use Param_Types
+         real(double), intent(in):: MagLimits(3), zLimits(3) !--Lower, Upper, Width
+         
+         character(*), intent(in),optional:: OutputDirectory
+       end subroutine create_redshiftDistribution_LookupTable
+    END INTERFACE
+
+    print *, ' '
+    print *, 'Constructing Redshift Distribution Look-Up Table............................'
+    print *, ' '
+
+
+    if(allocated(LT_RedshiftDistribution%xGrid)) deallocate(LT_RedshiftDistribution%xGrid)
+    if(allocated(LT_RedshiftDistribution%yGrid)) deallocate(LT_RedshiftDistribution%yGrid)
+    if(allocated(LT_RedshiftDistribution%LT)) deallocate(LT_RedshiftDistribution%LT)
+
+    nM = (MagLimits(2)-MagLimits(1))/MagLimits(3)
+    nZ = (zLimits(2)-zLimits(1))/zLimits(3)
+    
+    allocate(LT_RedshiftDistribution%xGrid(nM)); LT_RedshiftDistribution%xGrid = 0.
+    allocate(LT_RedshiftDistribution%yGrid(nZ)); LT_RedshiftDistribution%yGrid = 0.
+    allocate(LT_RedshiftDistribution%LT(nM, nZ)); LT_RedshiftDistribution%LT = 0.
+
+    LT_RedshiftDistribution%xGrid = (/ (MagLimits(1) + (M-1)*MagLimits(3), M = 1, size(LT_RedshiftDistribution%xGrid)) /)
+    LT_RedshiftDistribution%yGrid = (/ (zLimits(1) + (M-1)*zLimits(3), M = 1, size(LT_RedshiftDistribution%yGrid)) /)
+
+    do M = 1, size(LT_RedshiftDistribution%xGrid)
+       call CH08_redshift_distribution_Array(LT_RedshiftDistribution%xGrid(M), LT_RedshiftDistribution%yGrid, tPDF)
+
+       if(size(tPDF)/= size( LT_RedshiftDistribution%LT,2)) STOP 'create_redshiftDistribution_LookupTable: Error in setting Redshift distribution for given magnitude: Returned PDF not conformal'
+
+        LT_RedshiftDistribution%LT(M,:) = tPDF
+
+       deallocate(tPDF)
+    end do
+
+    !--Output
+    if(present(OutputDirectory)) then
+       Filename = trim(adjustl(OutputDirectory))//'Redshift_Distribution_Lookup.dat'
+       open(unit = 31, file = Filename)
+
+       !-_Write Header_-!
+       write(31, '(A)') '# First Row is Redshift Grid, First Column is magnitude, Other is p(z|m)'
+       
+       write(fmt,*) size(LT_RedshiftDistribution%yGrid)+1
+       fmt = '('//trim(adjustl(fmt))//'(e14.7,x))'
+       !-_Write First Row_-!
+       write(31, fmt) 0., LT_RedshiftDistribution%yGrid
+       do M = 1, size(LT_RedshiftDistribution%xGrid)
+          write(31, fmt) LT_RedshiftDistribution%xGrid(M), LT_RedshiftDistribution%LT(M,:)
+       end do
+
+       close(31)
+       write(*,'(A)') '--- Output Redshift Distribution Lookup to:', trim(Filename)
+    end if
+
+    print *, ' '
+    print *, 'Redshift Distribution Look-Up Table Constructed'
+    print *, ' '
+
+
+  end subroutine create_redshiftDistribution_LookupTable
+
   subroutine CH08_redshift_distribution_Array(Apparent_Magnitude, Grid, PDF)
     !--Returns a PDF for the redshift distribution, used in CH08, which is a Smail et al. distribution with apparent-magnitude-dependent median redshift--!
     real(double), intent(in)::Apparent_Magnitude
@@ -185,6 +336,7 @@ contains
 
   end function CH08_redshift_distribution_Scalar
 
+
   subroutine Analytic_Source_Redshift_Distribution(alpha, beta, z_med, Redshift, pdf, Output_Directory)
     use nr, only: gammln
     real(double), intent(in)::Redshift(:)
@@ -203,8 +355,6 @@ contains
     allocate(PDF(size(Redshift))); PDF = -1.e0_double
 
     if (z_med <= 0.e0_double) STOP 'Analytic_Source_Redshift_Distribution - MEDIAN REDSHIFT NEGATIVE OR ZERO, FATAL'
-
-
 
     AreaUnderCurve = 0.e0_double
     select case(Method)
@@ -243,6 +393,7 @@ contains
 
 
   subroutine get_Redshift_Distribution_MagnitudeBinning_byCatalogue(MagBins, Redshifts, PDF, RefCat, Output_Dir)
+    !--Constructs the redhsift distribution p(z,m) [or p(z|m)?] from a reference catalogue
     use Catalogues; use Statistics, only: variance_discrete, median
     real(double), intent(out),allocatable:: Redshifts(:)
     real(double), intent(out),allocatable::pdf(:,:) !-Redshift Bin, GridValue-!

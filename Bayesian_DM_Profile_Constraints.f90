@@ -15,6 +15,9 @@ program Bayesian_DM_Profile_Constraints
    character(500):: Distribution_Input = ' '
    logical::ReEvaluate_Distribution = .true.
 
+   !--Run Time Declarations
+   real:: Start_Time, End_Time
+
    !--Eventually want these to be passed in
    logical:: Set_Foreground_Masks = .false.
    real(double):: Masked_Survey_Area = 822.5666e0_double !- Defaults: 1089 (Mocks), 822.566577778 (Data)
@@ -102,6 +105,9 @@ program Bayesian_DM_Profile_Constraints
      if(Cluster_Filename(1:1) /= '/') STOP 'Input Cluster Filename MUST be referenced using an absolute address, stopping...'
      if(Output_Directory(1:1) /= '/') STOP 'Output Directory MUST be referenced using an absolute address, stopping...'
   end if
+
+  !--Start Counting CPUTime---!
+  call cpu_time(Start_Time)
   
   !--Set double Identifier if zero--!
   if(Catalogue_Identifier(1) == 0) then
@@ -175,6 +181,16 @@ program Bayesian_DM_Profile_Constraints
   case default
      STOP 'Run_type Entered not supported'
   end select
+
+  call cpu_time(End_Time)
+  print *, ' '
+  print *, ' '
+  print *, '______ Finished Program Normally __________'
+  print *, ' Run Time:', End_Time-Start_Time, ' seconds'
+  print *, '___________________________________________'  
+  print *, ' '
+  print *, ' '
+  
 
 contains
 
@@ -829,7 +845,7 @@ contains
 
        !--Apply Input Core Cuts
        print *, ' '
-       print *, '---Masking apertures on data:', Core_Cut_Radius
+       print *, '---Masking apertures on data (As Input):', Core_Cut_Radius
        call Mask_Circular_Aperture(Catt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
        print *, ' '
 
@@ -863,7 +879,9 @@ contains
 
        print *, '--Cuts on Prior:'
        call Cut_By_PhotoMetricRedshift(BFCatt, Lower_Redshift_Cut) !--Cut out foreground-
-       print *, '**Applying Masks to Prior Catalogue:'
+
+       print *, ' '
+       write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
        call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
        print *, ' '
 

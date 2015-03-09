@@ -368,6 +368,9 @@ contains
     integer:: C
     type(Catalogue):: tCat, tSource_Catalogue
 
+    print *, 'Called Select Source Sample. Press enter to continue (expected deprecated)'
+    read(*,*)
+
     !--Identify the source sample as the combination of sources in each aperture
     tCat = Cat
     do C = 1, size(Ap_Pos,1)
@@ -387,7 +390,7 @@ contains
   subroutine DM_Profile_Fitting_Simultaneous_MCMC(Cat, Ap_Pos, Ap_Radius, Lens_Redshift, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Output_Prefix, Blank_Field_Catalogue)
     use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors
     use Foreground_Clusters, only: get_distance_between_Clusters
-    use Interpolaters, only: Linear_Interp; use MCMC; use Statistics, only: create_Histogram; use Common_Functions, only: Pyth_distance_between_Points
+    use Interpolaters, only: Linear_Interp; use MCMC; use Statistics, only: create_Histogram; use Common_Functions, only: Pyth_distance_between_Points; use Matrix_Methods, only: Sort_Array; use Variable_Tests, only: real_Ordered_Array_Decreasing
     !-Routine that produces posteriors on dark matter profile free parameters, by simultaneously fitting to all clusters that belong to the same 'Fit_Group'.
     !--Fit_Group should be in assending order starting from 1, with no numerical gaps, and should hold a value for each aperture considered. The number of free parameters for each fit is therefore determined by the number of clusters considered in each group. 
 
@@ -405,7 +408,7 @@ contains
     real(double), dimension(Size(Ap_Pos,1))::iAp_Radius
     integer, allocatable:: Group_Index(:)
 
-    integer:: C,G,i,j
+    integer:: C,G,i,j, counter
 
     character(500):: Group_Output_Prefix
 
@@ -452,6 +455,15 @@ contains
     integer:: nMaxChain = 1000000
     logical, dimension(:),allocatable:: ifree_Parameter !used as a handle to tell convergence routine which parameter to check
 
+    !---Mass Grouping
+    type MassGrouping
+       integer, allocatable:: ClusterIndex(:)
+    end type MassGrouping
+    type(MassGrouping),allocatable:: MassOrderingGroup(:)
+    integer, allocatable:: cluster_MassOrdering_Groups(:)
+    real(double), allocatable:: MO_tr200(:)
+    logical:: Enforce_Mass_Ordering
+
     !--Temporary Posterior construction
     real(double),allocatable:: tMarginalised_Posterior_Grid(:), tMarginalised_Posterior(:)
     real(double), allocatable:: Combined_Chain(:,:), Combined_Likelihood(:)
@@ -462,6 +474,7 @@ contains
 
     !--Testing Declarations:
     real(double):: Time1, Time2
+    real:: Time_ChainLink_Start, Time_ChainLink_End
     
     if(size(Ap_Radius)==1) then
        iAp_Radius = Ap_Radius(1)
@@ -548,6 +561,7 @@ contains
           call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
           call Catalogue_Destruct(TSource_Catalogue)
           !--Mask Source Galaxies for that aperture to ensure no double counting
+          print *, '--__ Applying mask to temporary Catalogue as part of MCMC, to ensure no double counting...'
           call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
        end do
        call Catalogue_Destruct(tCat)
@@ -588,21 +602,61 @@ contains
        if(allocated(centroid_Prior_Width) == .false.) then
           STOP '\n DM_Profile_Fitting_Simultaneous_MCMC - FATAL ERROR - centroid_Prior_Width is not allocated. Exiting.'
        end if
-!!$       if(count(centroid_Prior_Width >= 0) /= 1 .and. count(centroid_Prior_Width >= 0) /= size(Ap_Pos,1)) then
-!!$          STOP '\n DM_Profile_Fitting_Simultaneous_MCMC - FATAL ERROR - centroid_Prior_Width is allocated, but does not have the correct size (1 or nCluster). Exiting.'
-!!$       end if
 
-       do i = 1, size(Group_Index)
-          do j = 1, size(Group_Index)
-             if (i == j) cycle
-             if((angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < centroid_Prior_Width(Group_Index(i))) .or. (angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < centroid_Prior_Width(Group_Index(j)))) then !-If overlap then
-                !--Set priorWidth for one cluster to half the distance between clusters, only if that is smaller than the input
-                centroid_Prior_Width(Group_Index(i)) = min(centroid_Prior_Width(Group_Index(i)), 0.5e0_double*angularDistance_betweenClusters(Group_Index(i),Group_Index(j)))
-                !-- set other clusters priorWidth to the remaining distance between the clusters
-                centroid_Prior_Width(Group_Index(j)) = min(centroid_Prior_Width(Group_Index(j)),angularDistance_betweenClusters(Group_Index(i),Group_Index(j))-centroid_Prior_Width(Group_Index(i)))
-             end if
+!!$ !!---This section of code edits the centroid prior width entered for the cluster to avoid cluster overlap----!
+!!$       do i = 1, size(Group_Index)
+!!$          do j = 1, size(Group_Index)
+!!$             if (i == j) cycle
+!!$             if((angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < centroid_Prior_Width(Group_Index(i))) .or. (angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < centroid_Prior_Width(Group_Index(j)))) then !-If overlap then
+!!$                !--Set priorWidth for one cluster to half the distance between clusters, only if that is smaller than the input
+!!$                centroid_Prior_Width(Group_Index(i)) = min(centroid_Prior_Width(Group_Index(i)), 0.5e0_double*angularDistance_betweenClusters(Group_Index(i),Group_Index(j)))
+!!$                !-- set other clusters priorWidth to the remaining distance between the clusters
+!!$                centroid_Prior_Width(Group_Index(j)) = min(centroid_Prior_Width(Group_Index(j)),angularDistance_betweenClusters(Group_Index(i),Group_Index(j))-centroid_Prior_Width(Group_Index(i)))
+!!$             end if
+!!$          end do
+!!$       end do
+!!$ !!--------------------------------------------------------------------------------------------------------------!
+
+       !!--- Set Size Ordering groups for the clusters ---!!
+       if(enforce_Mass_Ordering) then
+          !---Find Groups which are close together (within centroid prior limits)
+          allocate(cluster_MassOrdering_Groups(size(Group_Index))); cluster_MassOrdering_Groups = 0.
+          do i = 1, size(Group_Index)
+             do j = i+1, size(Group_Index)
+                if(i == j) cycle
+                if((angularDistance_betweenClusters(Group_Index(i), Group_Index(j)) < (centroid_Prior_Width(Group_Index(i)) + centroid_Prior_Width(j)) )) then !-If overlap then
+                   if(cluster_MassOrdering_Groups(i) == 0) then
+                      !--Create New Group
+                      cluster_MassOrdering_Groups(i) = maxval(cluster_MassOrdering_Groups) + 1
+                   end if
+                   !--Append to Group
+                   cluster_MassOrdering_Groups(j) = cluster_MassOrdering_Groups(i)
+                end if
+             end do
           end do
-       end do
+          
+          allocate(MassOrderingGroup(maxval(cluster_MassOrdering_Groups)))
+          do i = 1, size(MassOrderingGroup)
+             allocate(MassOrderingGroup(i)%ClusterIndex(count(cluster_MassOrdering_Groups == i))); MassOrderingGroup(i)%ClusterIndex = 0
+             counter = 0
+             do j = 1, size(cluster_MassOrdering_Groups)
+                if(cluster_MassOrdering_Groups(j) == i) then
+                   counter = counter + 1
+                   MassOrderingGroup(i)%ClusterIndex(counter) = j
+                end if
+             end do
+
+             print *, ' '
+             print *, 'Mass Grouping:', i, ':', MassOrderingGroup(i)%ClusterIndex
+             print *, ' '
+
+          end do
+
+
+          
+          deallocate(cluster_MassOrdering_Groups)
+       end if
+
 
        !-Set Parameter_Start_Limits, which also sets which parameters are being varied
        !--Chain is set up to include all parameters by default, however if they are not marginalised over then the proposal distribution has width zero in that parameters direction
@@ -613,7 +667,7 @@ contains
        allocate(ChainWidths(size(Group_Index)*nParameter_per_Cluster)); ChainWidths = 0.e0_double
        allocate(ifree_Parameter(size(Group_Index)*nParameter_per_Cluster)); ifree_Parameter = .true.
        do C = 1, size(Group_Index)
-          !--Set initial values
+
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+1,:) = (/0.05e0_double, 2.5e0_double/) !-r200
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+2,:) = (/0.0e0_double, 0.0e0_double/) !-Concentration
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/maxval((/Ap_Pos(Group_Index(C),1)-centroid_Prior_Width, 148.7707e0_double/)), minval((/Ap_Pos(Group_Index(C),1)+centroid_Prior_Width, 149.3524e0_double/))/) !-RA
@@ -637,7 +691,7 @@ contains
              ChainWidths((C-1)*nParameter_per_Cluster+3:(C-1)*nParameter_per_Cluster+4) = 0.e0_double
           end if
        end do
-
+       
 
        !--Set starting link for chain, by randomly placing within set parameter limits
        do M = 1,size(ChainArray)
@@ -655,6 +709,28 @@ contains
        end do
 
        deallocate(Parameter_Start_Limits)
+
+
+       !--Rearrange Starting r200 if mass ordering is enforced
+       if(enforce_Mass_Ordering) then
+          do i = 1, size(MassOrderingGroup)
+             do M = 1,size(ChainArray)
+                allocate(MO_tr200(size(MassOrderingGroup(i)%ClusterIndex))); 
+                do j = 1, size(MO_tr200)
+                   MO_tr200(j) = ChainArray(M)%Chain(1,(MassOrderingGroup(i)%ClusterIndex(j)-1)*nParameter_per_Cluster+1)
+                end do
+                   !--Sort Cluster Index by starting r200
+                MO_tr200 = Sort_Array(MO_tr200, Decreasing = .true.)
+
+                do j = 1, size(MO_tr200)
+                   ChainArray(M)%Chain(1,(MassOrderingGroup(i)%ClusterIndex(j)-1)*nParameter_per_Cluster+1) = MO_tr200(j)
+                end do
+
+                deallocate(MO_tr200)
+             end do
+          end do
+       end if
+
 
        !--If a certain parameter is not being fit, set to input values (never true for r200, but possibly true for position and concentration)
        if(fit_Parameter(1) == 0) then
@@ -766,8 +842,10 @@ contains
           allocate(tRedshift(size(Group_Cat%Redshift))); tRedshift = Group_Cat%Redshift
           allocate(tSizes(size(Group_Cat%Sizes))); tSizes = Group_Cat%Sizes
 
+          call CPU_TIME(Time_ChainLink_Start)
+
           call OMP_SET_NUM_THREADS(nOpenThreads)
-          !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(M, tAlpha, tAp_Pos, centroid_Prior_Offset)
+          !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(M, tAlpha, tAp_Pos, centroid_Prior_Offset, MO_tr200)
           !$OMP DO
           do M = 1, size(ChainArray)
              if(allocated(tAlpha)) deallocate(tAlpha); if(allocated(tAp_Pos)) deallocate(tAp_Pos)
@@ -800,13 +878,28 @@ contains
                    Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)
                    cycle
                 end if
+
+
+                if(enforce_Mass_Ordering) then
+                   do i = 1, size(MassOrderingGroup) !--For each group
+                      allocate(MO_tr200(size(MassOrderingGroup(i)%ClusterIndex)));
+
+                      !--Isolate r200 values for that group
+                      do j = 1, size(MO_tr200)
+                         MO_tr200(j) = tAlpha(MassOrderingGroup(i)%ClusterIndex(j))
+                      end do
+
+                      !--Test that r200 is decreasing
+                      if(real_Ordered_Array_Decreasing(MO_tr200) == .false.) then
+                         !--If fitting position, and Cluster N is larger than N-1 then set probability to zero
+                         !----This allows parameters to be fit over the whole field space, where labelling of cluster is not conserved (i.e. returned cluster 1 is the most massive)
+                         Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)
+                         cycle
+                      end if
+                      deallocate(MO_tr200)
+                   end do
+                end if
                 
-!!$                if(real_Ordered_Array_Decreasing(tAlpha) == .false.) then
-!!$                   !--If fitting position, and Cluster N is larger than N-1 then set probability to zero
-!!$                   !----This allows parameters to be fit over the whole field space, where labelling of cluster is not conserved (i.e. returned cluster 1 is the most massive)
-!!$                   Likelihood(M,chainCount) = -1.e0_ldp*huge(1.e0_ldp)
-!!$                   cycle
-!!$                end if
              end if
 
              !--Likelihood evaluation provided priors have been passed
@@ -817,7 +910,6 @@ contains
           end do
           !$OMP END PARALLEL
           deallocate(tMF606W, tRedshift, tSizes)
-
           !--Check that initial value of the chain has not been placed outside priors
           if(chainCount == 1 .and. any(Likelihood(:,chainCount) <= -(huge(1.e0_double)+100.e0_double))) then
              print *, 'MCMC - Possible error with initial positioning of chain, outside prior limits. FATAL.'
@@ -869,6 +961,9 @@ contains
              write(28,conv_fmt) ConvergenceStatistic
           end if
           if(allocated(ConvergenceStatistic)) deallocate(ConvergenceStatistic)
+
+          call CPU_TIME(Time_ChainLink_End)
+          print *, '--ChainLink took:', Time_ChainLink_End-Time_ChainLink_Start, ' seconds'
 
        end do !--End of chain loop
        print *, 'Finished Chain' !--Could output maximum value using maxloc, maybe average across chains
@@ -1119,6 +1214,7 @@ contains
           call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
           call Catalogue_Destruct(TSource_Catalogue)
           !--Mask Source Galaxies for that aperture to ensure no double counting
+          print *, '--__Applying mask as part of 2Cluster, to enusre no double counting...'
           call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
        end do
        call Catalogue_Destruct(tCat)
@@ -1171,7 +1267,6 @@ contains
        !--Evaluate Posterior
 
        call OMP_SET_NUM_THREADS(nOMPThread)
-!       call OMP_SET_NUM_THREADS(minval((/OMP_GET_NUM_THREADS(), nOMPThread/)))
        write(*,'(A,I2,A)') '---Paralellising over:', nOMPThread, ' threads.'
        !$OMP PARALLEL DEFAULT(SHARED), PRIVATE(i,j)
        !--OMP DO parallelises the *outer loop only*- is nalpha(1) == nalpha(2), this could be collapsed using collapse(2)
@@ -1364,7 +1459,8 @@ contains
     end if
 
     !--Get Mean of size and magnitude distributions in masked apertures
-    call Mask_Circular_Aperture(TCat, Ap_Pos, Core_Cut_Radius/60.e0_double)
+    print *, '--__Applying mask to data as part of single cluster routine to get mean od size and magnitude (may be second time):'
+    call Mask_Circular_Aperture(TCat, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
     TCat = Cat
 
     print *, '**Global catalogue has mean [Core mask accounted for] (Size, Mag):', mean_discrete(TCat%Sizes), mean_discrete(TCat%MF606W)

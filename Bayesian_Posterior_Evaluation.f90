@@ -2,10 +2,8 @@ module Bayesian_Posterior_Evaluation
   !--Contains the methods to evaluate the Bayesian Posterior for an input of free parameters
   use Param_Types
 
-  !--THIS HAS NOT BEEN IMPLEMENTED
-  
   implicit none
-  
+
   !--Function Overload-------------------------------------
   INTERFACE Likelihood_Evaluation_atVirialRadius_perSource
      module procedure Likelihood_atVirialRadius_SingleCluster_perSource, Likelihood_atVirialRadius_MultipleCluster_perSource
@@ -135,7 +133,7 @@ contains
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
 
     use Cosmology, only: angular_diameter_distance_fromRedshift
-    use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar
+    use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar, redshift_Distribution_byLookup
     use Interpolaters, only: Linear_Interp; use Integration
     real(double),intent(in):: Alpha(:)
     !--Mass Model Declarations
@@ -299,12 +297,21 @@ contains
           Posterior_perGalaxy_Redshift(z) = 1.e-100_double
           cycle
        end if
+
+       if(Magnitude + 2.5e0_double*dlog10(Effective_Magnification) > maxval(Pr_MagGrid)) then
+          !--Skipping as outside limits on which magnitude prior was evaluated (In effect, this should be close to the limit of the input catalogue magnitude)--! 
+          !--NOTE: THis could be a source of bias, where a single lensed galaxy is close to the magnitude limit of the survey: delensing it takes it out of the limits in which the magnitude was evaluated--!
+          Posterior_perGalaxy_Redshift(z) = 1.e-100_double
+          cycle
+       end if
+          
        
        !---Set RedshiftPDF, to unity if redshift known, and to a point in a particualr distribution if it is not
        if(Known_Redshift) then
           RedshiftPDF = 1.e0_double
        else
-          RedshiftPDF = CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
+          RedshiftPDF = redshift_Distribution_byLookup(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
+          !--Use this to evaluate at every level CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if
        
        !--Construct the correctly renormalised prior
@@ -338,7 +345,8 @@ contains
                 if(Known_Redshift) then
                    Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)
                 else
-                   Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*CH08_Redshift_Distribution_Scalar(Pr_MagGrid(m), RedshiftGrid(z))
+                   Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*redshift_Distribution_byLookup(Pr_MagGrid(m), RedshiftGrid(z))
+                   !--Use to evaulate at every position *CH08_Redshift_Distribution_Scalar(Pr_MagGrid(m), RedshiftGrid(z))
                 end if
              end if
           end do
@@ -455,6 +463,7 @@ contains
 
   subroutine get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Redshift_Limit, Output_Prefix)
     use Integration; use Cosmology, only: angular_diameter_distance_fromRedshift
+    use Distributions, only: create_redshiftdistribution_lookuptable
     !--Routine that:
     !---Normalises the Prior Distributions to integrate to one within the survey limits
     !---Sets up Sigma_Critical evalaution for all lenses considered
@@ -481,8 +490,8 @@ contains
     integer:: z, C, i
     real(double):: D_l, D_ls, D_s
     
-    integer,parameter:: nRedshift_Sampling = 50
-    real(double)::Redshift_Lower, Redshift_Higher = 4.e0_double
+    integer,parameter:: nRedshift_Sampling = 75
+    real(double)::Redshift_Lower, Redshift_Higher = 6.e0_double
 
     integer:: nMagnificationGrid = 2000
     real(double):: MagFactorGridLower = 1.e0_double, MagFactorGridHigher = 65.e0_double
@@ -545,6 +554,8 @@ contains
     end do
     write(*,'(2(A))') 'File output: ', trim(adjustl(Output_Prefix))//'Renormalisation_by_Magnification.dat'
 
+    !---- Set up Lookup Table to p(z|m) is used
+    call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.1*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
 
   end subroutine get_Likelihood_Evaluation_Precursors
 
