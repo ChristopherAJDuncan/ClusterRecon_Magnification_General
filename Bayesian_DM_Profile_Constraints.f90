@@ -195,7 +195,7 @@ program Bayesian_DM_Profile_Constraints
 contains
 
   subroutine Parameter_Input(Input_File)
-    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits, nOMPThread, centroid_Prior_Width
+    use Bayesian_Routines, only: Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Survey_Magnitude_Limits, Survey_Size_Limits, nOMPThread, centroid_Prior_Width, use_lnSize
     character(*), intent(in):: Input_File
 
     !--Internal Declarations
@@ -206,9 +206,9 @@ contains
 
     logical:: here
 
-    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions
+    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Survey_SNR_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions, use_lnSize
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File
-    namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits
+    namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits, use_lnSize
     namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter, nOMPThread, Parameter_Limit_Alpha, Parameter_Tolerance_Alpha, centroid_Prior_Width
 
     !--Check for existence of Input File
@@ -245,6 +245,15 @@ contains
     !--Convert centroid_Prior_Width from arcminutes to degrees
     if(count(centroid_Prior_Width >= 0) == 1) centroid_Prior_Width = centroid_Prior_Width(1)
     centroid_Prior_Width = centroid_Prior_Width/60.e0_double
+
+    !--Convert size limits to ln-Size if necessary
+    if(use_lnSize) then
+       if(Survey_Size_Limits(1) == 0.) Survey_Size_Limits(1) = 1.e-100_double
+       if(Prior_Size_Limits(1) == 0.) Prior_Size_Limits(1) = 1.e-100_double
+       
+       Survey_Size_Limits = dlog(Survey_Size_Limits)
+       Prior_Size_Limits = dlog(Prior_Size_Limits)
+    end if
 
 
     !--Copy Input File to output directory--!
@@ -568,17 +577,17 @@ contains
           !--Read in Mocks--!
           call common_Catalogue_directories(Cat_Ident(ID), Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
           Catalogue_Directory = Mock_Input
-          call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
-
+          call catalogue_readin(Cat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
 
           if(Blank_Field_Cat_Ident(ID) == Cat_Ident(ID)) then
              BFCat = Cat
           else
              call common_Catalogue_directories(Blank_Field_Cat_Ident(ID), Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
              Catalogue_Directory = Mock_Input
-             call catalogue_readin(BFCat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
-
+             call catalogue_readin(BFCat, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
           end if
+
+
 
           !--Decide between reading in the distribution (only Directory can be specified) or reevaluating the distribution from the input catalogue--!
           !--In future, would want to pull the reda in out so that it will only be done once, or at least at Single_Mass_Run level, rather than in Bayesian_Routines--!
@@ -801,7 +810,7 @@ contains
        Catt = inCat
     elseif(present(Cat_Ident)) then 
        call common_Catalogue_directories(Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-       call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+       call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
     else
        STOP 'Single_Run - Either Cat_Ident of inCat must be specified'
     end If
@@ -816,7 +825,7 @@ contains
              BFCatt = Catt
           else
              call common_Catalogue_directories(Blank_Field_Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-             call catalogue_readin(BFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols)
+             call catalogue_readin(BFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
           end if
        else
           STOP 'Error - Single_Run'
@@ -834,9 +843,11 @@ contains
 
        print *, ' '
        print *, '-----Cutting Source Catalogue:'
+
        call Cut_By_PhotoMetricRedshift(Catt, Lower_Redshift_Cut) !--Cut out foreground-
        call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2))  
        call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+       call Cut_by_SNR(Catt, Survey_SNR_Limits(1), Survey_SNR_Limits(2))
        print *, '------------------------------'
        print *, ' '
 
@@ -879,6 +890,7 @@ contains
 
        print *, '--Cuts on Prior:'
        call Cut_By_PhotoMetricRedshift(BFCatt, Lower_Redshift_Cut) !--Cut out foreground-
+       call Cut_by_SNR(BFCatt, Survey_SNR_Limits(1), Survey_SNR_Limits(2))
 
        print *, ' '
        write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
@@ -896,6 +908,7 @@ contains
           STOP 'INVALID Fitting Method has been entered'
        end select
     else
+       !---Take Field Sample as source sample---
 
        !--Cuts on data catalogue--!
        PRINT *, ' '

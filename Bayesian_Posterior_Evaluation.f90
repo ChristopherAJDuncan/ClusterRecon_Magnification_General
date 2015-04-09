@@ -17,9 +17,107 @@ module Bayesian_Posterior_Evaluation
      module procedure Combine_Posteriors_Scalar, Combine_Posteriors_Vector
   end interface Combine_Posteriors
 
+  interface delens_Source_Size
+     module procedure  delens_Source_Size_Array, delens_Source_Size_Scalar
+  end interface delens_Source_Size
+
+  interface delens_Source_Magnitude
+     module procedure delens_Source_Magnitude_Scalar, delens_Source_Magnitude_Array
+  end interface delens_Source_Magnitude
+
+
 contains  
 
-  real(double) function lnLikelihood_atVirialRadius_SingleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit)
+  !---------------------LENSING RELATIONS
+
+  !~~~~~~~~~~~~~Magnitude Relations
+  real(double) function delens_Source_Magnitude_Scalar(mu, m)
+    !--Returns the DELENSED source magnitude.
+    !--mu is magnification factor
+    !--m is apparent by default
+
+    real(double), intent(in)::mu, m
+
+    real(double):: dlm(1)
+    
+    dlm = delens_Source_Magnitude_Array(mu, (/m/))
+
+    delens_Source_Magnitude_Scalar = dlm(1)
+
+  end function delens_Source_Magnitude_Scalar
+
+
+  function delens_Source_Magnitude_Array(mu, m)
+    !--Returns the DELENSED source magnitude.
+    !--mu is magnification factor
+    !--m is apparent by default
+
+    real(double), intent(in)::mu, m(:)
+
+    real(double), dimension(size(m)):: delens_Source_Magnitude_Array
+
+    delens_Source_Magnitude_Array = m + 2.5e0_double*dlog10(mu)
+
+  end function delens_Source_Magnitude_Array
+
+  !~~~~~~~~~~~~~Size Relations
+  function delens_Source_Size_Scalar(mu, T, lnT) RESULT(Res)
+    !--Returns the DELENSED source size.
+    !--mu is magnification factor
+    !--T is size by default, or log-Size if lnT is present and true
+    real(double), intent(in):: mu
+    real(double), intent(in):: T
+    logical, intent(in),optional:: lnT
+
+    real(double):: dlT(1)
+
+    real(double):: Res
+
+    INTERFACE
+       function delens_Source_Size_Scalar(mu, T, lnT) RESULT(Res)
+         use Param_Types
+         real(double), intent(in):: mu
+         real(double), intent(in):: T(:)
+         logical, intent(in),optional:: lnT
+
+         real(double):: Res
+       end function delens_Source_Size_Scalar
+    END INTERFACE
+
+
+    if(present(lnT)) then
+       dlT = delens_Source_Size_Array(mu, (/T/), lnT)
+    else
+       dlT = delens_Source_Size_Array(mu, (/T/))
+    end if
+
+    Res = dlT(1)
+
+  end function delens_Source_Size_Scalar
+
+  function delens_Source_Size_Array(mu, T, lnT) RESULT(Res)
+    !--Returns the DELENSED source size.
+    !--mu is magnification factor
+    !--T is size by default, or log-Size if lnT is present and true
+    real(double), intent(in):: mu
+    real(double), intent(in):: T(:)
+    logical, intent(in),optional:: lnT
+
+    real(double), dimension(size(T)):: Res
+
+
+    if(present(lnT) .and. (lnT == .true.)) then
+       Res = T - 0.5e0_double*dlog(mu)
+    else
+       Res = T/dsqrt(mu)
+    end if
+
+  end function delens_Source_Size_Array
+
+
+  !---------------------LIKELIHOOD EVALUATION
+
+  real(double) function lnLikelihood_atVirialRadius_SingleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
     use Cosmology, only: angular_diameter_distance_fromRedshift
     use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar
@@ -36,6 +134,8 @@ contains
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:) !-Source_Redshift-!
+    logical:: use_lnT
+    character(3):: Flag
 
     real(double),allocatable:: Posterior_perSource(:)
 
@@ -44,12 +144,12 @@ contains
 
     tCluster_Position(1,:) = Cluster_Position; tSigma_Crit(1,:) = Sigma_Crit
 
-    lnLikelihood_atVirialRadius_SingleCluster_perSourceSample = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit)
+    lnLikelihood_atVirialRadius_SingleCluster_perSourceSample = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit, use_lnT, Flag)
 
   end function lnLikelihood_atVirialRadius_SingleCluster_perSourceSample
 
   
-  real(double) function lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit)
+  real(double) function lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
     use Cosmology, only: angular_diameter_distance_fromRedshift
     use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar
@@ -66,6 +166,8 @@ contains
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:,:) !-Lens, Source_Redshift-!
+    logical:: use_lnT
+    character(3):: Flag
 
     real(double),allocatable:: Posterior_perSource(:)
 
@@ -90,7 +192,7 @@ contains
           cycle
        end if
        
-       Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit)
+       Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
     end do
 
     !--Recombine
@@ -101,7 +203,7 @@ contains
   end function lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample
 
   !--Evalution of the posterior on a single virial radius grid point, per source
-  real(double) function Likelihood_atVirialRadius_SingleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit)
+  real(double) function Likelihood_atVirialRadius_SingleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
     !~~~~~DESCRIPTION: Wrapper routine which returns the posterior evulated at a single point, //where only a single cluster is modelled//. Uses a call to the standard multi-cluster routine to get it's result.
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
     real(double),intent(in):: Alpha
@@ -116,22 +218,24 @@ contains
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:)
-    
+    logical:: use_lnT
+    character(3):: Flag
+
     !--Internal_Declarations--!
     real(double):: tCluster_Position(1,2), tSigma_Crit(1,size(Sigma_Crit))
 
     tCluster_Position(1,:) = Cluster_Position; tSigma_Crit(1,:) = Sigma_Crit
 
-    Likelihood_atVirialRadius_SingleCluster_perSource = Likelihood_atVirialRadius_MultipleCluster_perSource((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit)
+    Likelihood_atVirialRadius_SingleCluster_perSource = Likelihood_atVirialRadius_MultipleCluster_perSource((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit, use_lnT, Flag)
 
   end function Likelihood_atVirialRadius_SingleCluster_perSource
 
-  real(double) function Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit)
+  real(double) function Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Posterior_Flag)
     !--Produces likelihood for a single source
     !-This is the workhorse of the routine as it stands. This constructs the likelihood of the data (theta and magnitude) given a set of cluster mass profile free parameters (alpha). The input priors MUST be normalised to unity in the size and magnitude range of the survey/source data set. Nearly everything reuiwred here is discernable fromt eh catalogue itself, or can be obtained using a call to get_Likelihood_Evaluation_Precursors.
     !--SM_Prior is understood to be evaluated over the prior size and magnitude limits. M_Prior is evaluated as the SM prior integrated over the entered *PRIOR* size limits. NOTE that survey limits are not taken into consideration in this method
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
-
+    !--If use_lnSize is present and true, then prior is assumed to be ln size prior, and Theta assumed to be ln-Theta 
     use Cosmology, only: angular_diameter_distance_fromRedshift
     use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar, redshift_Distribution_byLookup
     use Interpolaters, only: Linear_Interp; use Integration
@@ -147,6 +251,9 @@ contains
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:,:) !-Lens, Source_Redshift-!
+    logical:: use_lnT
+    character(3), intent(out):: Posterior_Flag
+
     
     !--Internal Declarations
     real(double), allocatable:: Posterior_perGalaxy_Redshift(:)
@@ -157,6 +264,7 @@ contains
     real(double):: RedshiftPDF, Renorm
     real(double), dimension(size(Alpha)):: Distance_From_Mass_Center
     real(double):: D_l
+    real(double):: Theta_0, Magnitude_0 !--Delensed Versions
 
     real(double), dimension(2):: Renormalisation_Size_Limits, Renormalisation_Magnitude_Limits
     real(double), dimension(2):: iSize_Limits, iMag_Limits
@@ -175,6 +283,7 @@ contains
     !--Internal Decalrations that could eventually be set/passed in
     logical:: Enforce_Weak_Lensing = .false., Cuts_Renormalise_Likelihood = .true.
 
+    Posterior_Flag = '0'
 
     !--Error Catching on Input---!
     if(size(Alpha) /= size(Distance_From_Mass_Center) .or. (size(Alpha) /= size(Lens_Redshift))) then
@@ -241,13 +350,17 @@ contains
        end if
     end select
 
-    !---Error Catching: Return Likelihood == 0 if size or magnitude falls outside set analysis limits
+    !---Error Catching: Return Likelihood == 0 for all alpha if size or magnitude falls outside set analysis limits - This should not occur as this body should be removed from the sample
     if( (Magnitude < iMag_Limits(1)) .or. (Magnitude > iMag_Limits(2)) ) then
+       Posterior_Flag = '1.1'
        Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
+       STOP 'Magnitude of entered source falls outside limits, this should not happen - Check source selection'
        return
     end if
     if( (Theta < iSize_Limits(1)) .or. (Theta > iSize_Limits(2)) ) then
+       Posterior_Flag = '1.2'
        Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
+       STOP 'Size of entered source falls outside limits, this should not happen - Check source selection'
        return
     end if
 
@@ -294,29 +407,37 @@ contains
        
        if(Effective_Magnification < minval(MagnificationGrid) .or. Effective_Magnification > maxval(MagnificationGrid)) then
           !--Skipping as outside limits on which magnification was evaluated--!                                                                                                                              
+          Posterior_Flag = '02' 
+          Posterior_perGalaxy_Redshift(z) = 1.e-100_double
+          cycle
+       end if
+       
+       if(delens_Source_Magnitude(Effective_Magnification, Magnitude) > maxval(Pr_MagGrid)) then
+          !--Skipping as outside limits on which magnitude prior was evaluated (In effect, this should be close to the limit of the input catalogue magnitude)--! 
+          !--NOTE: THis could be a source of bias, where a single lensed galaxy is close to the magnitude limit of the survey: delensing it takes it out of the limits in which the magnitude was evaluated--!
+          Posterior_Flag = '03'
           Posterior_perGalaxy_Redshift(z) = 1.e-100_double
           cycle
        end if
 
-       if(Magnitude + 2.5e0_double*dlog10(Effective_Magnification) > maxval(Pr_MagGrid)) then
-          !--Skipping as outside limits on which magnitude prior was evaluated (In effect, this should be close to the limit of the input catalogue magnitude)--! 
-          !--NOTE: THis could be a source of bias, where a single lensed galaxy is close to the magnitude limit of the survey: delensing it takes it out of the limits in which the magnitude was evaluated--!
-          Posterior_perGalaxy_Redshift(z) = 1.e-100_double
-          cycle
-       end if
+       !--Get de-lensed version of measured quantities
+       Theta_0 = delens_Source_Size(Effective_Magnification, Theta, use_lnT)
+       Magnitude_0 = delens_Source_Magnitude(Effective_Magnification, Magnitude)
           
-       
        !---Set RedshiftPDF, to unity if redshift known, and to a point in a particualr distribution if it is not
        if(Known_Redshift) then
           RedshiftPDF = 1.e0_double
        else
-          RedshiftPDF = redshift_Distribution_byLookup(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
+          RedshiftPDF = redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
+          !!DEPRECATED RedshiftPDF = redshift_Distribution_byLookup(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
           !--Use this to evaluate at every level CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if
        
        !--Construct the correctly renormalised prior
-       Renormalisation_Size_Limits = iSize_Limits/dsqrt(Effective_Magnification)
-       Renormalisation_Magnitude_Limits = iMag_Limits + 2.5e0_double*dlog10(Effective_Magnification)
+       Renormalisation_Size_Limits =  delens_Source_Size(Effective_Magnification, iSize_Limits, use_lnT)!!DEPRECATED iSize_Limits/dsqrt(Effective_Magnification)
+       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(Effective_Magnification, iMag_Limits) !!DEPRECATED iMag_Limits + 2.5e0_double*dlog10(Effective_Magnification)
+
+
        
        if(Cuts_Renormalise_Likelihood) then
 !          if(z ==1) print *, 'KAPPA RENORMALISATION TURNED ON'
@@ -340,6 +461,7 @@ contains
              !--m_0, theta_0--!                                                                                                                                                                              
              if((Pr_MagGrid(m) < Renormalisation_Magnitude_Limits(1)) .or. (Pr_MagGrid(m) > Renormalisation_Magnitude_Limits(2))) then
                 !-Since Integrand does not extend over this region anyway-!                                                                                                                                  
+                Posterior_Flag = '11'
                 Size_Only_Mag_Prior(m,:) = 1.e-100_double
              else
                 if(Known_Redshift) then
@@ -351,8 +473,9 @@ contains
              end if
           end do
           
-          if((Theta/dsqrt(Effective_Magnification) > maxval(PR_SizeGrid)) .or. (Theta/dsqrt(Effective_Magnification) < minval(PR_SizeGrid))) then
-             !--Extrapolation--!                                                                                                                                                                          
+          if((Theta_0 > maxval(PR_SizeGrid)) .or. (Theta_0 < minval(PR_SizeGrid))) then
+             !--Extrapolation--!                      
+             Posterior_Flag = '11'
              Posterior_perGalaxy_Redshift(z) = 1.e-100_double
              cycle
           else
@@ -360,7 +483,7 @@ contains
              !--Find Boundary Indexs for the Size at which the Prior will be evaluated - Aims to improve run-time by minimising the number of integrations required                                       
              allocate(Size_Only_Prior(2)); Size_Only_Prior = 0.e0_double
              do j = 1, size(PR_SizeGrid)-1
-                if( (PR_SizeGrid(j)<= Theta/dsqrt(Effective_Magnification)) .and. ( PR_SizeGrid(j+1) > Theta/dsqrt(Effective_Magnification)) ) then
+                if( (PR_SizeGrid(j)<= Theta_0) .and. ( PR_SizeGrid(j+1) > Theta_0) ) then
                    print *, 'Calling Integrate'
                    Size_Only_Prior(1) = Integrate(Pr_MagGrid, Size_Only_Mag_Prior(:,j), 2, lim = Renormalisation_Magnitude_Limits)
                    Size_Only_Prior(2) = Integrate(Pr_MagGrid, Size_Only_Mag_Prior(:,j+1), 2, lim = Renormalisation_Magnitude_Limits)
@@ -369,19 +492,27 @@ contains
              end do
              
              !--EVALUATE SIZE-ONLY LIKELIHOOD
-             Posterior_perGalaxy_Redshift(z) = Linear_Interp(Theta/dsqrt(Effective_Magnification), PR_SizeGrid(j:j+1), Size_Only_Prior(:), ExValue =  1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))
+             if(use_lnT) then
+                Posterior_perGalaxy_Redshift(z) = Linear_Interp(Theta_0, PR_SizeGrid(j:j+1), Size_Only_Prior(:), ExValue =  1.e-100_double)
+             else
+                Posterior_perGalaxy_Redshift(z) = Linear_Interp(Theta_0, PR_SizeGrid(j:j+1), Size_Only_Prior(:), ExValue =  1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))
+             end if
           end if
           deallocate(Size_Only_Prior)
           
        CASE(2) !--Joint Size-Magnitude Analysis--!
           !--Error Catching
-          if(Magnitude + 2.5e0_double*dlog10(Effective_Magnification) < 21.e0_double) then
+          if(Magnitude_0 < 21.e0_double) then
              print *, 'Possible problem with de-lensed magnitude - falls outwith bright limit of Scrabback Fit (21)'
-             print *, Magnitude + 2.5e0_double*dlog10(Effective_Magnification)
+             print *, Magnitude_0
           end if
           
           !--EVALUATE SIZE-MAGNITUDE LIKELIHOOD
-          Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude+2.5e0_double*dlog10(Effective_Magnification), Theta/dsqrt(Effective_Magnification), Pr_MagGrid, PR_SizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))*RedshiftPDF
+          if(use_lnT) then
+             Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Theta_0, Pr_MagGrid, PR_SizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*RedshiftPDF
+          else
+             Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Theta_0, Pr_MagGrid, PR_SizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))*RedshiftPDF
+          end if
           
        case(3) !--Magnitude-only
           allocate(Mag_Only_Prior(size(Pr_MagGrid))); Mag_Only_Prior = 0.e0_double                                                                                     
@@ -392,7 +523,7 @@ contains
 
              do j = 1, size(Pr_MagGrid)          
                 !--Construct p_[m_0] = int p_[theta_0, m_0], where int is understood to integrate over magnifcation-dependant survey size limits.
-                if( ( Pr_MagGrid(j)<=  Magnitude + 2.5e0_double*dlog10(Effective_Magnification) ) .and. (  Pr_MagGrid(j+1) > Magnitude + 2.5e0_double*dlog10(Effective_Magnification)) ) then
+                if( ( Pr_MagGrid(j)<=  Magnitude_0 ) .and. (  Pr_MagGrid(j+1) > Magnitude_0) ) then
                    Unlensed_Mag_Index = j
                 end if
                 Mag_Only_Prior(j) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)        
@@ -409,7 +540,7 @@ contains
              do j = 1, size(Pr_MagGrid)-1          
                 !--Construct p_[m_0] = int p_[theta_0, m_0], where int is understood to integrate over magnifcation-dependant survey size limits.
                 !--Renormalisation here considered to be set by the overall renormalisation of the size-magnitude distribution. This is not true if considering the mag-only case of Size-Mag+Mag
-                if( ( Pr_MagGrid(j)<=  Magnitude + 2.5e0_double*dlog10(Effective_Magnification) ) .and. (  Pr_MagGrid(j+1) > Magnitude + 2.5e0_double*dlog10(Effective_Magnification)) ) then
+                if( ( Pr_MagGrid(j)<=  Magnitude_0 ) .and. (  Pr_MagGrid(j+1) > Magnitude_0) ) then
                    Unlensed_Mag_Index =j
                    Mag_Only_Prior(j) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)                                                                      
                    Mag_Only_Prior(j+1) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j+1,:), 2, lim = Renormalisation_Size_Limits)                                                                    
@@ -420,8 +551,9 @@ contains
           end if
 
           !---EVALUATE MAGNITUDE-ONLY LIKELIHOOD                   
-          Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), Pr_MagGrid(Unlensed_Mag_Index:Unlensed_Mag_Index+1), Mag_Only_Prior(Unlensed_Mag_Index:Unlensed_Mag_Index+1), ExValue =  1.e-100_double)*RedshiftPDF
-          !--Could alsoe reasonably pass in the whole Mag_Only_Prior, but interpoaltion may take longer
+          Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Pr_MagGrid(Unlensed_Mag_Index:Unlensed_Mag_Index+1), Mag_Only_Prior(Unlensed_Mag_Index:Unlensed_Mag_Index+1), ExValue =  1.e-100_double)*RedshiftPDF
+
+          !--Could also reasonably pass in the whole Mag_Only_Prior, but interpoaltion may take longer
           deallocate(Mag_Only_Prior)                                                                                                                                                                   
           !---------------------------------------------------------------------------------------------------------------------                                                                             
           
@@ -461,7 +593,7 @@ contains
     
   end function Likelihood_atVirialRadius_MultipleCluster_perSource
 
-  subroutine get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Redshift_Limit, Output_Prefix)
+  subroutine get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Redshift_Limit, Output_Prefix, use_lnSize)
     use Integration; use Cosmology, only: angular_diameter_distance_fromRedshift
     use Distributions, only: create_redshiftdistribution_lookuptable
     !--Routine that:
@@ -479,6 +611,8 @@ contains
     real(double):: Survey_Magnitude_Limits(:), Survey_Size_Limits(:), Redshift_Limit
     real(double):: Lens_Redshift(:)
     character(*):: Output_Prefix
+    
+    logical,optional:: use_lnSize
 
     !--Output
     real(double),allocatable:: Survey_Renormalised_Prior(:,:), Survey_Renormalised_MagPrior(:)
@@ -489,13 +623,19 @@ contains
     real(double),dimension(2):: Renormalisation_Magnitude_Limits, Renormalisation_Size_Limits
     integer:: z, C, i
     real(double):: D_l, D_ls, D_s
-    
+    logical:: use_lnT
+
     integer,parameter:: nRedshift_Sampling = 75
     real(double)::Redshift_Lower, Redshift_Higher = 6.e0_double
 
     integer:: nMagnificationGrid = 2000
     real(double):: MagFactorGridLower = 1.e0_double, MagFactorGridHigher = 65.e0_double
 
+    print *, ' '
+    write(*,'(A)') '________ Setting up Precusors to Bayesian Analysis_______________'
+
+    use_lnT = .false.
+    if(present(use_lnSize)) use_lnT = use_lnSize
 
     allocate(Survey_Renormalised_Prior(size(Prior,1),size(Prior,2))); Survey_Renormalised_Prior = 0.e0_double
     allocate(Survey_Renormalised_MagPrior(size(PriorMagGrid))); Survey_Renormalised_MagPrior = 0.e0_double
@@ -535,11 +675,12 @@ contains
     allocate(MagOnly_Renormalisation_by_Magnification(size(MagnificationGrid))); MagOnly_Renormalisation_by_Magnification = 0.e0_double
 
     !---Construct the Renormalisation of the prior distribution as a function of magnification. Prior is allowed to be non-zeros outside the survey limits, since these limits should only apply to lensed quantities [not that survey limits here are most often used to detail user-imposed limits, such as magnitude or size cuts]. Only cuts on the prior distribution are necessary
-    MagFactorGridHigher = 1.05e0_double*(10.e0_double**((Survey_Magnitude_Limits(2)-Survey_Magnitude_Limits(1))/2.5e0_double)) !1.05 gives lee-way!                                                               
+    MagFactorGridHigher = 1.05e0_double*(10.e0_double**((Survey_Magnitude_Limits(2)-Survey_Magnitude_Limits(1))/2.5e0_double)) !1.05 gives lee-way!
     do i = 1, size(MagnificationGrid)
        MagnificationGrid(i) = MagFactorGridLower + (i-1)*((MagFactorGridHigher- MagFactorGridLower)/(size(MagnificationGrid)-1))
-       Renormalisation_Size_Limits = Survey_Size_Limits/dsqrt(MagnificationGrid(i))
-       Renormalisation_Magnitude_Limits = Survey_Magnitude_Limits + 2.5e0_double*dlog10(MagnificationGrid(i))
+       Renormalisation_Size_Limits = delens_Source_Size(MagnificationGrid(i), Survey_Size_Limits, use_lnT)  !!DEPRECATED Survey_Size_Limits/dsqrt(MagnificationGrid(i))
+       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(MagnificationGrid(i),Survey_Magnitude_Limits) !!DEPrecated Survey_Magnitude_Limits + 2.5e0_double*dlog10(MagnificationGrid(i))
+
        Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
        !--Edit this code to calculate the magnitude renormalisation over the whole size grid if Posterior_Method == 3, and over (0, Survey_Size_Limit(1)) if Posterior_Method == 4                             
        !-- vv This is only true if there are no cuts on the size-mag prior vv                                                                                                                                  
@@ -555,7 +696,11 @@ contains
     write(*,'(2(A))') 'File output: ', trim(adjustl(Output_Prefix))//'Renormalisation_by_Magnification.dat'
 
     !---- Set up Lookup Table to p(z|m) is used
-    call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.1*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
+    call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
+
+
+    write(*,'(A)') '________ Successfully got Precusors_______________'
+    print *, ' '
 
   end subroutine get_Likelihood_Evaluation_Precursors
 

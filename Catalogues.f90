@@ -91,7 +91,7 @@ module Catalogues
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, -1, 32, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 32, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'
@@ -926,7 +926,76 @@ module Catalogues
 
     end subroutine Cut_By_Magnitude
 
+    subroutine Cut_By_SNR(Cat, lowerCut, upperCut)
+      type(Catalogue)::Cat
+      real(double),intent(in),optional::lowerCut, upperCut
 
+      real(double)::ilower, iupper
+      type(Catalogue)::Temp_Cat
+      integer::i
+      integer::nPass
+      real(double), dimension(size(Cat%RA)):: SNR
+
+      if((present(lowerCut)==.false.) .and. (present(upperCut)==.false.)) then
+         print *, 'Error - Cut_By_SNR - Either a lower or upper cut needs to be entered, returning without cutting'
+         return
+      end if
+
+      if(all(Cat%flux <= 0.e0_double) .or. all(Cat%fluxerr <= 0.e0_double)) then
+         print *, '--------- Cut_By_SNR - Flux or Flux_Err not set, returning without cut'
+         print *, ' '
+         return
+      end if
+
+      !---Construct mSNR
+      SNR = Cat%flux/Cat%fluxerr
+
+      if(present(lowerCut)) then
+         ilower =lowerCut
+      else
+         ilower = 0.0
+      end if
+      if(present(upperCut)) then
+         iupper =upperCut
+      else
+         iupper = 10000.
+      end if
+
+      if(ilower >= iupper) then
+         STOP 'FATAL ERROR - Cut_By_SNR - lower cut larger than upper cut'
+      end if
+      
+      Temp_Cat = Cat
+
+      call Catalogue_Destruct(Cat)
+
+      nPass = 0
+      do i = 1, size(Temp_Cat%RA)
+         if(isNaN(SNR(i))) cycle
+         if((SNR(i) >= ilower) .and. (SNR(i) <= iupper)) nPass = nPass + 1
+      end do
+
+      call Catalogue_Construct(Cat, nPass)
+
+      nPass = 0
+      do i = 1, size(SNR)
+         if(isNaN(SNR(i))) cycle
+         if((SNR(i) >= ilower) .and.(SNR(i) <= iupper)) then
+            nPass = nPass + 1
+            call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)
+         end if
+      end do
+      if(nPass /= size(Cat%Sizes)) then
+         print *, 'Error - Cut_By_SNR - Error in Assigning galxies that pass cuts', nPass, size(Cat%Sizes)
+         STOP
+      end if
+
+      print *, 'Cut Catalogue by SNR between limits:', ilower, iupper, '; nCut = ', size(Temp_Cat%RA) - nPass
+
+      call Catalogue_Destruct(Temp_Cat)
+
+    end subroutine Cut_By_SNR
+    
     subroutine Cut_By_PixelSize(Cat, lowerCut, upperCut)
       type(Catalogue)::Cat
       real(double),intent(in),optional::lowerCut, upperCut
@@ -1066,11 +1135,13 @@ module Catalogues
 
     !--Catalogue IO----!
 
-    subroutine Catalogue_ReadIn(Cat, Cat_Filename, Size_label, Cols)
+    subroutine Catalogue_ReadIn(Cat, Cat_Filename, Size_label, Cols, get_lnSize)
       use IO, only: ReadIn, IO_Verbose, skip_header; use Strings_lib, only:remove_FileExtension_fromString
       !-Direct ReadIn of Catalogue File-!
+      !--if get_lnSize is present and true, then return a catalogue where Sizes = lnT
       type(Catalogue)::Cat
       character(*),intent(in)::Cat_Filename
+      logical, intent(in),optional:: get_lnSize
 
       real(double),allocatable::Cat_2D(:,:)
 
@@ -1175,6 +1246,20 @@ module Catalogues
 !      call convert_Size_from_Pixel_to_Physical(Cat)
 
       Cat_2D = 0.e0_double; deallocate(Cat_2D)
+
+      print *, 'Alpplying log-Size?:', (present(get_lnSize) .and. get_lnSize), minval(Cat%Sizes), maxval(Cat%Sizes)
+
+      if(present(get_lnSize) .and. get_lnSize) then
+         print *, ' '
+         print *, '~~~ Catalogue uses log-Sizes'
+         Cat%Sizes = dlog(Cat%Sizes)
+         Cat%log_Sizes = .true.
+      end if
+
+      print *, 'After Applying log-Size?:', (present(get_lnSize) .and. get_lnSize), minval(Cat%Sizes), maxval(Cat%Sizes)
+
+      write(*,'(A)') '_______ Catalogue Read in Successful ___________'
+      print *, ' '
 
     end subroutine Catalogue_ReadIn
 
@@ -1282,7 +1367,7 @@ module Catalogues
       Cat%Name = ' '
 
       allocate(Cat%Galaxy_Number(nObj)); Cat%Galaxy_Number = 0
-      allocate(Cat%flux(nObj)); Cat%flux = 0.e0_double
+      allocate(Cat%flux(nObj)); Cat%flux = -100.e0_double
       Cat%Mag_Label = ' '
       allocate(Cat%MF606W(nObj)); Cat%MF606W = 0.e0_double
       allocate(Cat%Absolute_Magnitude(nObj)); Cat%Absolute_Magnitude = 0.e0_double
@@ -1292,7 +1377,7 @@ module Catalogues
       allocate(Cat%Sizes(nObj)); Cat%Sizes = -100.e0_double
       allocate(Cat%Physical_Sizes(nObj)); Cat%Physical_Sizes = 0.e0_double
  
-      allocate(Cat%Fluxerr(nObj)); Cat%Fluxerr = 0.e0_double
+      allocate(Cat%Fluxerr(nObj)); Cat%Fluxerr = -100.e0_double
       allocate(Cat%Magerr(nObj)); Cat%Magerr = 0.e0_double
       allocate(Cat%ntile(nObj)); Cat%ntile = 0
       allocate(Cat%RA(nObj)); Cat%RA = 0.e0_double

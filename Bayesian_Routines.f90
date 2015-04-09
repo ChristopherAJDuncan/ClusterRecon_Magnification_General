@@ -10,6 +10,7 @@ module  Bayesian_Routines
   logical:: Analyse_with_Physical_Sizes = .false. !#Default Value#
 
   logical::Combine_log_Posteriors = .true. !-If False, then combined by multiplication-!
+  logical:: use_lnSize = .true.
 
   logical,private::Debug_Mode = .true.
 
@@ -22,9 +23,8 @@ module  Bayesian_Routines
   real(double),allocatable:: Core_Cut_Position(:,:), Core_Cut_Radius(:)
 
   logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false., allow_KDE_Extrapolation = .false.
-  logical::use_lnSize_Prior = .false.
   logical:: Cuts_Renormalise_Likelihood = .true.
-  real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/)    
+  real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/), Survey_SNR_Limits = (/0.e0_double, 10000.e0_double/)
   real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
   real(double),parameter:: Lower_Redshift_Cut = 0.21
 
@@ -422,7 +422,7 @@ contains
     character(500):: Combined_Chain_Output, Convergence_Test_Output, Acceptance_Rate_Output
     character(25):: fmt, conv_fmt, acc_fmt
     character(100):: Filename
-
+    character(3):: Posterior_Flag
 
     !--Distribution Declarations
     real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:)
@@ -515,7 +515,7 @@ contains
     end if
 
     !--Get Precursor
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
     deallocate(Joint_Size_Magnitude_Distribution, Magnitude_Distribution)
 
@@ -903,7 +903,7 @@ contains
              end if
 
              !--Likelihood evaluation provided priors have been passed
-             Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, tLens_Redshift, tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+             Likelihood(M,chainCount) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(tAlpha, Posterior_Method, Surface_Mass_Profile, tAp_Pos, tLens_Redshift, tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit, use_lnSize, Posterior_Flag)
 
              if(allocated(centroid_Prior_Offset)) deallocate(centroid_Prior_Offset)
              if(allocated(tAlpha)) deallocate(tAlpha); if(allocated(tAp_Pos)) deallocate(tAp_Pos)
@@ -1097,6 +1097,7 @@ contains
     real(double),allocatable:: AlphaGrid1(:), AlphaGrid2(:)
 
     real(double),allocatable:: Likelihood(:,:)
+    character(3),allocatable:: Posterior_Flag(:,:)
     real(double),allocatable:: Marginalised_Cl1(:), Marginalised_Cl2(:)
 
     !--Temporary Allocations--!
@@ -1171,7 +1172,7 @@ contains
     end if
 
     !--Get Precursor
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, (/(Lens_Redshift,i=1,size(Fit_Group))/), Lower_Redshift_Cut, Output_Prefix)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, (/(Lens_Redshift,i=1,size(Fit_Group))/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
 
     !--Set up output grid, on which the marginalised posteriors will be output, as the linear interpolation of the constructed marginalised posterior below
@@ -1245,6 +1246,7 @@ contains
           deallocate(Posterior_Single, AlphaGrid1, Group_Index, Source_Positions)
           call Catalogue_Destruct(Group_Cat)
           print *, 'Got single fit of cluster'
+
           cycle
        end if
 
@@ -1256,7 +1258,8 @@ contains
        print *, ' '
 
        allocate(Likelihood(nAlpha(1), nAlpha(2))); Likelihood = 0.e0_double
-       
+       allocate(Posterior_Flag(size(Likelihood,1), size(Likelihood,2))); Posterior_Flag = '000'
+
        allocate(tSigma_Crit(2,size(Sigma_Crit,2))); tSigma_Crit(1,:) = Sigma_Crit(Group_index(1),:); tSigma_Crit(2,:) = Sigma_Crit(Group_index(2),:) 
        allocate(tAp_Pos(2, 2)); tAp_pos(1,:) = Ap_Pos(Group_index(1),:); tAp_Pos(2,:) = Ap_Pos(Group_index(2),:)
 
@@ -1273,7 +1276,7 @@ contains
        !$OMP DO
        do i = 1, nAlpha(1)
           do j = 1, nAlpha(2)
-             Likelihood(i,j) = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/AlphaGrid1(i),AlphaGrid2(j)/), Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/Lens_Redshift,Lens_Redshift/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit)
+             Likelihood(i,j) = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/AlphaGrid1(i),AlphaGrid2(j)/), Posterior_Method, Surface_Mass_Profile, tAp_Pos, (/Lens_Redshift,Lens_Redshift/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit, use_lnSize, Posterior_Flag(i,j))
              print *, 'Done:', i, j,  Likelihood(i,j)
           end do
        end do
@@ -1304,8 +1307,21 @@ contains
        do i = 1, size(Likelihood,1)
           write(21, fmt) AlphaGrid1(i), Likelihood(i,:)
        end do
-       print *, '---Likelihood for group:', G, ' output to ', trim(adjustl(Output_Prefix))//'_SimultaneousFitting_Likelihood_Group'//trim(Filename)//'.dat'
+       write(*,'(A,I3,A,A)') '---Likelihood for group:', G, ' output to ', trim(adjustl(Output_Prefix))//'_SimultaneousFitting_Likelihood_Group'//trim(Filename)//'.dat'
        close(21)
+
+       !--Output Flag for posterior evaluation
+       open(unit = 22, file = trim(adjustl(Output_Prefix))//'_Likelihood_Evalutation_Flag'//trim(Filename)//'.dat')
+       write(fmt, '(I3)') size(Likelihood,2)+1
+       fmt = '('//trim(fmt)//'(A3,x))'
+       !--Write first row containing grid along second cluster
+       write(22, fmt) 0.e0_double, AlphaGrid2
+       do i = 1, size(Posterior_Flag,1)
+          write(22, fmt) AlphaGrid1(i), Posterior_Flag(i,:)
+       end do
+       write(*,'(A,I3,A,A)') '---Likelihood Flags for group:', G, ' output to ', trim(adjustl(Output_Prefix))//'_SimultaneousFitting_Likelihood_Group'//trim(Filename)//'.dat'
+       close(22)
+       deallocate(Posterior_Flag)
        
        !--Get Marginalised Distributions
        !(At this point, a flat prior is assumed)
@@ -1452,6 +1468,8 @@ contains
          end subroutine DM_Profile_Variable_Posteriors_CircularAperture
       end INTERFACE
 
+
+
     if(size(Ap_Radius)==1) then
        iAp_Radius = Ap_Radius(1)
     else
@@ -1466,6 +1484,7 @@ contains
     print *, '**Global catalogue has mean [Core mask accounted for] (Size, Mag):', mean_discrete(TCat%Sizes), mean_discrete(TCat%MF606W)
     call Catalogue_Destruct(TCat)
 
+    print *, ' '
     !--Identify Reduced Catalogue for each aperture--!
     do i =1, size(Ap_Cats)
        print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
@@ -1476,6 +1495,7 @@ contains
        
        print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
     end do
+    print *, ' '
 
     do i =1, size(Ap_Cats)
        print *, 'Aperture:', i, ' contains:', size(Ap_Cats(I)%RA), ' galaxies'
@@ -1521,7 +1541,7 @@ contains
        allocate(Posterior_Single(2,size(Coarse_LikelihoodGrid))); Posterior_Single(1,:) = Coarse_LikelihoodGrid
 
        !--Evaluate posterior on grid
-       call DM_Profile_Variable_Posterior_SingleFit(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, use_lnSize_Prior, PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
+       call DM_Profile_Variable_Posterior_SingleFit(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
 
        !--Allow the finalised posterior to be determined on a seperate grid to the input posterior, to account for the fact that the posterior routine may have added points as part of the search for the maximum of the posterior
        if(Ap == 1) then
@@ -1706,6 +1726,8 @@ contains
     character(500)::Filename
     logical::here
 
+    character(3), allocatable:: Posterior_Flag(:)
+
     !--Redshift Distribution Declarations--!
 !!$    integer,parameter:: nRedshift_Sampling = 50
 !!$    real(double),parameter::Redshift_Lower = Lower_Redshift_Cut, Redshift_Higher = 4.e0_double 
@@ -1781,9 +1803,11 @@ contains
 !!DELETE    nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
 
     !--Set up precursors
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, (/Lens_Redshift/), Lower_Redshift_Cut, Output_Prefix)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, (/Lens_Redshift/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
     Source_Positions(:,1) = Cat%RA; Source_Positions(:,2) = Cat%Dec
+
+    allocate(Posterior_Flag(size(Posterior,2))); Posterior_Flag = '000'
 
     i = 0; Alpha_Loop = 0
     Continue_To_Evaluate = .true.
@@ -1792,90 +1816,23 @@ contains
        !--Alpha_Loop counts the number of times the Alpha value has been looped over
        Alpha_Loop = Alpha_Loop+1
        i = i+1
-
+       
        !--Set exit strategy in normal case
        if(Search_For_Maximum == .false. .and. Alpha_Loop > size(Posterior,2)) Continue_To_Evaluate = .false.
        if(Search_For_Maximum .and. Alpha_Loop>size(Posterior,2)) then
           !--Find the Maximum. In this case, i will be set to the new grid point (added to grid), and exit case will be set when either tolerance or call limits are met 
           call  find_Maximum_by_Bisection(Posterior, i, Find_Maximum_Tolerance, Continue_To_Evaluate)
        end if
-
+       
        !--Exit here to remove need to evaluate an extra point when maximum has been found
        if(Continue_to_Evaluate == .false.) exit
 
        Posterior(2,i) = 1.e0_double
        if(Alpha_Loop == Size(Posterior,2)/2) print *, 'Approximately halfway done for this Aperture..'          
-!!$       do c = 1, size(Posterior_perGalaxy,1) !-Loop over galaxies-!
-          
-          !~~Select the method of posterior reconstruction for that point based in input method   
-!!$          select case(Posterior_Method)
-!!$          case(1) !--SizeOnly--!
-!!$             if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
-!!$                nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
-!!$                cycle
-!!$             end if
-!!$             !MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
-!!$             
-!!$             nSizePosterior = nSizePosterior + 1
-!!$             Galaxy_Posterior_Method = 1
-!!$          case(2)!--SizeMag--!
-!!$             if( (Cat%Sizes(c) > Survey_Size_Limits(2)) .or. (Cat%Sizes(c) < Survey_Size_Limits(1))) then
-!!$                nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
-!!$                cycle
-!!$             end if
-!!$             
-!!$             !MagRenorm          iSurvey_size_Limits = Survey_Size_Limits
-!!$             
-!!$             nSizeMagPosterior = nSizeMagPosterior + 1
-!!$             Galaxy_Posterior_Method = 2
-!!$          case(3) !-Magnitude Only--!
-!!$             nMagPosterior = nMagPosterior + 1
-!!$             
-!!$             !MagRenorm          iSurvey_size_Limits = (/0.e0_double, 1.e30_double/) !--Should encompase the whole data set
-!!$             
-!!$             if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only, but no magnitde prior entered, stopping'
-!!$             Galaxy_Posterior_Method = 3
-!!$          case(4) !-Size mag above size data limit, Mag-Only below size data limit-!
-!!$             if(present(MagPrior) == .false.) STOP 'Attempting to produce posterior using mag only under size limit, but no magnitde prior entered, stopping'
-!!$             STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distriution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
-!!$             
-!!$             !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies
-!!$             if(Cat%Sizes(c) < Survey_Size_Limits(1)) then
-!!$                !MagRenorm             iSurvey_Size_Limits = (/0.e0_double, Survey_Size_Limits(1)/)
-!!$                
-!!$                Galaxy_Posterior_Method = 3
-!!$                nMagPosterior = nMagPosterior + 1
-!!$             else
-!!$                !MagRenorm             iSurvey_Size_Limits = Survey_Size_Limits
-!!$                
-!!$                Galaxy_Posterior_Method = 2
-!!$                nSizeMagPosterior = nSizeMagPosterior + 1
-!!$             end if
-!!$          end select
-          
-          !~~~ Cycle if the observed magnitude falls outside the survey limits
-!!$          if( (Cat%MF606W(c) > Survey_Magnitude_Limits(2)) .or. (Cat%MF606W(c) < Survey_Magnitude_Limits(1))) then
-!!$             nGal_Ignored_MagLimits = nGal_Ignored_MagLimits + 1
-!!$             cycle
-!!$          end if
-!!$          if(isNaN(Cat%Sizes(c)) .or. isNaN(Cat%MF606W(c))) then
-!!$             nGal_Ignored_NaN = nGal_Ignored_NaN + 1
-!!$             cycle
-!!$          end if
-!!$
-!!$
-!!$          !--Evaluate the Posterior 
-!!$          Posterior_perGalaxy(c) = Likelihood_Evaluation_atVirialRadius_SingleCluster(Posterior(1,i), Galaxy_Posterior_Method, Mass_Profile, Lens_Position, Lens_Redshift, Cat%Sizes(c), Cat%MF606W(c), Cat%Redshift(c), (/Cat%RA(c),Cat%Dec(c)/), PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, Sigma_Crit(1,:))
-!!$                    
-!!$       end do !--End of galaxy loop       
-!!$
-!!$       !~~Return lnP to ensure that we can renormalise in an alpha-independent way in the combined posterior, and to ensure that the PDF is correctly recovered even with ronding error (large negative lnP across all alphas). The renormalisation is done after the outer loop is finished
-!!$       call Combine_Posteriors(Posterior(1,i), Posterior_perGalaxy(:), Combine_log_Posteriors, Renormalise = .false., Return_lnP = Combine_log_Posteriors, Combined_Posterior = Posterior(2,i))
-
-          Posterior(2,i) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(Posterior(1,i), Posterior_Method, Mass_Profile, Lens_Position, Lens_Redshift, Cat%Sizes, Cat%MF606W, Cat%Redshift, Source_Positions, PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, Sigma_Crit(1,:))
-
-       end do !--End of Posterior Loop
-!    deallocate(Posterior_perGalaxy)
+       
+       Posterior(2,i) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(Posterior(1,i), Posterior_Method, Mass_Profile, Lens_Position, Lens_Redshift, Cat%Sizes, Cat%MF606W, Cat%Redshift, Source_Positions, PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, Sigma_Crit(1,:), use_lnSize, Posterior_Flag(i))
+       
+    end do !--End of Posterior Loop
 
     if(any(dabs(Posterior) > huge(1.e0_double)) .or. any(isNaN(Posterior))) then
        print *, 'NaNs or infinities found in posterior:'
@@ -1893,26 +1850,6 @@ contains
     if(nGal_Ignored_NaN > 0) write(*,'(A,I3)') '****** Number of galaxies ignored as they were NaNs:', nGal_Ignored_NaN
     
     
-!!DELETE$    print *, '-------------------------------------------------------------'
-!!$    print *, 'Constructed ', nSizePosterior, ' size-only posteriors'
-!!$    print *, 'Constructed ', nSizeMagPosterior, ' size-magnitude posteriors'
-!!$    print *, 'Constructed ', nMagPosterior, ' magnitude-only posteriors'
-!!$    print *, '-------------------------------------------------------------'
-
-    !---DO NOT DELETE THIS. Instead, come up with a way to store the posterior per galaxy on a general grid for output
-!!!$    if(Debug_Mode .and. Output_Posterior_Per_Galaxy) then
-!!!$       
-!!!$       Filename = trim(adjustl(Output_Prefix))//'Posterior_Per_Galaxy.dat'
-!!!$       open(unit = 17, file = Filename)
-!!!$       write(fmtstring,'(I7)') size(Posterior_perGalaxy,1)+1
-!!!$       do i =1, size(Posterior,2)
-!!!$          write(17, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior_perGalaxy(:,i)
-!!!$       end do
-!!!$       close(17)
-!!!$       print *, 'Output Posterior per galaxy to: ', trim(adjustl(Filename))
-!!!$    end if
-    
-    
     Filename= trim(adjustl(Output_Prefix))//'Posterior_Combined_Renormalised.dat'
     open(unit = 82, file = Filename)
     write(fmtstring,'(I1)') 2
@@ -1920,8 +1857,20 @@ contains
        write(82, '('//trim(adjustl(fmtstring))//'(e14.7,x))') Posterior(1,i), Posterior(2,i)
     end do
     close(82)
-    print *, 'Output Combined Posterior to: ', trim(adjustl(Filename))
+    write(*,'(A)') 'Output Combined Posterior to: ', trim(adjustl(Filename))
     
+
+    !----Note that posterior may not evaluate exactly to flags, if maximum by bisection was used
+    Filename= trim(adjustl(Output_Prefix))//'Likelihood_Evaluation_Flags.dat'
+    open(unit = 83, file = Filename)
+    write(83, '((A,L1))') '# Note that posterior may not evaluate exactly to flags, if maximum by bisection was used: ', Search_For_Maximum
+    write(fmtstring,'(I1)') 1
+    do i =1, size(Posterior_Flag,1)
+       write(83, '('//trim(adjustl(fmtstring))//'(e14.7,x,A,x))') Posterior(1,i), Posterior_Flag(i)
+    end do
+    close(83)
+    write(*,'(A)') 'Output Posterior Flag to: ', trim(adjustl(Filename))
+
 
     if(any(isNAN(Posterior(2,:)))) then
        print *, 'Any NaNs in aperture posterior?', any(isNAN(Posterior(2,:))), count(isNAN(Posterior(2,:)) == .true.)
@@ -1993,8 +1942,8 @@ contains
     if(present(BFCat)) then
        print *, '--Producing Joint Size Magnitude Distribution from Catalogue.....'
        
-!!$    print *, '**Applying Masks to Prior Catalogue:'                                                                                                                                                            
        Cut_Catalogue = BFCat
+
 
        print *, '------Applying Cuts on the Catalogue from which the prior is constructed---------'
 !       call Mask_Circular_Aperture(Cut_Catalogue, Clusters_In%Position, (/2.e0_double, 2.e0_double, 2.e0_double, 2.e0_double/)/60.e0_double)
@@ -2003,7 +1952,7 @@ contains
        call Cut_by_PhotometricRedshift(Cut_Catalogue, Redshift_Cuts(1), Redshift_Cuts(2))
        print *, '----- Finished Cuts on BF catalogue----------------------------------------------'
 
-       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue, use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = use_lnSize_Prior, KDE_Smooth = ido_KDE)
+       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue, use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = .false., KDE_Smooth = ido_KDE)
        !--Output (matches the method of output used above)--!
        Output_Filename = trim(Dir)//trim(Filename)
        open(unit = 45, file = Output_Filename)

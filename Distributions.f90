@@ -166,21 +166,34 @@ contains
     integer:: Index
     real(double):: Width
 
-    !--Create Lookup on fine redshift Grid
+    !--Temporary Declarations
+    real(double), allocatable:: tPDF(:)
+
+    !---Error Catching Declarations
+    integer, save:: nOutsideMagRange = 0
+
+    !--Error Catching
     if(allocated(LT_RedshiftDistribution%LT) == .false.) then
        STOP 'redshift_Distribution_byLookup_Array: FATAL: Lookup Table not initialised'
     end if
 
-    !--Error Catching
     if(allocated(LT_RedshiftDistribution%xGrid) == .false. .or. allocated(LT_RedshiftDistribution%yGrid) == .false.) then
        STOP 'redshift_Distribution_byLookup_Array - Error in setting lookup table use: Grids not allocated'
     end if
 
     if(size(LT_RedshiftDistribution%xGrid) /= size(LT_RedshiftDistribution%LT,1) .or. size(LT_RedshiftDistribution%yGrid) /= size(LT_RedshiftDistribution%LT,2)) STOP 'redshift_Distribution_byLookup_Array - Error in setting lookup table use: Grids not conformal with Table'
 
+
+    !---Getting Distribution
     if(Apparent_Magnitude > maxval(LT_RedshiftDistribution%xGrid) .or. Apparent_Magnitude < minval(LT_RedshiftDistribution%xGrid)) then
+       nOutsideMagRange = nOutsideMagRange + 1
+       print *, 'redshift_Distribution_byLookup_Array - WARNING - Apparent Magnitude falls outside lookup range. Constructing PDF individually for this case. This is the ', nOutsideMagRange, ' time'
        print *, 'Input, Range:', Apparent_Magnitude, minval(LT_RedshiftDistribution%xGrid), maxval(LT_RedshiftDistribution%xGrid)
-       STOP 'redshift_Distribution_byLookup_Array - FATAL - Apparent Magnitude entered falls outside range of lookup table'
+
+       call CH08_redshift_distribution_Array(Apparent_Magnitude, Grid, tPDF)
+       PDF = tPDF
+
+       deallocate(tPDF)
     end if
 
     !--Find Magnitude on Grid
@@ -717,6 +730,8 @@ contains
     
     logical:: here
 
+    if(present(ln_size_Distribution) .and. ln_size_Distribution .and. RefCat%log_sizes) STOP 'produce_Joint_Size_Magnitude_Distribution - log-Size specified and catalogue already in log-Size. This can be rectified by setting TCat%Sizes = dexp(RefCat%Sizes) in this routine, but has been disabled for safety'
+
     iOutput_Dir = 'Distributions/'
     if(present(Output_Dir)) iOutput_Dir = Output_Dir
 
@@ -725,6 +740,9 @@ contains
 
     iln_size_Distribution = .false.
     if(present(ln_size_Distribution)) iln_size_Distribution = ln_size_Distribution
+
+
+    print *, 'PRoducing joint size-magnitude distribution: Limits:', minval(RefCat%Sizes), maxval(RefCat%Sizes)
 
     allocate(TCatMags(size(RefCat%RA))); TCatMags = 0.e0_double
     allocate(TCatSizes(size(RefCat%RA))); TCatSizes = 0.e0_double
@@ -743,7 +761,7 @@ contains
           print *, 'lnSize Dist: Limits:', Lower, Higher
           TCatSizes = dlog(RefCat%Sizes)
        else
-          Higher = maxval(RefCat%Sizes); Lower = 0.e0_double
+          Higher = maxval(RefCat%Sizes); Lower = min(0.e0_double, minval(RefCat%Sizes)) !--Allows user to pass in lnT even if ln_size_Distribution == F
           print *, 'Size Dist: Limits:', Lower, Higher
           TCatSizes = RefCat%Sizes
        end if
@@ -757,6 +775,7 @@ contains
        Smoothed_Grid_Size(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling-1))
     end do
     
+
 !    allocate(Histogram_SizeGrid(nSizes)); Sizes = 0.e0_double
     allocate(SizeBins(nSizes,2)); SizeBins = 0.e0_double
     dParam = (( Higher- Lower )/(1.e0_double*(nSizes-1)) )
@@ -769,8 +788,6 @@ contains
     end do
 
         
-
-    
     !--Set up Magnitude Binning--!
     !-Set Higher by + 2.17e0_double*Mag_Limit_Convergence_Buffer as will be going along a +2.17Kappa de-lensing line - Ensures at least kappa = 0.3 is acheivable for *every* galaxy in sample
     if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
@@ -1124,150 +1141,153 @@ contains
 
        allocate(PDF(nMags, nSizes)); PDF = 0.e0_double
            
-       if(any(Cat%Sizes <= 0.e0_double)) then
-          print *, 'ERROR - Some of the reference catalogue sizes are negative or zero:', count(Cat%Sizes<= 0.e0_double)
-          STOP
-       END if
-       if(use_Physical_Sizes .and. any(Cat%Physical_Sizes <= 0.e0_double)) then
-          print *, 'ERROR - Some of the reference catalogue physical sizes are negative or zero:', count(Cat%Physical_Sizes<= 0.e0_double)
-          STOP
-       END if
-
-
-    do i = 1, nMags
-       allocate(Temporary_Sizes_Array(size(BCat%Cat(i)%Sizes)));
-       if(use_Physical_Sizes) then
-          Temporary_Sizes_Array = BCat%Cat(i)%Physical_Sizes
-       else
-          Temporary_Sizes_Array= BCat%Cat(i)%Sizes
-       end if
-
-       if(any(Temporary_Sizes_Array <= 0.e0_double)) then
-          print *, count(Temporary_Sizes_Array <= 0.e0_double)
-          STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Negative Sizes in Temporary array, stopping'
-       end if
-       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-          Temporary_Sizes_Array = dlog(Temporary_Sizes_Array)
-       end if
-
-       !-Get KDE Smoothed PDF--!
-       if(present(KDE_Smooth)) then
-          if(KDE_Smooth) then
-             call KDE_Univariate_Gaussian(Temporary_Sizes_Array, Sig, Smoothed_Grid, Smoothed_PDF(i,:))
+!!$       if(Cat%log_sizes == .false.) then
+!!$          if(any(Cat%Sizes <= 0.e0_double)) then
+!!$             print *, 'ERROR - Some of the reference catalogue sizes are negative or zero:', count(Cat%Sizes<= 0.e0_double)
+!!$             STOP
+!!$          END if
+!!$          if(use_Physical_Sizes .and. any(Cat%Physical_Sizes <= 0.e0_double)) then
+!!$             print *, 'ERROR - Some of the reference catalogue physical sizes are negative or zero:', count(Cat%Physical_Sizes<= 0.e0_double)
+!!$             STOP
+!!$          END if
+!!$       end if
+       
+       
+       do i = 1, nMags
+          allocate(Temporary_Sizes_Array(size(BCat%Cat(i)%Sizes)));
+          if(use_Physical_Sizes) then
+             Temporary_Sizes_Array = BCat%Cat(i)%Physical_Sizes
+          else
+             Temporary_Sizes_Array= BCat%Cat(i)%Sizes
           end if
-       end if
-
-       do c = 1, size(Temporary_Sizes_Array)
-          do j = 1, nSizes
-             if( (Temporary_Sizes_Array(c) > ISizeBins(j,1)) .and. (Temporary_Sizes_Array(c) <= ISizeBins(j,2)) ) then
-                PDF(i,j) = PDF(i,j) + 1
-                exit
-             end if
-          end do
-       end do
-       deallocate(Temporary_Sizes_Array)
-    end do
-
-    !--Renormalise for each Magnitude Bin--!
-    if(present(Renormalise)) then
-       iRenormalise = Renormalise
-    else
-       iRenormalise = .True.
-    end if
-    if(iRenormalise) then
-       do i =1, nMags
-          !--Renormalise Histogram--!
-          Renormalisation = 0.e0_double
-          do j = 1, size(PDF,2)
-             Renormalisation = Renormalisation + PDF(i,j)*(ISizeBins(i,2)-ISizeBins(i,1))
-          end do
-          if(Renormalisation> 0.e0_double) PDF(i,:) = PDF(i,:)/Renormalisation
-          !--Renormalise KDE Smoothed PDF--!
+          
+!!$          if(any(Temporary_Sizes_Array <= 0.e0_double)) then
+!!$             print *, count(Temporary_Sizes_Array <= 0.e0_double)
+!!$             STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Negative Sizes in Temporary array, stopping'
+!!$          end if
+          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+             print *, 'produce_joint_size.....Producing log-Sizes Array, and log-Size distriubtion!'
+             Temporary_Sizes_Array = dlog(Temporary_Sizes_Array)
+          end if
+          
+          !-Get KDE Smoothed PDF--!
           if(present(KDE_Smooth)) then
              if(KDE_Smooth) then
-                Renormalisation = 0.e0_double
-                do j = 1, size(Smoothed_PDF,2)-1
-                   Renormalisation = Renormalisation + Smoothed_PDF(i,j)*(Smoothed_Grid(i+1)-Smoothed_Grid(i))
-                end do
-                if(Renormalisation> 0.e0_double) Smoothed_PDF(i,:) = Smoothed_PDF(i,:)/Renormalisation
+                call KDE_Univariate_Gaussian(Temporary_Sizes_Array, Sig, Smoothed_Grid, Smoothed_PDF(i,:))
              end if
           end if
+          
+          do c = 1, size(Temporary_Sizes_Array)
+             do j = 1, nSizes
+                if( (Temporary_Sizes_Array(c) > ISizeBins(j,1)) .and. (Temporary_Sizes_Array(c) <= ISizeBins(j,2)) ) then
+                   PDF(i,j) = PDF(i,j) + 1
+                   exit
+                end if
+             end do
+          end do
+          deallocate(Temporary_Sizes_Array)
        end do
-    end if
-
-    !--Output Size PDFS--!                                                                                                                                                                                        
-    if(present(output_dir)) then
-
-       !--Check for existence--!
-       inquire(directory =  trim(Output_Dir), exist = here)
-       if(here == .false.) call system('mkdir '//trim(Output_Dir))
-
-       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-          open(unit = 49, file = trim(Output_Dir)//'lnSize_Distribution_MagnitudeBinning_Catalogue.dat')
-          print *, 'Size Distribution, by Magnitude Bin, output to '//trim(Output_Dir)//'lnSize_Distribution_MagnitudeBinning_Catalogue.dat'
-
-          !--Smoothed--!
-          open(71, file = trim(Output_Dir)//'Smoothed_lnSize_Distribution_KDE.dat')
-          print *, 'Smoothed Size Distribution output to: ', trim(Output_Dir)//'Smoothed_lnSize_Distribution_KDE.dat'
+       
+       !--Renormalise for each Magnitude Bin--!
+       if(present(Renormalise)) then
+          iRenormalise = Renormalise
        else
-          open(unit = 49, file = trim(Output_Dir)//'Size_Distribution_MagnitudeBinning_Catalogue.dat')
-          print *, 'Size Distribution, by Magnitude Bin, output to '//trim(Output_Dir)//'Size_Distribution_MagnitudeBinning_Catalogue.dat'
-
-          !--Smoothed--!
-          open(71, file = trim(Output_Dir)//'Smoothed_Size_Distribution_KDE.dat')
-          print *, 'Smoothed Size Distribution output to: ', trim(Output_Dir)//'Smoothed_Size_Distribution_KDE.dat'
+          iRenormalise = .True.
        end if
-    else
-       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-          open(unit = 49, file = 'Distributions/lnSize_Distribution_MagnitudeBinning_Catalogue.dat')
-          print *, 'Size Distribution, by Magnitude Bin, output to Distributions/lnSize_Distribution_MagnitudeBinning_Catalogue.dat'
-
-          !--Smoothed--!
-          open(71, file = 'Distributions/Smoothed_lnSize_Distribution_KDE.dat')
-          print *, 'Smoothed Size Distribution output to: ', 'Distributions/Smoothed_lnSize_Distribution_KDE.dat'
-
+       if(iRenormalise) then
+          do i =1, nMags
+             !--Renormalise Histogram--!
+             Renormalisation = 0.e0_double
+             do j = 1, size(PDF,2)
+                Renormalisation = Renormalisation + PDF(i,j)*(ISizeBins(i,2)-ISizeBins(i,1))
+             end do
+             if(Renormalisation> 0.e0_double) PDF(i,:) = PDF(i,:)/Renormalisation
+             !--Renormalise KDE Smoothed PDF--!
+             if(present(KDE_Smooth)) then
+                if(KDE_Smooth) then
+                   Renormalisation = 0.e0_double
+                   do j = 1, size(Smoothed_PDF,2)-1
+                      Renormalisation = Renormalisation + Smoothed_PDF(i,j)*(Smoothed_Grid(i+1)-Smoothed_Grid(i))
+                   end do
+                   if(Renormalisation> 0.e0_double) Smoothed_PDF(i,:) = Smoothed_PDF(i,:)/Renormalisation
+                end if
+             end if
+          end do
+       end if
+       
+       !--Output Size PDFS--!                                                                                                                                                                                        
+       if(present(output_dir)) then
+          
+          !--Check for existence--!
+          inquire(directory =  trim(Output_Dir), exist = here)
+          if(here == .false.) call system('mkdir '//trim(Output_Dir))
+          
+          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+             open(unit = 49, file = trim(Output_Dir)//'lnSize_Distribution_MagnitudeBinning_Catalogue.dat')
+             print *, 'Size Distribution, by Magnitude Bin, output to '//trim(Output_Dir)//'lnSize_Distribution_MagnitudeBinning_Catalogue.dat'
+             
+             !--Smoothed--!
+             open(71, file = trim(Output_Dir)//'Smoothed_lnSize_Distribution_KDE.dat')
+             print *, 'Smoothed Size Distribution output to: ', trim(Output_Dir)//'Smoothed_lnSize_Distribution_KDE.dat'
+          else
+             open(unit = 49, file = trim(Output_Dir)//'Size_Distribution_MagnitudeBinning_Catalogue.dat')
+             print *, 'Size Distribution, by Magnitude Bin, output to '//trim(Output_Dir)//'Size_Distribution_MagnitudeBinning_Catalogue.dat'
+             
+             !--Smoothed--!
+             open(71, file = trim(Output_Dir)//'Smoothed_Size_Distribution_KDE.dat')
+             print *, 'Smoothed Size Distribution output to: ', trim(Output_Dir)//'Smoothed_Size_Distribution_KDE.dat'
+          end if
        else
-          open(unit = 49, file = 'Distributions/Size_Distribution_MagnitudeBinning_Catalogue.dat')
-          print *, 'Size Distribution, by Magnitude Bin, output to Distributions/Size_Distribution_MagnitudeBinning_Catalogue.dat'
-
-          open(71, file = 'Distributions/Smoothed_Size_Distribution_KDE.dat')
-          print *, 'Smoothed Size Distribution output to: ', 'Distributions/Smoothed_Size_Distribution_KDE.dat'
-
+          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+             open(unit = 49, file = 'Distributions/lnSize_Distribution_MagnitudeBinning_Catalogue.dat')
+             print *, 'Size Distribution, by Magnitude Bin, output to Distributions/lnSize_Distribution_MagnitudeBinning_Catalogue.dat'
+             
+             !--Smoothed--!
+             open(71, file = 'Distributions/Smoothed_lnSize_Distribution_KDE.dat')
+             print *, 'Smoothed Size Distribution output to: ', 'Distributions/Smoothed_lnSize_Distribution_KDE.dat'
+             
+          else
+             open(unit = 49, file = 'Distributions/Size_Distribution_MagnitudeBinning_Catalogue.dat')
+             print *, 'Size Distribution, by Magnitude Bin, output to Distributions/Size_Distribution_MagnitudeBinning_Catalogue.dat'
+             
+             open(71, file = 'Distributions/Smoothed_Size_Distribution_KDE.dat')
+             print *, 'Smoothed Size Distribution output to: ', 'Distributions/Smoothed_Size_Distribution_KDE.dat'
+             
+          end if
+          
+          
        end if
-
-
-    end if
-    !--Write Header--!
-    do j = 1, size(MagBins,1)
-       write(49, '(A1, 2(e14.7,x))') '#', MagBins(j,:)
-    end do
-    write(49,'(A)')
-    write(fmtstring, '(I5)') size(PDF,1)+1
-    do j = 1, size(PDF,2)
-       write(49, '('//trim(fmtstring)//'(e14.7,x))') Sizes(j), PDF(:,j)
-    end do
-    close(49)
-    !--Output Smoothed Version--!
-    do j = 1, size(MagBins,1)
-       write(71, '(A1, 2(e14.7,x))') '#', MagBins(j,:)
-    end do
-    write(fmtstring, '(I5)') size(PDF,1)+1
-    do j = 1, size(Smoothed_PDF,2)
-       write(71, '('//trim(fmtstring)//'(e14.7,x))') Smoothed_Grid(j), Smoothed_PDF(:,j)
-    end do
-    close(71)
-
-    if(present(KDE_Smooth)) then
-       if(KDE_Smooth) then
-          deallocate(Sizes); allocate(Sizes(size(Smoothed_Grid))); Sizes = Smoothed_Grid
-          deallocate(PDF); allocate(PDF(size(Smoothed_PDF,1),size(Smoothed_PDF,2))); PDF = Smoothed_PDF
+       !--Write Header--!
+       do j = 1, size(MagBins,1)
+          write(49, '(A1, 2(e14.7,x))') '#', MagBins(j,:)
+       end do
+       write(49,'(A)')
+       write(fmtstring, '(I5)') size(PDF,1)+1
+       do j = 1, size(PDF,2)
+          write(49, '('//trim(fmtstring)//'(e14.7,x))') Sizes(j), PDF(:,j)
+       end do
+       close(49)
+       !--Output Smoothed Version--!
+       do j = 1, size(MagBins,1)
+          write(71, '(A1, 2(e14.7,x))') '#', MagBins(j,:)
+       end do
+       write(fmtstring, '(I5)') size(PDF,1)+1
+       do j = 1, size(Smoothed_PDF,2)
+          write(71, '('//trim(fmtstring)//'(e14.7,x))') Smoothed_Grid(j), Smoothed_PDF(:,j)
+       end do
+       close(71)
+       
+       if(present(KDE_Smooth)) then
+          if(KDE_Smooth) then
+             deallocate(Sizes); allocate(Sizes(size(Smoothed_Grid))); Sizes = Smoothed_Grid
+             deallocate(PDF); allocate(PDF(size(Smoothed_PDF,1),size(Smoothed_PDF,2))); PDF = Smoothed_PDF
+          end if
        end if
-    end if
-    deallocate(Smoothed_Grid, Smoothed_PDF)
-
-    deallocate(iSizeBins)
-
-  end subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue
-
-
-end module Distributions
+       deallocate(Smoothed_Grid, Smoothed_PDF)
+       
+       deallocate(iSizeBins)
+       
+     end subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue
+     
+     
+   end module Distributions
