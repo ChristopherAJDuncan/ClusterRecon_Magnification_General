@@ -642,10 +642,10 @@ contains
 
   !----------------Magnitude Distributions------------------------------------------------------!
   subroutine produce_Magnitude_Distribution(MagGrid, PDF, RefCat, KDE_Smooth)
-    use Catalogues; use Statistics, only: Discrete_Covariance; use Smoothing, only:KDE_Univariate_Gaussian
+    use Catalogues; use Statistics, only: Discrete_Covariance; use Smoothing, only:KDE_Univariate_Gaussian; use Integration, only:Integrate
     !--Produces a magnitude distribution for the data--!
     !-Uses covariance for size-magnitude to set smoothing length. This could be edited to a simpler routine, but kept as is for speed's sake--!
-    real(double), intent(out),allocatable,dimension(:):: MagGrid
+    real(double), intent(inout),allocatable,dimension(:):: MagGrid
     real(double), intent(out),allocatable::pdf(:)
     type(Catalogue), intent(in):: RefCat
     logical, intent(in):: KDE_Smooth
@@ -671,6 +671,10 @@ contains
        end do
     end if
        
+    print *, 'Producing Magnitude Distribution:'
+    print *, 'Catalogue Limits:', minval(RefCat%MF606W), maxval(RefCat%MF606W)
+    print *, 'Grid Limits:', minval(MagGrid), maxval(MagGrid)
+
     allocate(Data_Vectors(2,size(RefCat%Sizes))); Data_Vectors(1,:) = RefCat%MF606W; Data_Vectors(2,:) = RefCat%Sizes
     call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
     KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
@@ -678,13 +682,16 @@ contains
     allocate(PDF(size(MagGrid))); PDF = 0.e0_double
     call KDE_Univariate_Gaussian(RefCat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), MagGrid, PDF)
 
+    !--Renormalise Distribution
+    PDF = PDF/Integrate(MagGrid, PDF, 2, lim = (/minval(MagGrid), maxval(MagGrid)/))
+
     deallocate(KDE_Gaussian_Covariance, Data_Vectors)
 
   end subroutine produce_Magnitude_Distribution
 
 
   !----------------SIZE DISTRIBUTIONS-----------------------------------------------------------!
-  subroutine produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth)
+  subroutine produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth, SizeLimits, MagLimits)
     use Catalogues; use Statistics, only: variance_discrete, Discrete_Covariance; use Smoothing, only:KDE_Bivariate_Gaussian; use Integration, only: Integrate, TrapInt, RectangularIntegration
     !--Essentially Wrapper routine - Does the same as get_Size_Distribution_MagnitudeBinning_byCatalogue, but binning type is set here, and output is slightly varied--!
     !--Returns p(R,m)
@@ -699,6 +706,7 @@ contains
     integer, intent(in)::Magnitude_Type
     character(*), intent(in), optional:: Output_Dir
     logical,intent(in),optional::ln_size_Distribution, KDE_Smooth
+    real(double), intent(in), optional:: SizeLimits(2), MagLimits(2)
     
     !----Binning Decalarations-----!
     integer,parameter::nSizes = 60, nMags = 60
@@ -730,6 +738,22 @@ contains
     
     logical:: here
 
+    INTERFACE
+       subroutine produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth, SizeLimits, MagLimits)
+         use Param_Types         
+         use Catalogues
+         real(double), intent(out),allocatable,dimension(:)::SizeGrid, MagGrid
+         real(double), intent(out),allocatable::pdf(:,:) !-Magnitude, Size-!                                                                                                                                            
+         type(Catalogue),intent(in)::RefCat
+         logical,intent(in)::use_Physical_Sizes
+         integer, intent(in)::Magnitude_Type
+
+         character(*), intent(in), optional:: Output_Dir
+         logical,intent(in),optional::ln_size_Distribution, KDE_Smooth
+         real(double), intent(in), optional:: SizeLimits(2), MagLimits(2)
+       END subroutine produce_Joint_Size_Magnitude_Distribution
+    END INTERFACE
+
     if(present(ln_size_Distribution) .and. ln_size_Distribution .and. RefCat%log_sizes) STOP 'produce_Joint_Size_Magnitude_Distribution - log-Size specified and catalogue already in log-Size. This can be rectified by setting TCat%Sizes = dexp(RefCat%Sizes) in this routine, but has been disabled for safety'
 
     iOutput_Dir = 'Distributions/'
@@ -746,29 +770,33 @@ contains
 
     allocate(TCatMags(size(RefCat%RA))); TCatMags = 0.e0_double
     allocate(TCatSizes(size(RefCat%RA))); TCatSizes = 0.e0_double
-    !--Set up SizeGrid--!
-    if(use_Physical_Sizes) then
-       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-          Higher = dlog(maxval(RefCat%Physical_Sizes)); Lower = dlog(minval(RefCat%Physical_Sizes))
-          TCatSizes = dlog(RefCat%Physical_Sizes)
-       else
-          Higher = maxval(RefCat%Physical_Sizes); Lower = 0.e0_double
-          TCatSizes = RefCat%Physical_Sizes
-       end if
+
+    if(present(SizeLimits)) then
+       Lower = SizeLimits(1); Higher = SizeLimits(2)
     else
-       if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-          Higher = dlog(maxval(RefCat%Sizes)); Lower = dlog(minval(RefCat%Sizes))
-          print *, 'lnSize Dist: Limits:', Lower, Higher
-          TCatSizes = dlog(RefCat%Sizes)
+       !--Set up SizeGrid--!
+       if(use_Physical_Sizes) then
+          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+             Higher = dlog(maxval(RefCat%Physical_Sizes)); Lower = dlog(minval(RefCat%Physical_Sizes))
+             TCatSizes = dlog(RefCat%Physical_Sizes)
+          else
+             Higher = maxval(RefCat%Physical_Sizes); Lower = 0.e0_double
+             TCatSizes = RefCat%Physical_Sizes
+          end if
        else
-          Higher = maxval(RefCat%Sizes); Lower = min(0.e0_double, minval(RefCat%Sizes)) !--Allows user to pass in lnT even if ln_size_Distribution == F
-          print *, 'Size Dist: Limits:', Lower, Higher
-          TCatSizes = RefCat%Sizes
+          if(present(ln_size_Distribution) .and. ln_size_Distribution) then
+             Higher = dlog(maxval(RefCat%Sizes)); Lower = dlog(minval(RefCat%Sizes))
+             print *, 'lnSize Dist: Limits:', Lower, Higher
+             TCatSizes = dlog(RefCat%Sizes)
+          else
+             Higher = maxval(RefCat%Sizes); Lower = min(0.e0_double, minval(RefCat%Sizes)) !--Allows user to pass in lnT even if ln_size_Distribution == F
+             print *, 'Size Dist: Limits:', Lower, Higher
+             TCatSizes = RefCat%Sizes
+          end if
        end if
     end if
     if(Higher > 100.e0_double) STOP 'Upper limit on size distribution too large, check catalogue'
     
-
     !--Produce KDE Smoothed Version--!
     allocate(Smoothed_Grid_Size(nSmoothed_Sampling)); Smoothed_Grid_Size = 0.e0_double
     do i =1, nSmoothed_Sampling
@@ -790,36 +818,50 @@ contains
         
     !--Set up Magnitude Binning--!
     !-Set Higher by + 2.17e0_double*Mag_Limit_Convergence_Buffer as will be going along a +2.17Kappa de-lensing line - Ensures at least kappa = 0.3 is acheivable for *every* galaxy in sample
-    if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
-!       call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMags, MagBins)
-       Higher = maxval(RefCat%Absolute_Magnitude)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%Absolute_Magnitude)
-       TCatMags = RefCat%Absolute_Magnitude
-    elseif(Magnitude_Type == 2) then
-!       call Calculate_Bin_Limits_by_equalNumber(Cat%MF606W, nMags, MagBins)
-       Higher =maxval(RefCat%MF606W)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%MF606W)
-       TCatMags = RefCat%MF606W
+    if(present(MagLimits)) then
+       Lower = MagLimits(1); Higher = MagLimits(2)
+       if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
+          TCatMags = RefCat%Absolute_Magnitude
+       elseif(Magnitude_Type == 2) then
+          TCatMags = RefCat%MF606W
+       else
+          STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Invalid Magnitude Type entered'
+       end if
+
     else
-       STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Invalid Magnitude Type entered'
+       if(Magnitude_Type == 1) then !-Absolute_Magnitude-!
+          !       call Calculate_Bin_Limits_by_equalNumber(Cat%Absolute_Magnitude, nMags, MagBins)
+          Higher = maxval(RefCat%Absolute_Magnitude)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%Absolute_Magnitude)
+          TCatMags = RefCat%Absolute_Magnitude
+       elseif(Magnitude_Type == 2) then
+          !       call Calculate_Bin_Limits_by_equalNumber(Cat%MF606W, nMags, MagBins)
+          Higher =maxval(RefCat%MF606W)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%MF606W)
+          TCatMags = RefCat%MF606W
+       else
+          STOP 'get_Size_Distribution_MagnitudeBinning_byCatalogue - Invalid Magnitude Type entered'
+       end if
     end if
+
+    !--Set up magnitude histogram binning
     dParam = (( Higher- Lower )/(1.e0_double*(nMags-1)) )
     allocate(MagBins(nMags,2)); MagBins = 0.e0_double
     allocate(Histogram_MagGrid(nMags)); Histogram_MagGrid = 0.e0_double
     do i = 1, nMags
        !--Use i-2 so that no galaxies fall into the first bin--!
-!       MagBins(i,1) = Lower + (i-1)*dParam
+       !       MagBins(i,1) = Lower + (i-1)*dParam
        MagBins(i,1) = Lower + (i-2)*dParam
        MagBins(i,2) = MagBins(i,1) + dParam
        if(i==nSizes) MagBins(i,2) = MagBins(i,2) + 1.e-3_double*dParam
        Histogram_MagGrid(i) = 0.5e0_double*(sum(MagBins(i,:)))
     end do
-    
+
     !--KDE Declarations--!
     allocate(Smoothed_Grid_Mag(nSmoothed_Sampling_Mag)); Smoothed_Grid_Mag = 0.e0_double
     do i =1, nSmoothed_Sampling_Mag
        Smoothed_Grid_Mag(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling_Mag-1))
     end do
 
-    print *, 'Magnitude Limits:', MagBins(1,1), MagBins(size(MagBIns,1), 2), Smoothed_Grid_Mag(1), maxval(Smoothed_Grid_Mag), minval(RefCat%MF606W), maxval(RefCat%MF606W)
+    print *, 'Magnitude Limits (BinMin, BinMax, SmoothedGrid Min/Max, Catalogue Min/Max):', MagBins(1,1), MagBins(size(MagBIns,1), 2), Smoothed_Grid_Mag(1), maxval(Smoothed_Grid_Mag), minval(RefCat%MF606W), maxval(RefCat%MF606W)
 
     !--Get KDE Smoothed Version--!
     if(present(KDE_Smooth)) then

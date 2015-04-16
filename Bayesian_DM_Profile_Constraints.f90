@@ -172,6 +172,7 @@ program Bayesian_DM_Profile_Constraints
      end do
      call Posterior_Maximum_Likelihood_Bias_Error(Catalogue_Identifier, Bias_Output_Directory, Blank_Field_Catalogue_Identifier, Cluster_Filename, Cluster_Aperture_Radius)
   case(3)
+     STOP 'Run-type 3 disabled, as uncertainty in what it does....'
      allocate(Bias_Output_Directory(size(Catalogue_Identifier))); Bias_Output_Directory = ' '
      do i = 1, size(Catalogue_Identifier)
         write(Bias_Output_Directory(i), '(I1)') Catalogue_Identifier(i)
@@ -766,7 +767,7 @@ contains
 
     character(*), intent(in):: run_Output_Dir
 
-    type(Catalogue)::Catt, BFCatt
+    type(Catalogue)::iCatt, iBFCatt, Catt(2), BFCatt(2)
     character(500)::Catalogue_Directory, Catalogue_Filename
     integer,dimension(:),allocatable::Catalogue_Cols
     logical::here
@@ -805,100 +806,103 @@ contains
     if(here == .false.) call system('mkdir '//trim(adjustl(run_Output_Dir)))
     Bayesian_Routines_Output_Directory = trim(run_Output_Dir)
 
+    !-----------------Read in Source Catalogue------------------------------------------------------------------------------------------------------------!
     !## 1: STAGES shear, 2: COMBO17, 3:RRG, 4: Mocks_STAGES; 5:Mocks_COMBO!          
     If(present(inCat)) then
-       Catt = inCat
+       iCatt = inCat
     elseif(present(Cat_Ident)) then 
        call common_Catalogue_directories(Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-       call catalogue_readin(Catt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
+       call catalogue_readin(iCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
     else
        STOP 'Single_Run - Either Cat_Ident of inCat must be specified'
     end If
 
+    !----Cut source Catalogue
+    print *, ' '
+    print *, '-----Cutting Source Catalogue:'
+    
+    call Cut_By_PhotoMetricRedshift(iCatt, Lower_Redshift_Cut) !--Cut out foreground-
+    call Cut_by_Magnitude(iCatt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+    print *, '------------------------------'
+    print *, ' '
+    
+    print *, '**Testing for Cluster contamination in the Data Catalogue'
+    call Foreground_Contamination_NumberDensity(iCatt, Clusters_In%Position, trim(run_Output_Dir), Masked_Survey_Area)
+    
+    !--Apply Input Core Cuts
+    print *, ' '
+    print *, '---Masking apertures on data (As Input):', Core_Cut_Radius
+    call Mask_Circular_Aperture(iCatt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
+    print *, ' '
+    
+    if(Set_Foreground_Masks) then
+       write(*,'(A)') '!---------------------------------------------------------------------------------------------------------'
+       write(*,'(A)') 'Check for foreground contamination and enter new values for the foreground masks to be applied to data:'
+       write(*,'(A)') ' (enter "-1" to use default)'
+       write(*,'(A,x,I2,x,A)') ' (',size(Core_Cuts_CommandLine_ReadIn), ' values needed. Less can be entered by finishing with "/")'
+       Core_Cuts_CommandLine_ReadIn = -1
+       read(*,*) Core_Cuts_CommandLine_ReadIn
+       where(Core_Cuts_CommandLine_ReadIn < 0)
+          Core_Cuts_CommandLine_ReadIn = Core_Cut_Radius
+       end where
+       !          if(all(Core_Cuts_CommandLine_ReadIn < 0)) Core_Cuts_CommandLine_ReadIn = Core_Cut_Radius
+       Core_Cut_Radius  = Core_Cuts_CommandLine_ReadIn
+       print *, 'Applying Core Cuts of:'
+       print *, Core_Cut_Radius
+       print *, 'Press <ENTER> to accept.'
+       read(*,*)
+       write(*,'(A)') '---------------------------------------------------------------------------------------------------------!'
+    end if
+
+    !---Split into Size-Mag and Mag-Only Catalogues
+    print *, 'Splitting Source Sample'
+    call split_Sample(iCatt, Catt)
+    call Catalogue_Destruct(iCatt)
+
+
     if(present(inBFCat) .or. present(Blank_Field_Cat_Ident)) then
 
-       !--Readin--!
+       !--Read in Field Catalogue--!
        if(present(inBFCat)) then
-          BFCatt = inBFCat
+          iBFCatt = inBFCat
+          !---Split into Size-Mag and Mag-Only Catalogues
+          print *, 'Splitting Field Sample'
+          call split_Sample(iBFCatt, BFCatt)
+          call Catalogue_Destruct(iBFCatt)
+
        elseif(present(Blank_Field_Cat_Ident)) then
-          if(Blank_Field_Cat_Ident == Cat_Ident) then
-             BFCatt = Catt
-          else
+!!$          if(Blank_Field_Cat_Ident == Cat_Ident) then
+!!$             !---This should be before cuts. Removed as time required to read in catalogue and split again is minimal
+!!$             BFCatt = Catt
+!!$          else
              call common_Catalogue_directories(Blank_Field_Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-             call catalogue_readin(BFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
-          end if
+             call catalogue_readin(iBFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
+             !---Split into Size-Mag and Mag-Only Catalogues
+             print *, 'Blank Field Catalogue Readin:', Catalogue_Constructed(iBFCatt), size(iBFCatt%RA)
+             print *, 'Splitting Field Sample'
+             call split_Sample(iBFCatt, BFCatt)
+             call Catalogue_Destruct(iBFCatt)
+!!$          end if
        else
           STOP 'Error - Single_Run'
        end if
 
-       PRINT *, ' '
-       !--Cuts should eventually be removed from here - Data cuts in BAyesian Posterior construction, Prior cuts in return_Size...Distribution
-       !--Cuts on data catalogue--!
-!!$       print *, '** Cutting Catalogue:'
-!!$       
-!!$       
-!!$       if(Analyse_with_Physical_Sizes) then
-!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(Catt)
-!!$       end if
 
-       print *, ' '
-       print *, '-----Cutting Source Catalogue:'
-
-       call Cut_By_PhotoMetricRedshift(Catt, Lower_Redshift_Cut) !--Cut out foreground-
-       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2))  
-       call Cut_by_Magnitude(Catt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
-       call Cut_by_SNR(Catt, Survey_SNR_Limits(1), Survey_SNR_Limits(2))
-       print *, '------------------------------'
-       print *, ' '
-
-       print *, '**Testing for Cluster contamination in the Data Catalogue'
-       call Foreground_Contamination_NumberDensity(Catt, Clusters_In%Position, trim(run_Output_Dir), Masked_Survey_Area)
-
-       !--Apply Input Core Cuts
-       print *, ' '
-       print *, '---Masking apertures on data (As Input):', Core_Cut_Radius
-       call Mask_Circular_Aperture(Catt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
-       print *, ' '
-
-       if(Set_Foreground_Masks) then
-          write(*,'(A)') '!---------------------------------------------------------------------------------------------------------'
-          write(*,'(A)') 'Check for foreground contamination and enter new values for the foreground masks to be applied to data:'
-          write(*,'(A)') ' (enter "-1" to use default)'
-          write(*,'(A,x,I2,x,A)') ' (',size(Core_Cuts_CommandLine_ReadIn), ' values needed. Less can be entered by finishing with "/")'
-          Core_Cuts_CommandLine_ReadIn = -1
-          read(*,*) Core_Cuts_CommandLine_ReadIn
-          where(Core_Cuts_CommandLine_ReadIn < 0)
-             Core_Cuts_CommandLine_ReadIn = Core_Cut_Radius
-          end where
-!          if(all(Core_Cuts_CommandLine_ReadIn < 0)) Core_Cuts_CommandLine_ReadIn = Core_Cut_Radius
-          Core_Cut_Radius  = Core_Cuts_CommandLine_ReadIn
-          print *, 'Applying Core Cuts of:'
-          print *, Core_Cut_Radius
-          print *, 'Press <ENTER> to accept.'
-          read(*,*)
-          write(*,'(A)') '---------------------------------------------------------------------------------------------------------!'
-       end if
-
-       !--Cuts on Catalogue--!
-       !--Cuts on prior removed as effectively implemented in the production of priors--!
-!!$       print *, '** Cutting Prior Catalogue:'
-!!$       call Cut_by_Magnitude(BFCatt, Prior_Magnitude_Limits(1))
-!!$       if(Analyse_with_Physical_Sizes) then
-!!$          call Monte_Carlo_Redshift_Sampling_Catalogue(BFCatt)
-!!$       end if
-!!$       call Cut_By_PixelSize(BFCatt, Prior_Size_Limits(1), Prior_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-
+       !----------- Apply *general* cuts on Field Catalogue, from which Prior is Constructed
        print *, '--Cuts on Prior:'
-       call Cut_By_PhotoMetricRedshift(BFCatt, Lower_Redshift_Cut) !--Cut out foreground-
-       call Cut_by_SNR(BFCatt, Survey_SNR_Limits(1), Survey_SNR_Limits(2))
-
-       print *, ' '
-       write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
-       call Mask_Circular_Aperture(BFCatt, Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
-       print *, ' '
+       do i =1, size(BFCatt)
+          call Cut_By_PhotoMetricRedshift(BFCatt(i), Lower_Redshift_Cut) !--Cut out foreground-
+          call Cut_by_Magnitude(BFCatt(i), Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!          
+          
+          print *, ' '
+          write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
+          call Mask_Circular_Aperture(BFCatt(i), Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
+          print *, ' '
+       end do
 
        select case (Nominated_Fitting_Type)
        case(0) !--Individual
+          print *, 'Callign Circular Aperture, reproduce_Prior?:', reconstruct_Prior
           call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
        case(1) !-2Cluster on coarse grid
           call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
@@ -908,17 +912,8 @@ contains
           STOP 'INVALID Fitting Method has been entered'
        end select
     else
-       !---Take Field Sample as source sample---
+       !---If no Blank Field Information, then attempt a read in-------! (Does this ever happen???)
 
-       !--Cuts on data catalogue--!
-       PRINT *, ' '
-       print *, '** Cutting Catalogue:'
-!!$       call Cut_by_Magnitude(Catt, 23.e0_double) !-Taken from CH08 P1435-!   
-!!$       call Cut_By_PixelSize(Catt, Survey_Size_Limits(1), Survey_Size_Limits(2)) !!!!!!!!!!!!!!!!!!!!!!!
-       call Cut_By_PhotoMetricRedshift(Catt, 0.21e0_double) !--Cut out foreground--!                                                                            
-       PRINT *, ' '
-
-       !--If no Blank Field Information, then attempt a read in--!
        select case (Nominated_Fitting_Type)
        case(0) !--Individual
           call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
@@ -932,13 +927,12 @@ contains
 
     end if
 
-    print *, 'Catalogue Check:'
-    print *, 'RA:', minval(Catt%RA), maxval(Catt%RA)
-    print *, 'Dec:', minval(Catt%Dec), maxval(Catt%Dec)
-    print *, 'MF606W:', minval(Catt%MF606W), maxval(Catt%MF606W)
-    print *, 'Sizes:', minval(Catt%Sizes), maxval(Catt%Sizes)
-
-    call catalogue_destruct(Catt); call catalogue_destruct(BFCatt)
+    do i = 1, size(Catt)
+       call catalogue_destruct(Catt(i)); 
+    end do
+    do i = 1, size(BFCatt)
+       call catalogue_destruct(BFCatt(i))
+    end do
 
     !--Output--!
     open(unit = 51, file = trim(Bayesian_Routines_Output_Directory)//'Posterior_per_Aperture.dat')

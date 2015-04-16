@@ -16,6 +16,7 @@ module Catalogues
   type Catalogue
      character(60)::Name
      character(len = 10)::Mag_Label
+     integer, dimension(:), allocatable:: Posterior_Method
      real(double),dimension(:),allocatable::flux, fluxerr, MF606W, magerr, Absolute_Magnitude
      integer,dimension(:),allocatable::ntile
      integer,dimension(:), allocatable::Galaxy_Number
@@ -76,34 +77,30 @@ module Catalogues
       allocate(Columns(15)); Columns = 0
 
       select case(Index)
-      case(1) !-Full STAGES+COMBO matched catalogue--!
-         !--Size Cases: 9(FR), 10(FWHM), 18(RRG_Tr), 19(RRG_det)
+      case(1) !-Full RRG+COMBO AND STAGES matched catalogue (source must occur in STAGES master and RRG measured)--!
          Directory = 'Catalogues/'
-         Filename = 'STAGES+COMBO_KSBf90_RRG.pzcat'
-         Columns = (/-1,-1,7,8,5,6,23,4,-1,3,-1,18,-1,-1,22/)
+         Filename = 'STAGES_KSBf90_RRG+COMBO_AND_STAGES.cat.WCalib.SSNRCalib'
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 41, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-! !--STAGES Master: 39: ST_FLUX_BEST, 40:ST_FLUXERR_BEST, 41:ST_MAG_BEST, 42: ST_MAGERR_BEST, 43: ST_MAG_GALFIT, 44: ST_MAGERR_GALFIT (DEFAULT MF606w: 5)
       case(2) !--COMBO17 redshift - Matched to STAGES--!
          Directory = 'Catalogues/'
-         Filename = 'STAGES_COMBO-17_Matched_20140304.pzcat'
-         Columns = (/-1,-1,12,13,10,11,37,5,-1,3,-1,31,-1,-1,35/)
-
-!!$         Filename = 'STAGES_COMBO17_gsMag_size_matched.pzcat'
-!!$         Columns = (/-1,10,11,-1,-1,8,12,-1,-1,-1,14,16,17,5/) !-12 (ST_Mag) could alos be 3 (ST_Mag_Best)
+         Filename = 'STAGES_KSBf90_RRG+COMBO.cat.WCalib.SSNRCalib'
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 32, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'
-         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, -1/)
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, 11, 12, 4, -1, -1, -1/)
       case(5) !--COMBO17-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_COMBO.cat'
-         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, 11, 12, 4, -1, -1, 5/)
       case(45) !--Combined STAGES and COMBO mock--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES+COMBO.cat'
-         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, 11, 12, 4, -1, -1, 5/)
       case(6) !--COMBO-17 RRG Sizes--!
          Directory = 'Catalogues/'
          Filename = 'RRG_COMBO-17_gsMag.pzcat'
@@ -115,15 +112,15 @@ module Catalogues
       case(-4) !-STAGES-like Blank Field (Unlensed) Mock Catalogue-!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES_Unlensed.cat'
-         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, -1/)         
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, 11, 12, 4, -1, -1, -1/)         
       case(-5) !-COMBO-like Blank Field (Unlensed) Mock Catalogue-!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_COMBO_Unlensed.cat'
-         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, 11, 12, 4, -1, -1, 5/)
       case(-45) !--Combined STAGES and COMBO mock--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES+COMBO_Unlensed.cat'
-         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, -1, -1, 4, -1, -1, 5/)
+         Columns = (/1,-1, 2, 3, -1, -1, 6, 7, -1, 11, 12, 4, -1, -1, 5/)
       case default
          print *, 'Catalogue Identifier:', Index
          STOP 'common_Catalogue_directories - Invalid Index entered: I do not have any information on this catalogue, retry with entry by hand'
@@ -171,6 +168,7 @@ module Catalogues
       call Catalogue_Destruct(tMaster)
 
     end subroutine Concatonate_Catalogues
+
 
     subroutine Mask_Single_Circular_Aperture(Cat, Ap_Pos, Ap_Radius)
       !--Cuts out galaxies which fall inside an aperture radius, where the radius is in DEGREES
@@ -846,6 +844,7 @@ module Catalogues
       end if
 
       print *, 'Out of:', size(Temp_Cat%Redshift),' orginal galaxies, ', nGal-nPass, ' were cut by redshift' 
+      print *, '       leaving:', size(Cat%RA), ' galaxies in catalogue'
 !      print *, 'Out of:', size(Temp_Cat%Redshift),' orginal galaxies, ', size(Cat%Redshift), ' galaxies passed the redshift cut' 
 
       call Catalogue_Destruct(Temp_Cat)
@@ -926,14 +925,15 @@ module Catalogues
 
     end subroutine Cut_By_Magnitude
 
-    subroutine Cut_By_SNR(Cat, lowerCut, upperCut)
+    subroutine Cut_By_SNR(Cat, lowerCut, upperCut, Discarded)
       type(Catalogue)::Cat
       real(double),intent(in),optional::lowerCut, upperCut
+      type(Catalogue), intent(out), optional:: Discarded
 
       real(double)::ilower, iupper
       type(Catalogue)::Temp_Cat
       integer::i
-      integer::nPass
+      integer::nPass, nFail
       real(double), dimension(size(Cat%RA)):: SNR
 
       if((present(lowerCut)==.false.) .and. (present(upperCut)==.false.)) then
@@ -976,13 +976,20 @@ module Catalogues
       end do
 
       call Catalogue_Construct(Cat, nPass)
+      if(present(Discarded)) then
+         call Catalogue_Destruct(Discarded)
+         call Catalogue_Construct(Discarded, size(SNR)-nPass)
+      end if
 
-      nPass = 0
+      nPass = 0; nFail = 0
       do i = 1, size(SNR)
          if(isNaN(SNR(i))) cycle
          if((SNR(i) >= ilower) .and.(SNR(i) <= iupper)) then
             nPass = nPass + 1
             call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)
+         elseif(present(Discarded)) then
+            nFail = nFail + 1
+            call Catalogue_Assign_byGalaxy_byCatalogue(Discarded, nFail, Temp_Cat, i)
          end if
       end do
       if(nPass /= size(Cat%Sizes)) then
@@ -996,14 +1003,15 @@ module Catalogues
 
     end subroutine Cut_By_SNR
     
-    subroutine Cut_By_PixelSize(Cat, lowerCut, upperCut)
+    subroutine Cut_By_PixelSize(Cat, lowerCut, upperCut, Discarded)
       type(Catalogue)::Cat
       real(double),intent(in),optional::lowerCut, upperCut
+      type(Catalogue), intent(out), optional:: Discarded
 
       real(double)::ilower, iupper
       type(Catalogue)::Temp_Cat
       integer::i
-      integer::nPass
+      integer::nPass, nFail
 
       if((present(lowerCut)==.false.) .and. (present(upperCut)==.false.)) then
          print *, 'Error - Cut_By_PixelSize - Either a lower or upper cut needs to be entered, returning without cutting'
@@ -1039,13 +1047,21 @@ module Catalogues
 
 
       call Catalogue_Construct(Cat, nPass)
+      if(present(Discarded)) then
+         call Catalogue_Destruct(Discarded)
+         call Catalogue_Construct(Discarded, size(Temp_Cat%RA)-nPass)
+      end if
+      
 
-      nPass = 0
+      nPass = 0; nFail = 0
       do i = 1, size(Temp_Cat%Sizes)
          if(isNaN(Temp_Cat%Sizes(i))) cycle
          if((Temp_Cat%Sizes(i) >= ilower) .and.(Temp_Cat%Sizes(i) <= iupper)) then
             nPass = nPass + 1
             call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)
+         elseif(present(Discarded)) then
+            nFail = nFail + 1
+            call Catalogue_Assign_byGalaxy_byCatalogue(Discarded, nFail, Temp_Cat, i)
          end if
       end do
       if(nPass /= size(Cat%Sizes)) then
@@ -1148,7 +1164,7 @@ module Catalogues
       integer,intent(in)::Cols(:) !- Number, ntile, RA, Dec, xpos, ypos, Absolute_Magnitude, MF606W, MagErr, Flux, FluxErr, Size, g1, g2, redshift-!
       integer::Cols_Length = 15
       integer, allocatable::iCols(:)
-      integer::Column_Index
+      integer::Column_Index, i
       character(500)::header_Filename
       logical::here
 
@@ -1247,16 +1263,23 @@ module Catalogues
 
       Cat_2D = 0.e0_double; deallocate(Cat_2D)
 
-      print *, 'Alpplying log-Size?:', (present(get_lnSize) .and. get_lnSize), minval(Cat%Sizes), maxval(Cat%Sizes)
+      !--- Set Galaxy Number [id] (for now this overwrites any input)
+      Cat%Galaxy_Number = (/(i, i = 1, size(Cat%RA))/)
 
-      if(present(get_lnSize) .and. get_lnSize) then
-         print *, ' '
-         print *, '~~~ Catalogue uses log-Sizes'
-         Cat%Sizes = dlog(Cat%Sizes)
-         Cat%log_Sizes = .true.
+      !print *, 'Alpplying log-Size?:', (present(get_lnSize) .and. get_lnSize), minval(Cat%Sizes), maxval(Cat%Sizes)
+
+      if(present(get_lnSize)) then
+         if(get_lnSize) then
+            print *, ' '
+            print *, '****************************'
+            print *, '~~~ Catalogue uses log-Sizes'
+            print *, '****************************'
+            print *, ' '
+            Cat%Sizes = dlog(Cat%Sizes)
+            Cat%log_Sizes = .true.
+         end if
       end if
 
-      print *, 'After Applying log-Size?:', (present(get_lnSize) .and. get_lnSize), minval(Cat%Sizes), maxval(Cat%Sizes)
 
       write(*,'(A)') '_______ Catalogue Read in Successful ___________'
       print *, ' '
@@ -1336,6 +1359,7 @@ module Catalogues
 
       Cat%Name = ' '
 
+      if(allocated(Cat%Posterior_Method)) deallocate(Cat%Posterior_Method)
       if(allocated(Cat%Galaxy_Number)) deallocate(Cat%Galaxy_Number)
       if(allocated(Cat%ntile)) deallocate(Cat%ntile)
       if(allocated(Cat%flux)) deallocate(Cat%flux)
@@ -1366,6 +1390,7 @@ module Catalogues
 
       Cat%Name = ' '
 
+      allocate(Cat%Posterior_Method(nObj)); Cat%Posterior_Method = 0
       allocate(Cat%Galaxy_Number(nObj)); Cat%Galaxy_Number = 0
       allocate(Cat%flux(nObj)); Cat%flux = -100.e0_double
       Cat%Mag_Label = ' '
@@ -1393,9 +1418,13 @@ module Catalogues
     logical function Catalogue_Constructed(Cat)
       type(Catalogue),intent(in)::Cat
 
+
+      Catalogue_Constructed = .false.
+
       if(Cat%Name /= ' ') Catalogue_Constructed = .true.
 
       Catalogue_Constructed = .false.
+      if(allocated(Cat%Posterior_Method)) Catalogue_Constructed = .true.
       if(allocated(Cat%Galaxy_Number)) Catalogue_Constructed = .true.
       if(allocated(Cat%flux)) Catalogue_Constructed = .true.
       if(allocated(Cat%MF606W)) Catalogue_Constructed = .true.
@@ -1475,6 +1504,7 @@ module Catalogues
       end if
 
       Cat%Galaxy_Number(Index) = Cat_Ref%Galaxy_Number(Index_Ref)
+      Cat%Posterior_Method(Index) = Cat_Ref%Posterior_Method(Index_Ref)
       Cat%flux(Index) = Cat_Ref%flux(Index_Ref)
       Cat%fluxerr(Index) = Cat_Ref%fluxerr(Index_Ref)
       Cat%Absolute_Magnitude(Index) = Cat_Ref%Absolute_Magnitude(Index_Ref)

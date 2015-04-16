@@ -98,7 +98,7 @@ contains
   function delens_Source_Size_Array(mu, T, lnT) RESULT(Res)
     !--Returns the DELENSED source size.
     !--mu is magnification factor
-    !--T is size by default, or log-Size if lnT is present and true
+    !--T is size by default, or log-Size if lnT is present and true - uses NATURAL LOGARITHM - must be consistent with defintition og log-Size in catalogue
     real(double), intent(in):: mu
     real(double), intent(in):: T(:)
     logical, intent(in),optional:: lnT
@@ -129,13 +129,13 @@ contains
     !--Galaxy Data Input
     real(double), intent(in):: Theta(:), Magnitude(:), Source_Redshift(:), Position(:,:) !-RA,Dec-!
     !--Supplementary
-    integer:: Method
+    integer:: Method(:)
     real(double), intent(in):: Pr_MagGrid(:), Pr_SizeGrid(:), SM_Prior(:,:), M_Prior(:)
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:) !-Source_Redshift-!
     logical:: use_lnT
-    character(3):: Flag
+    character(3):: Flag(:)
 
     real(double),allocatable:: Posterior_perSource(:)
 
@@ -161,13 +161,13 @@ contains
     !--Galaxy Data Input
     real(double), intent(in):: Theta(:), Magnitude(:), Source_Redshift(:), Position(:,:) !-RA,Dec-!
     !--Supplementary
-    integer, intent(in):: Method
+    integer, intent(in):: Method(:)
     real(double), intent(in):: Pr_MagGrid(:), Pr_SizeGrid(:), SM_Prior(:,:), M_Prior(:)
     real(double), intent(in):: Size_Limits(:), Magnitude_Limits(:)
     real(double), intent(in):: MagnificationGrid(:), M_Pr_Renormalisation(:), SM_Pr_Renormalisation(:)
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:,:) !-Lens, Source_Redshift-!
     logical:: use_lnT
-    character(3):: Flag
+    character(3):: Flag(:)
 
     real(double),allocatable:: Posterior_perSource(:)
 
@@ -192,7 +192,7 @@ contains
           cycle
        end if
        
-       Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
+       Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method(c), Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag(c))
     end do
 
     !--Recombine
@@ -312,6 +312,10 @@ contains
 
     !--Set which method will be used, including effective survey limits
     select case(Method)
+    case(0)
+       !--Do Nothing, return a constant
+       write(*,'(A)') 'WARNING - Galaxy posterior method is zero - this should have been removed!!'
+       Likelihood_atVirialRadius_MultipleCluster_perSource = 1.0e0_double
     case(1) !--SizeOnly--!                                                                                                                                                                              
        if( (Theta > Size_Limits(2)) .or. (Theta < Size_Limits(1))) then
           nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
@@ -333,6 +337,7 @@ contains
        iMag_Limits = Magnitude_Limits; iSize_Limits = (/minval(Pr_SizeGrid), maxval(Pr_SizeGrid)/) !--Should encompase the whole data set                                                                                       
        Galaxy_Posterior_Method = 3
     case(4) !-Size mag above size data limit, Mag-Only below size data limit-!                                                                                                                              
+       STOP 'Galaxy Posterior Method 4 has been disabled at the level where the posterior is evaluated - Instead, the sample should be split before call, and the correct posterior method and prior fed in for each galaxy. Fatal.'
 
        !!$STOP 'Posterior Method 4 has been disabled as it needs further thought into its construction. In particular, with respect to the construction of the prior from the size-mag distribution, the effect of prior cuts, and correct renormalisation. The skeleton code has been added for this, but disabled for now. See commented code labeled MagRenorm'
        !--Note, in this case the data-renormalisation should take inot account that the mag only is constructed from a sample which takes small, faint galaxies                                             
@@ -348,6 +353,8 @@ contains
           Galaxy_Posterior_Method = 2
           nSizeMagPosterior = nSizeMagPosterior + 1
        end if
+    case default
+       STOP 'Likelihood_atVirialRadius_MultipleCluster_perSource - Entered Posterior Method invalid, FATAL'
     end select
 
     !---Error Catching: Return Likelihood == 0 for all alpha if size or magnitude falls outside set analysis limits - This should not occur as this body should be removed from the sample
@@ -357,13 +364,14 @@ contains
        STOP 'Magnitude of entered source falls outside limits, this should not happen - Check source selection'
        return
     end if
-    if( (Theta < iSize_Limits(1)) .or. (Theta > iSize_Limits(2)) ) then
-       Posterior_Flag = '1.2'
-       Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
-       STOP 'Size of entered source falls outside limits, this should not happen - Check source selection'
-       return
+    if((Galaxy_Posterior_Method == 1) .or. (Galaxy_Posterior_Method == 2)) then
+       if( (Theta < iSize_Limits(1)) .or. (Theta > iSize_Limits(2)) ) then
+          Posterior_Flag = '1.2'
+          Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
+          STOP 'Size of entered source falls outside limits, this should not happen - Check source selection'
+          return
+       end if
     end if
-
  
 
     allocate(Posterior_perGalaxy_Redshift(nZ)); Posterior_perGalaxy_Redshift = 0.e0_double
@@ -429,25 +437,33 @@ contains
           RedshiftPDF = 1.e0_double
        else
           RedshiftPDF = redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
-          !!DEPRECATED RedshiftPDF = redshift_Distribution_byLookup(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
           !--Use this to evaluate at every level CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if
        
        !--Construct the correctly renormalised prior
        Renormalisation_Size_Limits =  delens_Source_Size(Effective_Magnification, iSize_Limits, use_lnT)!!DEPRECATED iSize_Limits/dsqrt(Effective_Magnification)
        Renormalisation_Magnitude_Limits = delens_Source_Magnitude(Effective_Magnification, iMag_Limits) !!DEPRECATED iMag_Limits + 2.5e0_double*dlog10(Effective_Magnification)
-
-
        
        if(Cuts_Renormalise_Likelihood) then
 !          if(z ==1) print *, 'KAPPA RENORMALISATION TURNED ON'
-          Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, SM_Pr_Renormalisation, ExValue = 1.e30_double)
-          if(Renorm == 0) then
-             Kappa_Renormalised_Prior = 0.e0_double
-          else
-             Kappa_Renormalised_Prior = SM_Prior/Renorm
+          if(Galaxy_Posterior_Method == 1 .or. Galaxy_Posterior_Method == 2) then
+             Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, SM_Pr_Renormalisation, ExValue = 1.e30_double)
+             if(Renorm == 0) then
+                Kappa_Renormalised_Prior = 0.e0_double
+             else
+                Kappa_Renormalised_Prior = SM_Prior/Renorm
+             end if
+             Renorm = 0.e0_double
           end if
-          Renorm = 0.e0_double
+          if(Galaxy_Posterior_Method == 3) then
+             Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, M_Pr_Renormalisation, ExValue = 1.e30_double)
+             if(Renorm == 0) then
+                Kappa_Renormalised_MagPrior = 0.e0_double
+             else
+                Kappa_Renormalised_MagPrior = M_Prior/Renorm
+             end if
+             Renorm = 0.e0_double
+          end if
        else
  !         if(i == 1 .and. z ==1 .and. c == 1) print *, 'KAPPA RENORMALISATION TURNED OFF'
           Kappa_Renormalised_Prior =  SM_Prior
@@ -515,46 +531,53 @@ contains
           end if
           
        case(3) !--Magnitude-only
-          allocate(Mag_Only_Prior(size(Pr_MagGrid))); Mag_Only_Prior = 0.e0_double                                                                                     
-          
-          if(Method == 4) then !-if Size_Mag+Mag and here, then this lies below the lower size limit and *must* therefore be correctly renormalised. This requires p_[m_0] to be calculated over the whole grid [Note: this may then take longer]
+          !allocate(Mag_Only_Prior(size(Pr_MagGrid))); Mag_Only_Prior = 0.e0_double                                                                                     
+        
+          !---DEPRACTED AFTER SOURCE SAMPLE SEPERATION CHANGES (9Apr2015)
+!!$          if(Method == 4) then !-if Size_Mag+Mag and here, then this lies below the lower size limit and *must* therefore be correctly renormalised. This requires p_[m_0] to be calculated over the whole grid [Note: this may then take longer]
+!!$
+!!$             print *, 'RECONSTRUCTING MAG PRIOR DISTRIBUTION AS PART OF SIZEMAG+MAG ANALYSIS'
+!!$
+!!$             do j = 1, size(Pr_MagGrid)          
+!!$                !--Construct p_[m_0] = int p_[theta_0, m_0], where int is understood to integrate over magnifcation-dependant survey size limits.
+!!$                if( ( Pr_MagGrid(j)<=  Magnitude_0 ) .and. (  Pr_MagGrid(j+1) > Magnitude_0) ) then
+!!$                   Unlensed_Mag_Index = j
+!!$                end if
+!!$                Mag_Only_Prior(j) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)        
+!!$             end do
+!!$             !--Renormalise
+!!$             Mag_Only_Prior = Mag_Only_Prior/Integrate(Pr_MagGrid, Mag_Only_Prior, 2, lim = Renormalisation_Magnitude_Limits)
+!!$             
+!!$             
+!!$          else !--This is the case of Magnitude only analysis
+!!$
+!!$             !--Construct p_[m_0] as the magnitude distribution for a sample of galaxies between cuts-corrected survey size limits                                                
+!!$
+!!$             !--Find point where de-lensed magnitude lie on intrinsic distribution - could also use locate (NR).                           
+!!$             do j = 1, size(Pr_MagGrid)-1          
+!!$                !--Construct p_[m_0] = int p_[theta_0, m_0], where int is understood to integrate over magnifcation-dependant survey size limits.
+!!$                !--Renormalisation here considered to be set by the overall renormalisation of the size-magnitude distribution. This is not true if considering the mag-only case of Size-Mag+Mag
+!!$                if( ( Pr_MagGrid(j)<=  Magnitude_0 ) .and. (  Pr_MagGrid(j+1) > Magnitude_0) ) then
+!!$                   Unlensed_Mag_Index =j
+!!$                   Mag_Only_Prior(j) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)                                                                      
+!!$                   Mag_Only_Prior(j+1) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j+1,:), 2, lim = Renormalisation_Size_Limits)                                                                    
+!!$                   exit                                                                                                                                                                                  
+!!$                end if
+!!$             end do
+!!$            
+!!$          end if
+!!$
+!!$
+!!$          !---EVALUATE MAGNITUDE-ONLY LIKELIHOOD                   
+!!$          Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Pr_MagGrid(Unlensed_Mag_Index:Unlensed_Mag_Index+1), Mag_Only_Prior(Unlensed_Mag_Index:Unlensed_Mag_Index+1), ExValue =  1.e-100_double)*RedshiftPDF
+!!$
+!!$          !--Could also reasonably pass in the whole Mag_Only_Prior, but interpoaltion may take longer
+!!$          deallocate(Mag_Only_Prior)                                                                                                                                                                   
 
-             print *, 'RECONSTRUCTING MAG PRIOR DISTRIBUTION AS PART OF SIZEMAG+MAG ANALYSIS'
+          !---Added after source sample split (9th April 2015)
+          Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Pr_MagGrid(:), Kappa_Renormalised_MagPrior(:), ExValue =  1.e-100_double)*RedshiftPDF
 
-             do j = 1, size(Pr_MagGrid)          
-                !--Construct p_[m_0] = int p_[theta_0, m_0], where int is understood to integrate over magnifcation-dependant survey size limits.
-                if( ( Pr_MagGrid(j)<=  Magnitude_0 ) .and. (  Pr_MagGrid(j+1) > Magnitude_0) ) then
-                   Unlensed_Mag_Index = j
-                end if
-                Mag_Only_Prior(j) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)        
-             end do
-             !--Renormalise
-             Mag_Only_Prior = Mag_Only_Prior/Integrate(Pr_MagGrid, Mag_Only_Prior, 2, lim = Renormalisation_Magnitude_Limits)
-             
-             
-          else !--This is the case of Magnitude only analysis
 
-             !--Construct p_[m_0] as the magnitude distribution for a sample of galaxies between cuts-corrected survey size limits                                                
-
-             !--Find point where de-lensed magnitude lie on intrinsic distribution - could also use locate (NR).                           
-             do j = 1, size(Pr_MagGrid)-1          
-                !--Construct p_[m_0] = int p_[theta_0, m_0], where int is understood to integrate over magnifcation-dependant survey size limits.
-                !--Renormalisation here considered to be set by the overall renormalisation of the size-magnitude distribution. This is not true if considering the mag-only case of Size-Mag+Mag
-                if( ( Pr_MagGrid(j)<=  Magnitude_0 ) .and. (  Pr_MagGrid(j+1) > Magnitude_0) ) then
-                   Unlensed_Mag_Index =j
-                   Mag_Only_Prior(j) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j,:), 2, lim = Renormalisation_Size_Limits)                                                                      
-                   Mag_Only_Prior(j+1) = Integrate(Pr_SizeGrid, Kappa_Renormalised_Prior(j+1,:), 2, lim = Renormalisation_Size_Limits)                                                                    
-                   exit                                                                                                                                                                                  
-                end if
-             end do
-            
-          end if
-
-          !---EVALUATE MAGNITUDE-ONLY LIKELIHOOD                   
-          Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Pr_MagGrid(Unlensed_Mag_Index:Unlensed_Mag_Index+1), Mag_Only_Prior(Unlensed_Mag_Index:Unlensed_Mag_Index+1), ExValue =  1.e-100_double)*RedshiftPDF
-
-          !--Could also reasonably pass in the whole Mag_Only_Prior, but interpoaltion may take longer
-          deallocate(Mag_Only_Prior)                                                                                                                                                                   
           !---------------------------------------------------------------------------------------------------------------------                                                                             
           
           !--The following gives unbiased results if no size cuts are used, however is known to be biased in the presence of size cuts, I believe that this is due to the fact that the prior itself should depend on the size cuts in the presence of a size-magnitude correlation. THIS SHOULD BE DELETED IF CODE IS VERIFIED AS UNBIASED AFTER 23RD JAN 2015
@@ -685,7 +708,7 @@ contains
        !--Edit this code to calculate the magnitude renormalisation over the whole size grid if Posterior_Method == 3, and over (0, Survey_Size_Limit(1)) if Posterior_Method == 4                             
        !-- vv This is only true if there are no cuts on the size-mag prior vv                                                                                                                                  
        !MagRenorm          MagOnly_Renormalisation_by_Magnification(i) =  Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)                                                                                                                                                                                                                 
-       !--No cuts on size presumed - NOTE, THIS MAY NOW NOT BE NECCESSARY AFTER EDIT TO CODE TO ACCOUNT FOR SIZE LIMITS (23 JAN 2015)
+       !--Get Magnitufaction -dependent renomralisation for mag-prior, usually constructed from sample for which size-information is not present
        MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
     end do
 
@@ -694,6 +717,13 @@ contains
        write(53, *) MagnificationGrid(i), Renormalisation_by_Magnification(i)
     end do
     write(*,'(2(A))') 'File output: ', trim(adjustl(Output_Prefix))//'Renormalisation_by_Magnification.dat'
+
+    open(unit = 53, file = trim(adjustl(Output_Prefix))//'Magnitude_Renormalisation_by_Magnification.dat')
+    do i = 1, size(MagOnly_Renormalisation_by_Magnification)
+       write(53, *) MagnificationGrid(i), MagOnly_Renormalisation_by_Magnification(i)
+    end do
+    write(*,'(2(A))') 'File output: ', trim(adjustl(Output_Prefix))//'Magnitude_Renormalisation_by_Magnification.dat'
+
 
     !---- Set up Lookup Table to p(z|m) is used
     call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
