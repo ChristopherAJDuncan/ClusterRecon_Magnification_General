@@ -822,19 +822,16 @@ contains
     print *, '-----Cutting Source Catalogue:'
     
     call Cut_By_PhotoMetricRedshift(iCatt, Lower_Redshift_Cut) !--Cut out foreground-
-    call Cut_by_Magnitude(iCatt, Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!   
+    call Cut_by_Magnitude(iCatt, Survey_Magnitude_Limits(1), Survey_Magnitude_Limits(2)) !-Taken from CH08 P1435-!   
+    !print *, '------- CUTTING WHOLE CATALOGUE BY SNR >= 20. FOR ALL ANALYSES'
+    !call Cut_by_SNR(iCatt, 20.e0_double, 10000.e0_double)
+
     print *, '------------------------------'
     print *, ' '
     
     print *, '**Testing for Cluster contamination in the Data Catalogue'
     call Foreground_Contamination_NumberDensity(iCatt, Clusters_In%Position, trim(run_Output_Dir), Masked_Survey_Area)
-    
-    !--Apply Input Core Cuts
-    print *, ' '
-    print *, '---Masking apertures on data (As Input):', Core_Cut_Radius
-    call Mask_Circular_Aperture(iCatt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
-    print *, ' '
-    
+        
     if(Set_Foreground_Masks) then
        write(*,'(A)') '!---------------------------------------------------------------------------------------------------------'
        write(*,'(A)') 'Check for foreground contamination and enter new values for the foreground masks to be applied to data:'
@@ -853,6 +850,13 @@ contains
        read(*,*)
        write(*,'(A)') '---------------------------------------------------------------------------------------------------------!'
     end if
+
+    !--Apply Input Core Cuts
+    print *, ' '
+    print *, '---Masking apertures on data (As Input):', Core_Cut_Radius
+    call Mask_Circular_Aperture(iCatt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
+    print *, ' '
+
 
     !---Split into Size-Mag and Mag-Only Catalogues
     print *, 'Splitting Source Sample'
@@ -892,8 +896,11 @@ contains
        print *, '--Cuts on Prior:'
        do i =1, size(BFCatt)
           call Cut_By_PhotoMetricRedshift(BFCatt(i), Lower_Redshift_Cut) !--Cut out foreground-
-          call Cut_by_Magnitude(BFCatt(i), Survey_Magnitude_Limits(1)) !-Taken from CH08 P1435-!          
-          
+          !call Cut_by_Magnitude(BFCatt(i), Survey_Magnitude_Limits(1), Survey_Magnitude_Limits(2)) !-Should really be prior magnitude limits
+          !print *, '------- CUTTING WHOLE CATALOGUE BY SNR >= 20. FOR ALL ANALYSES'
+          !call Cut_by_SNR(BFCATT(i), 20.e0_double, 10000.e0_double)
+
+
           print *, ' '
           write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
           call Mask_Circular_Aperture(BFCatt(i), Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
@@ -903,9 +910,9 @@ contains
        select case (Nominated_Fitting_Type)
        case(0) !--Individual
           print *, 'Callign Circular Aperture, reproduce_Prior?:', reconstruct_Prior
-          call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
+          call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)
        case(1) !-2Cluster on coarse grid
-          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
+          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
        case(2) !-MCMC
           call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)), BFCatt)
        case default
@@ -916,9 +923,9 @@ contains
 
        select case (Nominated_Fitting_Type)
        case(0) !--Individual
-          call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
+          call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = .false.)
        case(1) !-2Cluster on coarse grid
-          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, returned_Cluster_Posteriors, Dist_Directory, .false.,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)))
+          call  DM_Profile_Fitting_Simultaneous_2Cluster(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Dist_Directory, .false.,  Clusters_In%Fitting_Group, Parameter_Limit_Alpha, (/(Parameter_Tolerance_Alpha, i = 1, size(Clusters_In%Position,1))/), 0.01e0_double, trim(adjustl(Bayesian_Routines_Output_Directory)))
        case(2) !-MCMC
           call DM_Profile_Fitting_Simultaneous_MCMC(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Dist_Directory, reconstruct_Prior, CLusters_In%Fitting_Group, trim(adjustl(Bayesian_Routines_Output_Directory)))
        case default

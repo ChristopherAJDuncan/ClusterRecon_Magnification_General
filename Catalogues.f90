@@ -17,7 +17,7 @@ module Catalogues
      character(60)::Name
      character(len = 10)::Mag_Label
      integer, dimension(:), allocatable:: Posterior_Method
-     real(double),dimension(:),allocatable::flux, fluxerr, MF606W, magerr, Absolute_Magnitude
+     real(double),dimension(:),allocatable::flux, fluxerr, MF606W, magerr, Absolute_Magnitude, Surface_Brightness
      integer,dimension(:),allocatable::ntile
      integer,dimension(:), allocatable::Galaxy_Number
      real(double),dimension(:),allocatable::xpos, ypos
@@ -79,16 +79,21 @@ module Catalogues
       select case(Index)
       case(1) !-Full RRG+COMBO AND STAGES matched catalogue (source must occur in STAGES master and RRG measured)--!
          Directory = 'Catalogues/'
-         Filename = 'STAGES_KSBf90_RRG+COMBO_AND_STAGES.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 41, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-! !--STAGES Master: 39: ST_FLUX_BEST, 40:ST_FLUXERR_BEST, 41:ST_MAG_BEST, 42: ST_MAGERR_BEST, 43: ST_MAG_GALFIT, 44: ST_MAGERR_GALFIT (DEFAULT MF606w: 5)
-      case(2) !--COMBO17 redshift - Matched to STAGES--!
+         Filename = 'STAGES_HSTExtended.cat'
+         Columns = (/-1,-1, 12, 13, 14, 15, -1, 3, -1, 1, 2, 9, -1, -1, 18/) !-MF606W: 7 (Galfit), 3: SEx
+
+         !Filename = 'STAGES_KSBf90_RRG+COMBO_AND_STAGES.cat.WCalib.SSNRCalib'
+         !Columns = (/-1,1, 12, 13, 10, 11, -1, 41, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-! !--STAGES Master: 39: ST_FLUX_BEST, 40:ST_FLUXERR_BEST, 41:ST_MAG_BEST, 42: ST_MAGERR_BEST, 43: ST_MAG_GALFIT, 44: ST_MAGERR_GALFIT (DEFAULT MF606w: 5)
+      case(2) !--RRG+STAGES - All RRG sources, with STAGES matched where avaialble--!
          Directory = 'Catalogues/'
-         Filename = 'STAGES_KSBf90_RRG+COMBO.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Filename = 'RRG+STAGES_HSTExtended.cat'
+         Columns = (/-1,-1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 47, 28, 29, 35/) !--THis uses RRG Sex run for Magnitudes and Fluxs, and GALFIT RE from master where available
+!!$         Filename = 'STAGES_KSBf90_RRG+COMBO.cat.WCalib.SSNRCalib.+SB'
+!!$         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
          Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'
@@ -1055,7 +1060,10 @@ module Catalogues
 
       nPass = 0; nFail = 0
       do i = 1, size(Temp_Cat%Sizes)
-         if(isNaN(Temp_Cat%Sizes(i))) cycle
+         !--TESTING< THIS NEEDS REMOVED
+         !if(i<=10) print *, 'cut_by_pixel size: removing D = -1 from both samples: THIS NEEDS DEALT WITH'
+         !if(isNaN(Temp_Cat%Sizes(i))) cycle
+
          if((Temp_Cat%Sizes(i) >= ilower) .and.(Temp_Cat%Sizes(i) <= iupper)) then
             nPass = nPass + 1
             call Catalogue_Assign_byGalaxy_byCatalogue(Cat, nPass, Temp_Cat, i)
@@ -1068,6 +1076,13 @@ module Catalogues
          print *, 'Error - Cut_By_PixelSize - Error in Assigning galxies that pass cuts', nPass, size(Cat%Sizes)
          STOP
       end if
+!!$      if(present(Discarded) .and. nFail /= size(Discarded%Sizes)) then
+!!$         !--Previously this has been due to the presence of NaNs
+!!$         print *, 'FATAL Error - Cut_By_PixelSize - Error in Assigning galxies that fail cuts', nFail, size(Discarded%RA)
+!!$         print *, 'nFail, nFail+nPass, Catalogue Size:', nFail, nPass+nFail, size(Temp_Cat%RA)
+!!$         STOP
+!!$      end if
+
 
       print *, 'Cut Catalogue by size between limits:', ilower, iupper, '; nCut = ', size(Temp_Cat%RA) - nPass
 
@@ -1280,7 +1295,6 @@ module Catalogues
          end if
       end if
 
-
       write(*,'(A)') '_______ Catalogue Read in Successful ___________'
       print *, ' '
 
@@ -1364,6 +1378,7 @@ module Catalogues
       if(allocated(Cat%ntile)) deallocate(Cat%ntile)
       if(allocated(Cat%flux)) deallocate(Cat%flux)
       if(allocated(Cat%fluxerr)) deallocate(Cat%fluxerr)
+      if(allocated(Cat%Surface_Brightness)) deallocate(Cat%Surface_Brightness)
       if(allocated(Cat%MF606W)) deallocate(Cat%MF606W)
       if(allocated(Cat%magerr)) deallocate(Cat%magerr)
       if(allocated(Cat%Absolute_Magnitude)) deallocate(Cat%Absolute_Magnitude)
@@ -1394,6 +1409,7 @@ module Catalogues
       allocate(Cat%Galaxy_Number(nObj)); Cat%Galaxy_Number = 0
       allocate(Cat%flux(nObj)); Cat%flux = -100.e0_double
       Cat%Mag_Label = ' '
+      !allocate(Cat%Surface_Brightness(nObj)); Cat%Surface_Brightness = -100.e0_double
       allocate(Cat%MF606W(nObj)); Cat%MF606W = 0.e0_double
       allocate(Cat%Absolute_Magnitude(nObj)); Cat%Absolute_Magnitude = 0.e0_double
       allocate(Cat%xpos(nObj)); Cat%xpos = 0.e0_double
@@ -1427,6 +1443,7 @@ module Catalogues
       if(allocated(Cat%Posterior_Method)) Catalogue_Constructed = .true.
       if(allocated(Cat%Galaxy_Number)) Catalogue_Constructed = .true.
       if(allocated(Cat%flux)) Catalogue_Constructed = .true.
+      if(allocated(Cat%Surface_Brightness)) Catalogue_Constructed = .true.
       if(allocated(Cat%MF606W)) Catalogue_Constructed = .true.
       if(allocated(Cat%Absolute_Magnitude)) Catalogue_Constructed = .true. 
       if(allocated(Cat%xpos)) Catalogue_Constructed = .true.
@@ -1507,6 +1524,7 @@ module Catalogues
       Cat%Posterior_Method(Index) = Cat_Ref%Posterior_Method(Index_Ref)
       Cat%flux(Index) = Cat_Ref%flux(Index_Ref)
       Cat%fluxerr(Index) = Cat_Ref%fluxerr(Index_Ref)
+      !Cat%Surface_Brightness(Index) = Cat_Ref%Surface_Brightness(Index_Ref)
       Cat%Absolute_Magnitude(Index) = Cat_Ref%Absolute_Magnitude(Index_Ref)
       Cat%MF606W(Index) = Cat_Ref%MF606W(Index_Ref)
       Cat%magerr(Index) = Cat_Ref%magerr(Index_Ref)

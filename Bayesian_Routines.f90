@@ -216,14 +216,20 @@ contains
 
     type(Catalogue):: tCat, inputCat
 
-    print *, 'Splitting Catalogue!!'
+    write(*,'(A)') '_______________________________________________________SPLITTING CATALOGUE________________________________________________'
 
     inputCat = iCat
+
+    PRINT *, 'Input Catalogue Check:'
+    print *, 'Sizes:', minval(inputCat%Sizes), maxval(inputCat%Sizes)
+    print *, 'Magnitude:', minval(inputCat%MF606W), maxval(inputCat%MF606W)
 
     if((Catalogue_Constructed(inputCat) == .false.) .or. (size(inputCat%RA) == 0)) STOP 'FATAL ERROR - split_Sample - Input Catalogue is not allocated, or zero'
 
     !--Split by Size Limits
+    print *, 'Cutting by Pixel Size'
     call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
+    print *, 'Pixel Size Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W), count(tCat%MF606W <= 5.), count(tCat%MF606W <= 0.1), count(tCat%MF606W <= 0.)
     call Concatonate_Catalogues(oCat(2), tCat)
     call Catalogue_Destruct(tCat)
     
@@ -235,6 +241,7 @@ contains
 
     !--Split by SNR Limits
     call Cut_By_SNR(inputCat, Survey_SNR_Limits(1), Survey_SNR_limits(2), tCat)
+    print *, 'SNR Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W)
     call Concatonate_Catalogues(oCat(2), tCat)
     call Catalogue_Destruct(tCat)
 
@@ -259,7 +266,10 @@ contains
        oCat(2)%Posterior_Method  = 0
     elseif(Posterior_Method == 3) then !-Mag-Only
        !--Edit Mag-Only catalogue to contain every catalogue (this whole routine could really be by-passed in this case)
+       !--Use the following to produce magnitude-only on the whole catalogue
+       print *, 'Mag-Only uses the full sample...'
        call Concatonate_Catalogues(oCat(2), oCat(1))
+
        oCat(1)%Posterior_Method = 0
        oCat(2)%Posterior_Method  = 3
     elseif(Posterior_Method == 4) then !- Size-Mag where appropriate, M-Only thereafter
@@ -286,6 +296,7 @@ contains
     print *, 'Size-Mag Cat has:', size(oCat(1)%RA), ' of ', size(iCat%RA), ' galaxies'
     print *, 'Mag-Only Cat has:', size(oCat(2)%RA), ' of ', size(iCat%RA), ' galaxies'
     write(*,'(A)') '__________________________________ Succesfully Split Catalogue _________________________________________________'
+
 
   end subroutine split_Sample
 
@@ -474,29 +485,73 @@ contains
   end subroutine Convert_Alpha_Posteriors_to_VirialMass
 
 
-  function Select_Source_Sample(Cat, Ap_Pos, Ap_Radius)
+  function Select_Source_Sample(Cat, Ap_Pos, Ap_Radius, Group_Index, Redshift_Limit)
     !--Ap Radius must be in degrees
+    !--Redshift Limit is, for now, a LOWER limit only
     type(Catalogue), intent(in):: Cat
     real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+    integer, intent(in), optional:: Group_Index(:)
+    real(double), intent(in), optional:: Redshift_Limit(:)
+    !! DEPRECATED real(double), intent(in), optional:: Redshift_Limit(:,:)
     type(Catalogue):: Select_Source_Sample
 
-    integer:: C
-    type(Catalogue):: tCat, tSource_Catalogue
+    integer, allocatable:: iGroup_Index(:)
 
-    print *, 'Called Select Source Sample. Press enter to continue (expected deprecated)'
-    read(*,*)
+    integer:: C, i
+    type(Catalogue):: tCat, tSource_Catalogue, Group_Cat
+
+    INTERFACE
+        function Select_Source_Sample(Cat, Ap_Pos, Ap_Radius, Group_Index, Redshift_Limit)
+          use Param_Types; use Catalogues, only: Catalogue
+          !--Ap Radius must be in degrees                                                                                                                                                
+          type(Catalogue), intent(in):: Cat
+          real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+
+          integer, intent(in), optional:: Group_Index(:)
+          real(double), intent(in), optional:: Redshift_Limit(:)
+          type(Catalogue):: Select_Source_Sample
+        end function Select_Source_Sample
+    END INTERFACE
+
+
+    write(*,'(A)') '__________________________________SELECTING SAMPLE__________________________________________________'
+
+    if(present(Redshift_Limit)) then
+       print *, 'Lower Redshift_Limit of ', Redshift_Limit, ' will be applied to sample selection'
+       if(size(Redshift_Limit) /= size(Ap_Pos,1)) STOP 'Select_Source_Sample - FATAL ERROR - Redshift Limit is not of correct size'
+    end if
+
+    if(present(Group_Index)) then
+       allocate(iGroup_Index(size(Group_Index))); iGroup_Index = Group_Index
+    else
+       allocate(iGroup_Index(size(Ap_Pos,1))); iGroup_Index = (/(i,i=1,size(Ap_Pos,1))/)
+    end if
 
     !--Identify the source sample as the combination of sources in each aperture
     tCat = Cat
-    do C = 1, size(Ap_Pos,1)
-       !          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
-       call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(C,:), Ap_Radius(C), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
-       call Concatonate_Catalogues(Select_Source_Sample, TSource_Catalogue) 
+    do C = 1, size(iGroup_Index)
+       !--Get sources for that aperture
+       call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(iGroup_Index(C),:), Ap_Radius(iGroup_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+       !--Cut those sources which are undesirable (Usually by redshift)
+       if(present(Redshift_Limit)) then
+          print *, 'SOURCE SELECTION - CUTTING by 0.2 for all clusters!!!: THIS NEEDS DEALT WITH'
+          call Cut_By_PhotometricRedshift(TSource_Catalogue, 0.2e0_double, 10000.e0_double)!DEPRECATED , Redshift_Limit(iGroup_Index(C),2))
+          !call Cut_By_PhotometricRedshift(TSource_Catalogue, Redshift_Limit(iGroup_Index(C)), 10000.e0_double)!DEPRECATED , Redshift_Limit(iGroup_Index(C),2))
+       end if
+       call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
        call Catalogue_Destruct(TSource_Catalogue)
-       !--Mask Source Galaxies for that aperture to ensure no double counting
-       call Mask_Circular_Aperture(tCat, Ap_Pos(C,:),  Ap_Radius(C))          
+       !--Mask Source Galaxies in temporary catalogue for that aperture to ensure no double counting
+       print *, '--__ Applying mask to temporary Catalogue as part of Sample Selection, to ensure no double counting...'
+       call Mask_Circular_Aperture(tCat, Ap_Pos(iGroup_Index(C),:),  Ap_Radius(iGroup_Index(C)))          
     end do
-    call Catalogue_Destruct(tCat)
+    call Catalogue_Destruct(tCat); call Catalogue_Destruct(tSource_Catalogue)
+
+    Select_Source_Sample = Group_Cat
+
+    print *, 'Got source sample. Sample contains:', size(Group_Cat%RA), ' sources'
+    write(*,'(A)') '_____________________________________________________________________________________________________'
+
+    call Catalogue_Destruct(Group_Cat); deallocate(iGroup_Index)
     
   end function Select_Source_Sample
 
@@ -577,7 +632,7 @@ contains
     type(MassGrouping),allocatable:: MassOrderingGroup(:)
     integer, allocatable:: cluster_MassOrdering_Groups(:)
     real(double), allocatable:: MO_tr200(:)
-    logical:: Enforce_Mass_Ordering
+    logical:: Enforce_Mass_Ordering = .true.
 
     !--Temporary Posterior construction
     real(double),allocatable:: tMarginalised_Posterior_Grid(:), tMarginalised_Posterior(:)
@@ -646,6 +701,11 @@ contains
     !--Get the angular distance between clusters being considered
     angularDistance_betweenClusters = get_distance_between_Clusters(Ap_Pos)
 
+    if(count(Fit_Group == 1) /= size(Fit_Group)) then
+       write(*,'(A)') 'Entered fit group does not simulataneously fit all clusters. Are you sure? <Enter> to continue'
+       read(*,*)
+    end if
+
     do G = 1, 100 !-Assume no more than 100 groups will be present
        !--Find all clusters with that grouping
        !---Group Index contains the index of the clusters within that group, and can be used to access the correct Aperture Location and Radius. Size of Group_Index is the number of free parameters being used
@@ -672,19 +732,22 @@ contains
           end if
        end do
 
-       !--Identify the source sample as the combination of sources in each aperture
-       tCat = Cat
-       do C = 1, size(Group_Index)
-          call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
-          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
-          call Catalogue_Destruct(TSource_Catalogue)
-          !--Mask Source Galaxies for that aperture to ensure no double counting
-          print *, '--__ Applying mask to temporary Catalogue as part of MCMC, to ensure no double counting...'
-          call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
-       end do
-       call Catalogue_Destruct(tCat)
+       Group_Cat = Select_Source_Sample(Cat, Ap_Pos, iAp_Radius, Group_Index, 1.2e0_double*Lens_Redshift)
 
-       print *, 'Source Catalogue contains:', size(Group_Cat%RA), ' of ', size(Cat%RA), 'galaxies'
+!!$ !! DEPRECATED
+!!$       !--Identify the source sample as the combination of sources in each aperture
+!!$       tCat = Cat
+!!$       do C = 1, size(Group_Index)
+!!$          call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+!!$          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
+!!$          call Catalogue_Destruct(TSource_Catalogue)
+!!$          !--Mask Source Galaxies for that aperture to ensure no double counting
+!!$          print *, '--__ Applying mask to temporary Catalogue as part of MCMC, to ensure no double counting...'
+!!$          call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
+!!$       end do
+!!$       call Catalogue_Destruct(tCat)
+!!$
+!!$       print *, 'Source Catalogue contains:', size(Group_Cat%RA), ' of ', size(Cat%RA), 'galaxies'
 
        if(allocated(Source_Positions)) deallocate(Source_Positions)
        allocate(Source_Positions(size(Group_Cat%RA),2));
@@ -956,6 +1019,8 @@ contains
 
           !______________________EVALUATE LIKELIHOOD AT NEW CHAIN POINT________________________________________________!
           !--Set up Temporary Source Sample array (Parallelisation does not like derived types)
+          if(allocated(tMF606W)) deallocate(tMF606W); if(allocated(tRedshift)) deallocate(tRedshift); if(allocated(tSizes)) deallocate(tSizes);
+          if(allocated(tPosterior_Method)) deallocate(tPosterior_Method); if(allocated(Posterior_Flag)) deallocate(Posterior_Flag)
           allocate(tMF606W(size(Group_Cat%MF606W))); tMF606W = Group_Cat%MF606W
           allocate(tRedshift(size(Group_Cat%Redshift))); tRedshift = Group_Cat%Redshift
           allocate(tSizes(size(Group_Cat%Sizes))); tSizes = Group_Cat%Sizes
@@ -1002,6 +1067,7 @@ contains
 
                 if(enforce_Mass_Ordering) then
                    do i = 1, size(MassOrderingGroup) !--For each group
+                      if(allocated(MO_tr200)) deallocate(MO_tr200)
                       allocate(MO_tr200(size(MassOrderingGroup(i)%ClusterIndex)));
 
                       !--Isolate r200 values for that group
@@ -1029,7 +1095,7 @@ contains
              if(allocated(tAlpha)) deallocate(tAlpha); if(allocated(tAp_Pos)) deallocate(tAp_Pos)
           end do
           !$OMP END PARALLEL
-          deallocate(tMF606W, tRedshift, tSizes, tPosterior_Method)
+          deallocate(tMF606W, tRedshift, tSizes, tPosterior_Method, Posterior_Flag)
           !--Check that initial value of the chain has not been placed outside priors
           if(chainCount == 1 .and. any(Likelihood(:,chainCount) <= -(huge(1.e0_double)+100.e0_double))) then
              print *, 'MCMC - Possible error with initial positioning of chain, outside prior limits. FATAL.'
@@ -1166,7 +1232,7 @@ contains
 
   end function Start_MCMC_Chain_TopHatAperture
 
-  subroutine DM_Profile_Fitting_Simultaneous_2Cluster(iCat, Ap_Pos, Ap_Radius, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Alpha_Limit, Grid_Tolerance, Alpha_Tolerance, Output_Prefix, Blank_Field_Catalogue)
+  subroutine DM_Profile_Fitting_Simultaneous_2Cluster(iCat, Ap_Pos, Ap_Radius, Lens_Redshift, Marginalised_Posteriors, Distribution_Directory, reproduce_Prior, Fit_Group, Alpha_Limit, Grid_Tolerance, Alpha_Tolerance, Output_Prefix, Blank_Field_Catalogue)
     use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_likelihood_evaluation_precursors, lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample
     use gridintervals, only: equalscale; use Integration, only: Integrate; use Interpolaters, only: Linear_Interp
     !-Routine that produces posteriors on dark matter profile free parameters, by simultaneously fitting to all clusters that belong to the same 'Fit_Group'.
@@ -1179,7 +1245,7 @@ contains
     !-- Output is marginalised posterior interpolated for true output. Difficulty in passing out joint posterior results from the unknown size of the joint distribution (rank), and how many need passed out. Instead, they are written to file.
 
     type(Catalogue), intent(in):: iCat(:)
-    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:), Lens_Redshift(:)
     real(double),intent(out),allocatable::Marginalised_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-! 
     character(*), intent(in):: Distribution_Directory
     logical, intent(in):: reproduce_Prior
@@ -1232,7 +1298,6 @@ contains
     real(double),allocatable:: RedshiftGrid(:)
     real(double),allocatable::Sigma_Crit(:,:)    
     real(double),allocatable:: MagnificationGrid(:), Renormalisation_by_Magnification(:), MagOnly_Renormalisation_by_Magnification(:)
-    real(double)::Lens_Redshift = 0.165e0_double    
 
     !--Fine Grid declaration
     integer,dimension(2):: Max_Point
@@ -1296,7 +1361,7 @@ contains
     end if
 
     !--Get Precursor
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, (/(Lens_Redshift,i=1,size(Fit_Group))/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
 
     !--Set up output grid, on which the marginalised posteriors will be output, as the linear interpolation of the constructed marginalised posterior below
@@ -1332,18 +1397,21 @@ contains
           end if
        end do
 
-       tCat = Cat
-       do C = 1, size(Group_Index)
-!          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
-          call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
-          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
-          call Catalogue_Destruct(TSource_Catalogue)
-          !--Mask Source Galaxies for that aperture to ensure no double counting
-          print *, '--__Applying mask as part of 2Cluster, to enusre no double counting...'
-          call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
-       end do
-       call Catalogue_Destruct(tCat)
-       print *, 'Got source sample'
+       Group_Cat = Select_Source_Sample(Cat, Ap_Pos, iAp_Radius, Group_Index, 1.2e0_double*Lens_Redshift)
+
+!!$       tCat = Cat
+!!$       do C = 1, size(Group_Index)
+!!$!          print *, 'Cutting on a core radius of:', Core_Cut_Radius(Group_Index(C)), ' arcminutes for aperture:', Group_Index(C)
+!!$          !--Get galaxies in aperture
+!!$          call Identify_Galaxys_in_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:), iAp_Radius(Group_Index(C)), TSource_Catalogue)!, Core_Radius = Core_Cut_Radius(Group_Index(C))/60.e0_double)
+!!$          call Concatonate_Catalogues(Group_Cat, TSource_Catalogue) 
+!!$          call Catalogue_Destruct(TSource_Catalogue)
+!!$          !--Mask Source Galaxies for that aperture to ensure no double counting
+!!$          print *, '--__Applying mask as part of 2Cluster, to enusre no double counting...'
+!!$          call Mask_Circular_Aperture(tCat, Ap_Pos(Group_Index(C),:),  iAp_Radius(Group_Index(C)))          
+!!$       end do
+!!$       call Catalogue_Destruct(tCat)
+!!$       print *, 'Got source sample'
 
        if(allocated(Source_Positions)) deallocate(Source_Positions)
        allocate(Source_Positions(size(Group_Cat%RA),2));
@@ -1365,7 +1433,7 @@ contains
           !--Do single fitting of cluster
           print *, 'Just attempting a single fit...'
           allocate(Posterior_Single(2,size(AlphaGrid1))); Posterior_Single = dsqrt(-1.e0_double); Posterior_Single(1,:) = AlphaGrid1
-          call DM_Profile_Variable_Posterior_SingleFit(Group_Cat, Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Group_Index(1),:), Posterior_Single, Output_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)
+          call DM_Profile_Variable_Posterior_SingleFit(Group_Cat, Surface_Mass_Profile, Lens_Redshift(Group_Index(1)), Ap_Pos(Group_Index(1),:), Posterior_Single, Output_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)
           Marginalised_Posteriors(Group_Index(1),2,:) = Linear_Interp(Marginalised_Posteriors(Group_Index(1),1,:), Posterior_Single(1,:), Posterior_Single(2,:), ExValue =1.e-100_double)
           deallocate(Posterior_Single, AlphaGrid1, Group_Index, Source_Positions)
           call Catalogue_Destruct(Group_Cat)
@@ -1403,7 +1471,7 @@ contains
        !$OMP DO
        do i = 1, nAlpha(1)
           do j = 1, nAlpha(2)
-             Likelihood(i,j) = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/AlphaGrid1(i),AlphaGrid2(j)/), tPosterior_Method, Surface_Mass_Profile, tAp_Pos, (/Lens_Redshift,Lens_Redshift/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit, use_lnSize, Posterior_Flag(i,j,:))
+             Likelihood(i,j) = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/AlphaGrid1(i),AlphaGrid2(j)/), tPosterior_Method, Surface_Mass_Profile, tAp_Pos, (/(Lens_Redshift(Group_Index(i)), i = 1, 2)/), tSizes, tMF606W, tRedshift, Source_Positions, MagGrid, SizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, tSigma_Crit, use_lnSize, Posterior_Flag(i,j,:))
              print *, 'Done:', i, j,  Likelihood(i,j)
           end do
        end do
@@ -1514,7 +1582,7 @@ contains
 
   
 
-  subroutine DM_Profile_Variable_Posteriors_CircularAperture(iCat, Ap_Pos, Ap_Radius, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
+  subroutine DM_Profile_Variable_Posteriors_CircularAperture(iCat, Ap_Pos, Ap_Radius, Lens_Redshift, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
     use Statistics, only: mean_discrete, mode_distribution, variance_distribution; use Mass_profiles
     use Distributions; use Cosmology, only: angular_diameter_distance_fromRedshift; use Interpolaters, only: Linear_Interp; use gridintervals, only: equalscale
     !--Main routine that returns the Posteriors on DM free parameter (alpha) over all apertures.
@@ -1526,7 +1594,7 @@ contains
 
 
     type(Catalogue), intent(in)::iCat(:)
-    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+    real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:), Lens_Redshift(:)
     real(double),intent(out),allocatable::Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-! - Second dimension allows for a different grid for each aperture
     character(*), intent(in):: Distribution_Directory
     logical, intent(in):: reproduce_Prior
@@ -1560,7 +1628,6 @@ contains
     real(double),allocatable::Posterior_Single(:,:) !-Grid/Posterior, Value-!
     real(double),allocatable::Prior_Single(:,:) !!-Grid/Prior, Value-! 
 
-    real(double)::Lens_Redshift = 0.165e0_double
     real(double)::Renorm
 
     character(2)::fmtString, apString
@@ -1581,12 +1648,12 @@ contains
     type(catalogue)::TCat
 
     INTERFACE
-         subroutine DM_Profile_Variable_Posteriors_CircularAperture(iCat, Ap_Pos, Ap_Radius, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
+         subroutine DM_Profile_Variable_Posteriors_CircularAperture(iCat, Ap_Pos, Ap_Radius, Lens_Redshift, Posteriors, Distribution_Directory, reproduce_Prior, Blank_Field_Catalogue)
            use Param_Types; use Catalogues
            !--Main routine that returns the Posteriors over all apertures.
            !--Ap_Radius in DEGREES
            type(Catalogue), intent(in)::iCat(:)
-           real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:)
+           real(double),intent(in)::Ap_Pos(:,:), Ap_Radius(:), Lens_Redshift(:)
            real(double),intent(out),allocatable::Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-! - Second dimension allows for a different grid for each aperture
            character(*), intent(in):: Distribution_Directory
            logical, intent(in):: Reproduce_Prior
@@ -1615,17 +1682,23 @@ contains
     call Catalogue_Destruct(TCat)
 !!$
     print *, ' '
-    !--Identify Reduced Catalogue for each aperture--!
-    do i =1, size(Ap_Cats)
-       print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
-!       call Maximise_Convergenceb_yShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
 
-!       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), ' arcminutes for aperture:', i
-       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i))!, Core_Radius = Core_Cut_Radius(i)/60.e0_double)
-       
-       print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
+    do i =1, size(Ap_Cats)
+       Ap_Cats(i) = Select_Source_Sample(Cat, Ap_Pos, iAp_Radius, (/i/), 1.2e0_double*Lens_Redshift)
     end do
-    print *, ' '
+
+!--Deprecated
+!!$    !--Identify Reduced Catalogue for each aperture--!
+!!$    do i =1, size(Ap_Cats)
+!!$       print *, 'Searching for position of maxima in Size-Magnitude Shifts for Cluster:', i
+!!$!       call Maximise_Convergenceb_yShifts_inAperture(Cat, Blank_Field_Catalogue, Ap_Pos(i,:), Ap_Radius(i))
+!!$
+!!$!       print *, 'Cutting on a core radius of:', Core_Cut_Radius(i), ' arcminutes for aperture:', i
+!!$       call Identify_Galaxys_in_Circular_Aperture(Cat, Ap_Pos(i,:), iAp_Radius(i), Ap_Cats(i))!, Core_Radius = Core_Cut_Radius(i)/60.e0_double)
+!!$       
+!!$       print *, '* Ap ', i ,' has mean (Size,Mag):',  mean_discrete(Ap_Cats(i)%Sizes), mean_discrete(Ap_Cats(i)%MF606W)
+!!$    end do
+!!$    print *, ' '
 
     do i =1, size(Ap_Cats)
        print *, 'Aperture:', i, ' contains:', size(Ap_Cats(I)%RA), ' galaxies'
@@ -1641,11 +1714,7 @@ contains
        call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
     else
        write(*,'(A)') 'Reading in distribution from (here):', Distribution_Directory
-       print *, 'Allocated check:', allocated(MagGrid), allocated(SizeGrid), allocated(Joint_Size_Magnitude_Distribution), allocated(Magnitude_Distribution)
-       print *, 'Testing with BFF passed in'
        call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
-       print *, 'Success:', Distribution_Directory
-       STOP
     end if
 
     if(size(magBins,1) > 1) STOP 'I have had to disable Magnitude Binning for now, youll have to edit the code to get this to work, stopping'
@@ -1675,7 +1744,7 @@ contains
        allocate(Posterior_Single(2,size(Coarse_LikelihoodGrid))); Posterior_Single(1,:) = Coarse_LikelihoodGrid
 
        !--Evaluate posterior on grid
-       call DM_Profile_Variable_Posterior_SingleFit(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift, Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
+       call DM_Profile_Variable_Posterior_SingleFit(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift(Ap), Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
 
        !--Allow the finalised posterior to be determined on a seperate grid to the input posterior, to account for the fact that the posterior routine may have added points as part of the search for the maximum of the posterior
        if(Ap == 1) then
@@ -2132,6 +2201,15 @@ contains
 
        print *, '--Producing Joint Size Magnitude Distribution from Catalogue.....'
 
+       print *, 'Check on Field Catalogue:'
+       print *, 'Size Catalogue:', Catalogue_Constructed(BFCat(1))
+       print *, 'Size Range:', minval(BFCat(1)%Sizes), maxval(BFCat(1)%Sizes)
+       print *, 'MF606W Range:', minval(BFCat(1)%MF606W), maxval(BFCat(1)%MF606W)
+       print *, 'Magnitude Catalogue:', Catalogue_Constructed(BFCat(2))
+       print *, 'Size Range:', minval(BFCat(2)%Sizes), maxval(BFCat(2)%Sizes)
+       print *, 'MF606W Range:', minval(BFCat(2)%MF606W), maxval(BFCat(2)%MF606W)
+
+
        Cut_Catalogue = BFCat
 
        print *, '------Applying general cuts on the Catalogue from which the prior is constructed (Magnitude, Prior Size Cuts, Redshift)---------'
@@ -2145,6 +2223,7 @@ contains
 
        !--Produce Joint Size Magnitude Distribution from the first catalogue
        MLimit = (/ minval((/(minval(Cut_Catalogue(i)%MF606W-2.17e0_double*Mag_Limit_Convergence_Buffer), i = 1, size(Cut_Catalogue))/)) , maxval((/(maxval(Cut_Catalogue(i)%MF606W+2.17e0_double*Mag_Limit_Convergence_Buffer), i = 1, size(Cut_Catalogue))/))/)
+       print *, 'Producing Size-Magnitude-Distribution:', size(Cut_Catalogue(1)%RA)
        call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue(1), use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = .false., KDE_Smooth = ido_KDE, MagLimits = MLimit )
        !--Output (matches the method of output used above)--!
        Output_Filename = trim(Dir)//trim(Filename)

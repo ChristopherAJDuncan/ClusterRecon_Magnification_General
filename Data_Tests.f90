@@ -109,8 +109,8 @@ contains
     real(double):: Core_Radius = 0.e0_double
     real(double), allocatable:: NumberDensity(:,:) !-Ap, Seperation-!
     real(double), allocatable:: SeperationGrid(:), SeperationBins(:,:)
-    integer:: nSep = 30
-    real(double),parameter:: Seperation_Limits(2) = (/0.e0_double, 3.e0_double/) !--In ArcMinutes--!
+    integer:: nSep = 40
+    real(double),parameter:: Seperation_Limits(2) = (/0.e0_double, 4.e0_double/) !--In ArcMinutes--!
     real(double),allocatable:: Annulus_Area(:)
 
     real(double):: global_Number_Density
@@ -125,6 +125,7 @@ contains
     allocate(SeperationGrid(nSep)); SeperationGrid = 0.e0_double
     allocate(SeperationBins(nSep, 2)); SeperationBins = 0.e0_double
     allocate(Annulus_Area(size(SeperationGrid))); Annulus_Area = 0.e0_double
+    print *, 'Allocated', nSep
     do i =1 , nSep
        if(i == 1) then
           SeperationBins(i,1) = Seperation_Limits(1)
@@ -136,6 +137,8 @@ contains
        SeperationGrid(i) = 0.5e0_double*( SeperationBins(i,2) + SeperationBins(i,1) )
        Annulus_Area(i) = 3.14159e0_double*( (SeperationBins(i,2)**2.e0_double) - (SeperationBins(i,1)**2.e0_double) ) !--Pi*r^2--!
     end do
+
+    print *, 'Set 1'
 
     allocate(NumberDensity(size(Ap_Pos,1), size(SeperationGrid))); NumberDensity = 0.e0_double
     do Ap = 1, size(Ap_Pos,1)
@@ -149,6 +152,8 @@ contains
           call Catalogue_Destruct(Annulus_Cat)
        end do
     end do
+
+    print *, 'Set 2'
 
     !---Output---!
     open(unit = 31, file = trim(Output_Directory)//'Foreground_Contamination_NumberDensity.dat')

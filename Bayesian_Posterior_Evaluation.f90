@@ -4,6 +4,8 @@ module Bayesian_Posterior_Evaluation
 
   implicit none
 
+  logical, private:: use_lookup = .false.
+
   !--Function Overload-------------------------------------
   INTERFACE Likelihood_Evaluation_atVirialRadius_perSource
      module procedure Likelihood_atVirialRadius_SingleCluster_perSource, Likelihood_atVirialRadius_MultipleCluster_perSource
@@ -182,15 +184,15 @@ contains
     do c = 1, size(Theta)
        Posterior_perSource(c) = 1.e0_double
 
-       !--Skip Evaluation if Galaxy Input falls outside limits 
-       if( (Magnitude(c) > Magnitude_Limits(2)) .or. (Magnitude(c) < Magnitude_Limits(1))) then
-          nGal_Ignored_MagLimits = nGal_Ignored_MagLimits + 1
-          cycle
-       end if
-       if(isNaN(Theta(c)) .or. isNaN(Magnitude(c))) then
-          nGal_Ignored_NaN = nGal_Ignored_NaN + 1
-          cycle
-       end if
+!!$       !--Skip Evaluation if Galaxy Input falls outside limits -- Removed as should be done at posterior evaluation level: e.g. magnitude-only should not care about whether size is a NaN
+!!$       if( (Magnitude(c) > Magnitude_Limits(2)) .or. (Magnitude(c) < Magnitude_Limits(1))) then
+!!$          nGal_Ignored_MagLimits = nGal_Ignored_MagLimits + 1
+!!$          cycle
+!!$       end if
+!!$       if(isNaN(Theta(c)) .or. isNaN(Magnitude(c))) then
+!!$          nGal_Ignored_NaN = nGal_Ignored_NaN + 1
+!!$          cycle
+!!$       end if
        
        Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method(c), Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag(c))
     end do
@@ -317,18 +319,10 @@ contains
        write(*,'(A)') 'WARNING - Galaxy posterior method is zero - this should have been removed!!'
        Likelihood_atVirialRadius_MultipleCluster_perSource = 1.0e0_double
     case(1) !--SizeOnly--!                                                                                                                                                                              
-       if( (Theta > Size_Limits(2)) .or. (Theta < Size_Limits(1))) then
-          nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
-          return
-       end if
        iSize_Limits = Size_Limits; iMag_Limits = (/minval(Pr_MagGrid), maxval(Pr_MagGrid)/) !--Mag limits should encompass the whole data set
        nSizePosterior = nSizePosterior + 1
        Galaxy_Posterior_Method = 1
     case(2)!--SizeMag--!                                                                                                                                                                                    
-       if( (Theta > Size_Limits(2)) .or. (Theta < Size_Limits(1))) then
-          nGal_Ignored_SizeLimits = nGal_Ignored_SizeLimits + 1
-          return
-       end if
        iSize_Limits = Size_Limits; iMag_Limits = Magnitude_Limits
        nSizeMagPosterior = nSizeMagPosterior + 1
        Galaxy_Posterior_Method = 2
@@ -358,17 +352,18 @@ contains
     end select
 
     !---Error Catching: Return Likelihood == 0 for all alpha if size or magnitude falls outside set analysis limits - This should not occur as this body should be removed from the sample
-    if( (Magnitude < iMag_Limits(1)) .or. (Magnitude > iMag_Limits(2)) ) then
+    if( (Magnitude < iMag_Limits(1)) .or. (Magnitude > iMag_Limits(2)) .or. isNaN(Magnitude)) then
        Posterior_Flag = '1.1'
        Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
-       STOP 'Magnitude of entered source falls outside limits, this should not happen - Check source selection'
+       print *, 'Source Magnitude, Limits:', Magnitude, iMag_Limits
+       STOP 'Magnitude of entered source falls outside limits or NaN, this should not happen - Check source selection'
        return
     end if
     if((Galaxy_Posterior_Method == 1) .or. (Galaxy_Posterior_Method == 2)) then
-       if( (Theta < iSize_Limits(1)) .or. (Theta > iSize_Limits(2)) ) then
+       if( (Theta < iSize_Limits(1)) .or. (Theta > iSize_Limits(2)) .or. isNaN(Theta)) then
           Posterior_Flag = '1.2'
           Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
-          STOP 'Size of entered source falls outside limits, this should not happen - Check source selection'
+          STOP 'Size of entered source falls outside limits or NaN, this should not happen - Check source selection'
           return
        end if
     end if
@@ -436,7 +431,8 @@ contains
        if(Known_Redshift) then
           RedshiftPDF = 1.e0_double
        else
-          RedshiftPDF = redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
+          RedshiftPDF = CH08_Redshift_Distribution_Scalar(Magnitude_0, RedshiftGrid(z))
+          !redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
           !--Use this to evaluate at every level CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if
        
@@ -726,7 +722,7 @@ contains
 
 
     !---- Set up Lookup Table to p(z|m) is used
-    call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
+    if(use_lookup) call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
 
 
     write(*,'(A)') '________ Successfully got Precusors_______________'

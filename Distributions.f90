@@ -139,24 +139,30 @@ contains
 
   !---------------REDSHIFT DISTRIBUTIONS--------------------------------------------------------!
 
-  function redshift_Distribution_byLookup_Scalar(Apparent_Magnitude, Redshift)
+  function redshift_Distribution_byLookup_Scalar(Apparent_Magnitude, Redshift, Renorm_Limits)
     real(double), intent(in)::Apparent_Magnitude, Redshift
     real(double):: redshift_Distribution_byLookup_Scalar
+    real(double),intent(in),optional:: Renorm_Limits(2)
 
     real(double):: PDF(1)
 
-    PDF = redshift_Distribution_byLookup_Array(Apparent_Magnitude, (/Redshift/))
+    if(present(Renorm_Limits)) then
+       PDF = redshift_Distribution_byLookup_Array(Apparent_Magnitude, (/Redshift/), Renorm_Limits)
+    else
+       PDF = redshift_Distribution_byLookup_Array(Apparent_Magnitude, (/Redshift/))
+    end if
 
     redshift_Distribution_byLookup_Scalar = PDF(1)
 
   end function redshift_Distribution_byLookup_Scalar
     
 
-  function redshift_Distribution_byLookup_Array(Apparent_Magnitude, Grid) RESULT(PDF)
+  function redshift_Distribution_byLookup_Array(Apparent_Magnitude, Grid, Renorm_Limits) RESULT(PDF)
     !--Wrapper Routine for use of redshift distribution lookup. If lookup does not exisit/ has not been created, then this will create it
-    use Interpolaters, only: Linear_Interp
+    use Interpolaters, only: Linear_Interp; use Integration, only: Integrate
     real(double), intent(in)::Apparent_Magnitude
     real(double), intent(in)::Grid(:)
+    real(double), intent(in),optional::Renorm_Limits(2)
     real(double)::PDF(size(Grid))
 
     !--Internal Declarations
@@ -167,7 +173,7 @@ contains
     real(double):: Width
 
     !--Temporary Declarations
-    real(double), allocatable:: tPDF(:)
+    real(double), allocatable:: tPDF(:), LT_PDF(:)
 
     !---Error Catching Declarations
     integer, save:: nOutsideMagRange = 0
@@ -204,9 +210,17 @@ contains
        STOP 'LookupTable: Error getting apparent magnitude of grid'
     end if
 
+    !--Store LT value for that magnitude
+    allocate(LT_PDF(size(LT_RedshiftDistribution%LT,2))); LT_PDF = LT_RedshiftDistribution%LT(Index,:)
+
+    if(present(Renorm_Limits)) then
+       !--Renormalise PDF between entered limits. As this will be evaluated for each source, this is likely to correspond to a noticable increase in run-time if used. Alternative is, if a single renormalisation is used for the whole system is to do this once when the table is constructed
+       LT_PDF = LT_PDF/Integrate(LT_RedshiftDistribution%yGrid, LT_PDF, 2, lim = Renorm_Limits)
+    end if
+
     !--Interpolate on redshift grid
-    !--Linear Interpolate on 1D array
-    PDF = Linear_Interp(Grid, LT_RedshiftDistribution%yGrid, LT_RedshiftDistribution%LT(Index,:), ExValue = 0.e0_double)
+    !--Linear Interpolate on 1D array, over redshift
+    PDF = Linear_Interp(Grid, LT_RedshiftDistribution%yGrid, LT_PDF, ExValue = 0.e0_double)
 
     !--2D interpolation - More accurate (but different only < 1% when dm = 0.01 over index approach), but marginally slower
 !!$    do z = 1, size(Grid)
@@ -310,11 +324,11 @@ contains
     callcount = callcount + 1
 
     zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
-    if(zmed < 0.e0_double) then
-       print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
-       print *, 'zmed, m:', zmed, Apparent_Magnitude
-       STOP
-    end if
+!!$    if(zmed < 0.e0_double) then
+!!$       print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
+!!$       print *, 'zmed, m:', zmed, Apparent_Magnitude
+!!$       STOP
+!!$    end if
 
     call Analytic_Source_Redshift_Distribution(alpha, beta, zmed, Grid, PDF)
 
@@ -364,15 +378,22 @@ contains
 
     !--Smail-!      
     real(double):: z_0, Norm
-
-    allocate(PDF(size(Redshift))); PDF = -1.e0_double
-
-    if (z_med <= 0.e0_double) STOP 'Analytic_Source_Redshift_Distribution - MEDIAN REDSHIFT NEGATIVE OR ZERO, FATAL'
+    
+    if(allocated(PDF) == .false.) then
+       allocate(PDF(size(Redshift)));
+    end if
+    PDF = -1.e0_double !--Set to negative to test for unassigned elements later
 
     AreaUnderCurve = 0.e0_double
     select case(Method)
     case(1) !-Smail-!
        !print *, 'Producing a Smail et al source redshift distribution with alpha = ', alpha, '; beta = ', beta, '; z_med  = ', z_med 
+       if(z_med <= 0.) then
+          print *, 'WARNING: Analytic Redshift Distribution: Likelihood returned as zero as median redshift is zero or negative'
+          PDF = 1.e-100_double
+          return
+       end if
+
        z_0 = z_med/1.412e0_double
        Norm = (beta/(z_0*dexp(gammln( (alpha+1.e0_double)/(beta) ))))
 
@@ -754,6 +775,7 @@ contains
        END subroutine produce_Joint_Size_Magnitude_Distribution
     END INTERFACE
 
+
     if(present(ln_size_Distribution) .and. ln_size_Distribution .and. RefCat%log_sizes) STOP 'produce_Joint_Size_Magnitude_Distribution - log-Size specified and catalogue already in log-Size. This can be rectified by setting TCat%Sizes = dexp(RefCat%Sizes) in this routine, but has been disabled for safety'
 
     iOutput_Dir = 'Distributions/'
@@ -771,6 +793,7 @@ contains
     allocate(TCatMags(size(RefCat%RA))); TCatMags = 0.e0_double
     allocate(TCatSizes(size(RefCat%RA))); TCatSizes = 0.e0_double
 
+    print *, 'Getting Limits'
     if(present(SizeLimits)) then
        Lower = SizeLimits(1); Higher = SizeLimits(2)
     else
