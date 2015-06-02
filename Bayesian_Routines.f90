@@ -296,6 +296,9 @@ contains
     print *, 'Size:',  minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)
     print *, 'Posterior Method:', count(oCat(2)%Posterior_Method == 0), count(oCat(2)%Posterior_Method == 1), count(oCat(2)%Posterior_Method == 2), count(oCat(2)%Posterior_Method == 3), count(oCat(2)%Posterior_Method == 4)
 
+    print *, 'Size Limits:', Survey_Size_Limits
+    print *, 'Magnitude Limits:', Survey_Magnitude_Limits
+
     print *, ' '
     write( *,'(A)') '__________________________________ Succesfully Split Catalogue _________________________________________________'
     print *, 'Size-Mag Cat has:', size(oCat(1)%RA), ' of ', size(iCat%RA), ' galaxies'
@@ -2041,7 +2044,7 @@ contains
        Posterior(2,i) = 1.e0_double
        if(Alpha_Loop == Size(Posterior,2)/2) print *, 'Approximately halfway done for this Aperture..'          
        
-       Posterior(2,i) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(Posterior(1,i), Cat%Posterior_Method, Mass_Profile, Lens_Position, Lens_Redshift, Cat%Sizes, Cat%MF606W, Cat%Redshift, Source_Positions, PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, Sigma_Crit(1,:), use_lnSize, Posterior_Flag(i,:))
+       Posterior(2,i) = lnLikelihood_Evaluation_atVirialRadius_perSourceSample(Posterior(1,i), Cat%Posterior_Method, Mass_Profile, Lens_Position, Lens_Redshift, Cat%Sizes, Cat%MF606W, Cat%Redshift, Source_Positions, PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, Survey_Size_Limits, Survey_Magnitude_Limits, MagnificationGrid, MagOnly_Renormalisation_by_Magnification, Renormalisation_by_Magnification, RedshiftGrid, Sigma_Crit(1,:), use_lnSize, Posterior_Flag(i,:), output_Prefix)
 
     end do !--End of Posterior Loop
 

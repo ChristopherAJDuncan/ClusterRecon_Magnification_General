@@ -119,7 +119,7 @@ contains
 
   !---------------------LIKELIHOOD EVALUATION
 
-  real(double) function lnLikelihood_atVirialRadius_SingleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
+  real(double) function lnLikelihood_atVirialRadius_SingleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag, output_Prefix)
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
     use Cosmology, only: angular_diameter_distance_fromRedshift
     use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar
@@ -138,6 +138,9 @@ contains
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:) !-Source_Redshift-!
     logical:: use_lnT
     character(3):: Flag(:)
+    !--Optional
+    character(*), optional:: output_Prefix
+
 
     real(double),allocatable:: Posterior_perSource(:)
 
@@ -146,12 +149,17 @@ contains
 
     tCluster_Position(1,:) = Cluster_Position; tSigma_Crit(1,:) = Sigma_Crit
 
-    lnLikelihood_atVirialRadius_SingleCluster_perSourceSample = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit, use_lnT, Flag)
+    if(present(output_Prefix)) then
+       lnLikelihood_atVirialRadius_SingleCluster_perSourceSample = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit, use_lnT, Flag, output_Prefix)
+    else
+       lnLikelihood_atVirialRadius_SingleCluster_perSourceSample = lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample((/Alpha/), Method, Profile, tCluster_Position, (/Lens_Redshift/), Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, tSigma_Crit, use_lnT, Flag)
+    end if
 
   end function lnLikelihood_atVirialRadius_SingleCluster_perSourceSample
 
   
-  real(double) function lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag)
+  real(double) function lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample(Alpha, Method, Profile, Cluster_Position, Lens_Redshift, Theta, Magnitude, Source_Redshift, Position, Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag, output_Prefix)
+    !-- Returns the log-Likelihood for a source sample (>1 source) at a single r200 and centroid position, where Alpha (r200) and Cluster_Position (centroid) can contain information for multiple clusters
     !--Sigma_Crit must be entered in units (10^18 MSun/h), and the first dimension should hold sigma critical for all lenses considered (not on a lens redshift grid)
     use Cosmology, only: angular_diameter_distance_fromRedshift
     use Mass_Profiles; use Distributions, only: CH08_Redshift_Distribution_Scalar
@@ -170,6 +178,8 @@ contains
     real(double), intent(in):: RedshiftGrid(:), Sigma_Crit(:,:) !-Lens, Source_Redshift-!
     logical:: use_lnT
     character(3):: Flag(:)
+    !--Optional
+    character(*), optional:: output_Prefix
 
     real(double),allocatable:: Posterior_perSource(:)
 
@@ -178,6 +188,8 @@ contains
     integer::c
 
     real(double):: Res
+
+    character(10):: fmt
 
     allocate(Posterior_perSource(size(Theta))); Posterior_perSource = dsqrt(-1.e0_double)
 
@@ -199,6 +211,14 @@ contains
 
     !--Recombine
     call Combine_Posteriors_Scalar(Alpha(1), Posterior_perSource(:), .true., Renormalise = .false., Return_lnP = .true., Combined_Posterior = Res)
+
+    if(present(output_Prefix)) then
+       !--This may be slow as opend and closed for each alpha
+       open(unit = 24, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source.dat', Access = 'append')
+       write(fmt, '(I10)') size(Alpha)+size(Posterior_perSource)+1
+       write(24, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_perSource
+       close(24)
+    end if
 
     lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample = Res
 
