@@ -24,8 +24,13 @@ module  Bayesian_Routines
 
   logical:: use_KDE_Smoothed_Distributions = .true., KDE_onTheFly = .false., allow_KDE_Extrapolation = .false.
   logical:: Cuts_Renormalise_Likelihood = .true.
+  !--Survey Limits are applied only to the source sample
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/), Survey_SNR_Limits = (/0.e0_double, 10000.e0_double/)
-  real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3
+  !--Global Limits are applied to both the source sample and field sample
+  real(double), dimension(2):: global_SNR_Limits(2) = (/10., 100000./)
+  !--Prior Limits are applied to field only - Deprecated, not applied, but not deleted to enable use of old input files
+  real(double),dimension(2):: Prior_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Prior_Size_Limits = (/0.0e0_double, 100.e0_double/) !-3.3  
+
   real(double),parameter:: Lower_Redshift_Cut = 0.21
 
   !--Parallisation Decalaration (To Be Passed In)
@@ -632,7 +637,7 @@ contains
     type(MassGrouping),allocatable:: MassOrderingGroup(:)
     integer, allocatable:: cluster_MassOrdering_Groups(:)
     real(double), allocatable:: MO_tr200(:)
-    logical:: Enforce_Mass_Ordering = .true.
+    logical:: Enforce_Mass_Ordering = .false.
 
     !--Temporary Posterior construction
     real(double),allocatable:: tMarginalised_Posterior_Grid(:), tMarginalised_Posterior(:)
@@ -816,6 +821,7 @@ contains
              end do
           end do
           
+          !--Store mass ordering group
           allocate(MassOrderingGroup(maxval(cluster_MassOrdering_Groups)))
           do i = 1, size(MassOrderingGroup)
              allocate(MassOrderingGroup(i)%ClusterIndex(count(cluster_MassOrdering_Groups == i))); MassOrderingGroup(i)%ClusterIndex = 0
@@ -2212,13 +2218,14 @@ contains
 
        Cut_Catalogue = BFCat
 
-       print *, '------Applying general cuts on the Catalogue from which the prior is constructed (Magnitude, Prior Size Cuts, Redshift)---------'
-       do i = 1, size(Cut_Catalogue)
-          !call Cut_By_Magnitude(Cut_Catalogue(i), Prior_Magnitude_Limits(1), Prior_Magnitude_Limits(2))
-          !call Cut_By_PixelSize(Cut_Catalogue(i), Prior_Size_Limits(1), Prior_Size_Limits(2))
-          call Cut_by_PhotometricRedshift(Cut_Catalogue(i), Redshift_Cuts(1), Redshift_Cuts(2))
-       end do
-       print *, '----- Finished Cuts on BF catalogue----------------------------------------------'
+       !--Removed: Should be done earlier
+!!$       print *, '------Applying general cuts on the Catalogue from which the prior is constructed (Magnitude, Prior Size Cuts, Redshift)---------'
+!!$       do i = 1, size(Cut_Catalogue)
+!!$          !call Cut_By_Magnitude(Cut_Catalogue(i), Prior_Magnitude_Limits(1), Prior_Magnitude_Limits(2))
+!!$          !call Cut_By_PixelSize(Cut_Catalogue(i), Prior_Size_Limits(1), Prior_Size_Limits(2))
+!!$          call Cut_by_PhotometricRedshift(Cut_Catalogue(i), Redshift_Cuts(1), Redshift_Cuts(2))
+!!$       end do
+!!$       print *, '----- Finished Cuts on BF catalogue----------------------------------------------'
 
 
        !--Produce Joint Size Magnitude Distribution from the first catalogue

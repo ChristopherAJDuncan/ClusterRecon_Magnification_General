@@ -671,10 +671,11 @@ contains
     type(Catalogue), intent(in):: RefCat
     logical, intent(in):: KDE_Smooth
 
-    integer:: nSmoothed_Sampling_Mag = 110
+    integer:: nSmoothed_Sampling_Mag = 110, nHist = 60
     real(double):: Higher, Lower, Mag_Limit_Convergence_Buffer = 0.3e0_double
-    
-    integer::i
+    real(double), allocatable:: Bins(:)
+
+    integer::i, c
 
     !--KDE Declarations--!
     real(double),allocatable:: KDE_Gaussian_Covariance(:,:), Data_Vectors(:,:)
@@ -685,28 +686,54 @@ contains
     if(allocated(MagGrid) == .false.) then
        Higher =maxval(RefCat%MF606W)+ 2.17e0_double*Mag_Limit_Convergence_Buffer; Lower = minval(RefCat%MF606W)
        
-       !--KDE Declarations--!
-       allocate(MagGrid(nSmoothed_Sampling_Mag)); MagGrid = 0.e0_double
-       do i =1, nSmoothed_Sampling_Mag
-          MagGrid(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling_Mag-1))
-       end do
+       if(KDE_Smooth) then
+          !--KDE Declarations--!
+          allocate(MagGrid(nSmoothed_Sampling_Mag)); MagGrid = 0.e0_double
+          do i =1, nSmoothed_Sampling_Mag
+             MagGrid(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling_Mag-1))
+          end do
+       else
+          !--Histogram Decalrations
+          allocate(Bins(nHist+1)); Bins = 0.e0_double
+          allocate(MagGrid(nHist)); MagGrid = 0.e0_double
+          Bins(1) = Lower
+          do i =2, nHist + 1
+             Bins(i) = Bins(i-1) + ((Higher-Lower)/(nHist))
+             MagGrid(i-1) = 0.5e0_double*(Bins(i-1) + Bins(i))
+          end do
+       end if
     end if
        
     print *, 'Producing Magnitude Distribution:'
     print *, 'Catalogue Limits:', minval(RefCat%MF606W), maxval(RefCat%MF606W)
     print *, 'Grid Limits:', minval(MagGrid), maxval(MagGrid)
 
-    allocate(Data_Vectors(2,size(RefCat%Sizes))); Data_Vectors(1,:) = RefCat%MF606W; Data_Vectors(2,:) = RefCat%Sizes
-    call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
-    KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
-    
-    allocate(PDF(size(MagGrid))); PDF = 0.e0_double
-    call KDE_Univariate_Gaussian(RefCat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), MagGrid, PDF)
+    if(KDE_Smooth) then
+       allocate(Data_Vectors(2,size(RefCat%Sizes))); Data_Vectors(1,:) = RefCat%MF606W; Data_Vectors(2,:) = RefCat%Sizes
+       call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
+       KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
+       
+       allocate(PDF(size(MagGrid))); PDF = 0.e0_double
+       call KDE_Univariate_Gaussian(RefCat%MF606W, dsqrt(KDE_Gaussian_Covariance(1,1)), MagGrid, PDF)
+       
+       deallocate(KDE_Gaussian_Covariance, Data_Vectors)
+    else
+       allocate(PDF(size(MagGrid))); PDF = 0.e0_double
+       do c = 1, size(RefCat%MF606W)
+          do i = 1, nHist
+             if( (RefCat%MF606W(c) >= Bins(i)) .and. (RefCat%MF606W(c) < Bins(i+1)) ) then
+                PDF(i) = PDF(i) + 1.e0_double
+                exit
+             end if
+          end do
+       end do
+       if(sum(PDF) /= size(RefCat%MF606W)) STOP 'produce_Magnitude_Distribution - FATAL ERROR - Not all galaxies accounted for in histogram'
+
+       deallocate(Bins)
+    end if
 
     !--Renormalise Distribution
     PDF = PDF/Integrate(MagGrid, PDF, 2, lim = (/minval(MagGrid), maxval(MagGrid)/))
-
-    deallocate(KDE_Gaussian_Covariance, Data_Vectors)
 
   end subroutine produce_Magnitude_Distribution
 

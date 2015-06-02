@@ -79,21 +79,44 @@ module Catalogues
       select case(Index)
       case(1) !-Full RRG+COMBO AND STAGES matched catalogue (source must occur in STAGES master and RRG measured)--!
          Directory = 'Catalogues/'
-         Filename = 'STAGES_HSTExtended.cat'
-         Columns = (/-1,-1, 12, 13, 14, 15, -1, 3, -1, 1, 2, 9, -1, -1, 18/) !-MF606W: 7 (Galfit), 3: SEx
+         Filename = 'STAGES_GALFIT.cat'
+         Columns = (/-1,-1, 12, 13, 14, 15, -1, 3, -1, 1, 2, 9, -1, -1, 17/) !-MF606W: 7 (Galfit), 3: SEx
+!!$
+!!$         !!-- HST Extended - includes non-GALFIT option
+!!$         Directory = 'Catalogues/'
+!!$         Filename = 'STAGES_HSTExtended.cat'
+!!$         Columns = (/-1,-1, 12, 13, 14, 15, -1, 3, -1, 1, 2, 9, -1, -1, 18/) !-MF606W: 7 (Galfit), 3: SEx
+
+!!$         Directory = 'Catalogues/STAGES/'
+!!$         Filename = 'RRG_AND_STAGES_GALFIT.cat'
+!!$         Columns = (/-1,-1, 12, 13, 10, 11, -1,40, -1, 3, 4, 42, -1, -1, 44/) !--THis uses RRG Sex run for Magnitudes and Fluxs, and GALFIT RE from master where available - Mag : 5 SEX RRG, 38 SEX Master
+
 
          !Filename = 'STAGES_KSBf90_RRG+COMBO_AND_STAGES.cat.WCalib.SSNRCalib'
          !Columns = (/-1,1, 12, 13, 10, 11, -1, 41, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-! !--STAGES Master: 39: ST_FLUX_BEST, 40:ST_FLUXERR_BEST, 41:ST_MAG_BEST, 42: ST_MAGERR_BEST, 43: ST_MAG_GALFIT, 44: ST_MAGERR_GALFIT (DEFAULT MF606w: 5)
+
+      case(-1) !--GEMS GALFIT
+         Directory = 'Catalogues/'
+         Filename = 'GEMS_GALFIT.cat'
+         Columns = (/-1,-1, 12, 13, 14, 15, -1, 7, -1, 1, 2, 9, -1, -1, 17/) !-MF606W: 7 (Galfit), 3: SEx
+
       case(2) !--RRG+STAGES - All RRG sources, with STAGES matched where avaialble--!
+!!$
+!!$         Directory = 'Catalogues/STAGES/'
+!!$         Filename = 'RRG_AND_STAGES_GALFIT.cat'
+!!$         Columns = (/-1,-1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 32, 28, 29, -1/)
+!!$
          Directory = 'Catalogues/'
          Filename = 'RRG+STAGES_HSTExtended.cat'
          Columns = (/-1,-1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 47, 28, 29, 35/) !--THis uses RRG Sex run for Magnitudes and Fluxs, and GALFIT RE from master where available
+         !^^-- Mags:: 5: RRG SEx
+
 !!$         Filename = 'STAGES_KSBf90_RRG+COMBO.cat.WCalib.SSNRCalib.+SB'
 !!$         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(3) !-- KSBf90 with RRG output--!
          Directory = 'Catalogues/'
-         Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib'
-         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
+         Filename =  'STAGES_KSBf90_RRG.cat.WCalib.SSNRCalib.+SB'
+         Columns = (/-1,-1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, -1/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!
       case(4) !--STAGES-like Mock Catalogue--!
          Directory = 'Simulations/Output/'
          Filename = 'Mock_STAGES.cat'

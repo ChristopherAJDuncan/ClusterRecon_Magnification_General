@@ -4,16 +4,16 @@ program Bayesian_DM_Profile_Constraints
   implicit none
 
   character(500), parameter::Output_Directory_Default = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/DELETE/'
-   character(500):: Output_Directory = Output_Directory_Default
-   character(500)::Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini'
-   integer,allocatable:: Catalogue_Identifier(:)
-   integer,allocatable::Blank_Field_Catalogue_Identifier(:)
-   character(500),allocatable:: Bias_Output_Directory(:)
-   integer:: Bin_By_Magnitude_Type = 2 !-1:Absolute Magnitude, 2: Apparent Magnitude-!
-   integer:: Run_Type = 1 !-1:SingleRun, 2:Bias And Error-!
-   logical:: ReRun_Mocks = .false.
-   character(500):: Distribution_Input = ' '
-   logical::ReEvaluate_Distribution = .true.
+  character(500):: Output_Directory = Output_Directory_Default
+  character(500)::Cluster_Filename = '/disk1/cajd/Size_Magnification/Cluster_Parameters/STAGES.ini'
+  integer,allocatable:: Catalogue_Identifier(:)
+  integer,allocatable::Blank_Field_Catalogue_Identifier(:)
+  character(500),allocatable:: Bias_Output_Directory(:)
+  integer:: Bin_By_Magnitude_Type = 2 !-1:Absolute Magnitude, 2: Apparent Magnitude-!
+  integer:: Run_Type = 1 !-1:SingleRun, 2:Bias And Error-!
+  logical:: ReRun_Mocks = .false.
+  character(500):: Distribution_Input = ' '
+  logical::ReEvaluate_Distribution = .true.
 
    !--Run Time Declarations
    real:: Start_Time, End_Time
@@ -207,10 +207,10 @@ contains
 
     logical:: here
 
-    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Survey_SNR_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions, use_lnSize
+    namelist/Run/Surface_Mass_Profile, Posterior_Method, use_KDE_Smoothed_Distributions, Run_Type, Cluster_Filename, Output_Directory, Blank_Field_Catalogue_Identifier, Catalogue_Identifier, Survey_Size_Limits, Survey_Magnitude_Limits, Survey_SNR_Limits, Global_SNR_Limits, Mask_Aperture_Radius, Set_Foreground_Masks, Aperture_Radius_ArcMin, Mask_Positions, use_lnSize
     namelist/Mocks/ nSources, frac_z, ReRun_Mocks, nRealisations, Mock_Do_SL, Mock_Do_Cluster_Contamination, Mock_Contaminant_Cluster_Single, Mock_Contaminant_File
     namelist/Distribution/Distribution_Input, ReEvaluate_Distribution, Prior_Size_Limits, Prior_Magnitude_Limits, use_lnSize
-    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter, nOMPThread, Parameter_Limit_Alpha, Parameter_Tolerance_Alpha, centroid_Prior_Width
+    namelist/Simultaneous_Fit/Nominated_Fitting_Type, nBurnin, nChains, nChainOut, nMinChain, tune_MCMC, fit_Parameter, nOMPThread, Parameter_Limit_Alpha, Parameter_Tolerance_Alpha, centroid_Prior_Width, MCMC_Proposal_Width
 
     !--Check for existence of Input File
     inquire(file = Input_File, exist = Here)
@@ -250,10 +250,8 @@ contains
     !--Convert size limits to ln-Size if necessary
     if(use_lnSize) then
        if(Survey_Size_Limits(1) == 0.) Survey_Size_Limits(1) = 1.e-100_double
-       if(Prior_Size_Limits(1) == 0.) Prior_Size_Limits(1) = 1.e-100_double
        
        Survey_Size_Limits = dlog(Survey_Size_Limits)
-       Prior_Size_Limits = dlog(Prior_Size_Limits)
     end if
 
 
@@ -817,14 +815,52 @@ contains
        STOP 'Single_Run - Either Cat_Ident of inCat must be specified'
     end If
 
+    if(present(inBFCat) .or. present(Blank_Field_Cat_Ident)) then
+       !--Read in Field Catalogue--!
+       if(present(inBFCat)) then
+          !--If passed in, then directly assign
+          iBFCatt = inBFCat
+       elseif(present(Blank_Field_Cat_Ident)) then
+          if(Blank_Field_Cat_Ident == Cat_Ident) then
+             !---Blank field catalogue is the same as the source catalogue, therefore we need to apply cuts
+             iBFCatt = iCatt
+
+             !----------- Apply *general* cuts on Field Catalogue, from which Prior is Constructed
+             print *, ' '
+             write(*,'(A)') '_______________________Applying Cuts on Prior:________________________________________'
+             call Cut_By_PhotoMetricRedshift(iBFCatt, Lower_Redshift_Cut) !--Cut out foreground-
+             !call Cut_by_Magnitude(BFCatt(i), Survey_Magnitude_Limits(1), Survey_Magnitude_Limits(2)) !-Should really be prior magnitude limits
+             !print *, '------- CUTTING WHOLE CATALOGUE BY SNR >= 20. FOR ALL ANALYSES'
+             !call Cut_by_SNR(BFCATT(i), 20.e0_double, 10000.e0_double)
+
+             print *, ' '
+             write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
+             call Mask_Circular_Aperture(iBFCatt, Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
+             print *, ' '
+             write(*,'(A)') '_______________________Applied Cuts on Prior:________________________________________'
+             print *, ' '
+
+          else
+             call common_Catalogue_directories(Blank_Field_Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
+             call catalogue_readin(iBFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
+          end if
+       else
+          STOP 'Error - Single_Run'
+       end if
+    end if
+
+    !----Apply Global SNR cut to prior
+    print *, '------- CUTTING FIELD CATALOGUE BY SNR', global_SNR_Limits
+    call Cut_by_SNR(iBFCatt, global_SNR_limits(1), global_SNR_limits(2))
+
     !----Cut source Catalogue
     print *, ' '
-    print *, '-----Cutting Source Catalogue:'
+    write(*,'(A)') '___________________________________Applying cuts on Source Catalogue:___________________________________'
     
     call Cut_By_PhotoMetricRedshift(iCatt, Lower_Redshift_Cut) !--Cut out foreground-
     call Cut_by_Magnitude(iCatt, Survey_Magnitude_Limits(1), Survey_Magnitude_Limits(2)) !-Taken from CH08 P1435-!   
-    !print *, '------- CUTTING WHOLE CATALOGUE BY SNR >= 20. FOR ALL ANALYSES'
-    !call Cut_by_SNR(iCatt, 20.e0_double, 10000.e0_double)
+    print *, '------- CUTTING SAMPLE CATALOGUE BY GLOBAL SNR CUTS'
+    call Cut_by_SNR(iCatt, global_snr_limits(1), global_snr_limits(2))
 
     print *, '------------------------------'
     print *, ' '
@@ -851,63 +887,51 @@ contains
        write(*,'(A)') '---------------------------------------------------------------------------------------------------------!'
     end if
 
+    !------CUTS ON SOURCE CATALOGUE
     !--Apply Input Core Cuts
     print *, ' '
     print *, '---Masking apertures on data (As Input):', Core_Cut_Radius
     call Mask_Circular_Aperture(iCatt, Core_Cut_Position, Core_Cut_Radius/60.e0_double)
     print *, ' '
 
+    !--Edit magnitude limits to reflect source distribution
+    print *, ' '
+    write(*,'(A)') '____Editing Survey Limits to reflect source catalogue____'
+    Survey_Magnitude_Limits = (/max(Survey_Magnitude_Limits(1),minval(iCatt%MF606W)), min(Survey_Magnitude_limits(2),maxval(iCatt%MF606W))/)
+    print *, 'Magnitude Limits changed to:', Survey_Magnitude_Limits
+    Survey_Size_Limits = (/max(Survey_Size_Limits(1),minval(iCatt%Sizes)), min(Survey_Size_Limits(2),maxval(iCatt%Sizes))/)
+    print *, 'Size Limits changed to:', Survey_Size_Limits
+    write(*,'(A)') '____Done Editing Survey Limits to reflect source catalogue____'
+    print *, ' '
+
+!!$    print *, '*** Applying faint cut to Field Catalogue to enforce correcto normalisation: THIS NEEDS FIXED ***'
+!!$    !---Apply cut to prior (should thi be done??)
+!!$    print *, ' '
+!!$    print *, '_______________Applying Cuts on Prior:________________________________________'
+!!$    print *, 'This may not be necessary'
+!!$    call Cut_by_Magnitude(iBFCatt, -2000.e0_double, Survey_Magnitude_Limits(2))
+!!$    write(*,'(A)') '_______________________Applied Cuts on Prior:________________________________________'
+!!$    print *, ' '
+
+    write(*,'(A)') '___________________________________Applied cuts on Source Catalogue:___________________________________'
 
     !---Split into Size-Mag and Mag-Only Catalogues
     print *, 'Splitting Source Sample'
     call split_Sample(iCatt, Catt)
     call Catalogue_Destruct(iCatt)
+    !---END source cuts
 
 
+    !---Split Field Catalogue into Size-Mag and Mag-Only Catalogues
+    print *, 'Blank Field Catalogue Readin:', Catalogue_Constructed(iBFCatt), size(iBFCatt%RA)
+    print *, 'Splitting Field Sample'
+    call split_Sample(iBFCatt, BFCatt)
+    call Catalogue_Destruct(iBFCatt)
+
+
+    !--Produce Posteriors
     if(present(inBFCat) .or. present(Blank_Field_Cat_Ident)) then
-
-       !--Read in Field Catalogue--!
-       if(present(inBFCat)) then
-          iBFCatt = inBFCat
-          !---Split into Size-Mag and Mag-Only Catalogues
-          print *, 'Splitting Field Sample'
-          call split_Sample(iBFCatt, BFCatt)
-          call Catalogue_Destruct(iBFCatt)
-
-       elseif(present(Blank_Field_Cat_Ident)) then
-!!$          if(Blank_Field_Cat_Ident == Cat_Ident) then
-!!$             !---This should be before cuts. Removed as time required to read in catalogue and split again is minimal
-!!$             BFCatt = Catt
-!!$          else
-             call common_Catalogue_directories(Blank_Field_Cat_Ident, Catalogue_Directory, Catalogue_Filename, Catalogue_Cols)
-             call catalogue_readin(iBFCatt, trim(adjustl(Catalogue_Directory))//trim(adjustl(Catalogue_Filename)), 'Tr(J)', Catalogue_Cols, use_lnSize)
-             !---Split into Size-Mag and Mag-Only Catalogues
-             print *, 'Blank Field Catalogue Readin:', Catalogue_Constructed(iBFCatt), size(iBFCatt%RA)
-             print *, 'Splitting Field Sample'
-             call split_Sample(iBFCatt, BFCatt)
-             call Catalogue_Destruct(iBFCatt)
-!!$          end if
-       else
-          STOP 'Error - Single_Run'
-       end if
-
-
-       !----------- Apply *general* cuts on Field Catalogue, from which Prior is Constructed
-       print *, '--Cuts on Prior:'
-       do i =1, size(BFCatt)
-          call Cut_By_PhotoMetricRedshift(BFCatt(i), Lower_Redshift_Cut) !--Cut out foreground-
-          !call Cut_by_Magnitude(BFCatt(i), Survey_Magnitude_Limits(1), Survey_Magnitude_Limits(2)) !-Should really be prior magnitude limits
-          !print *, '------- CUTTING WHOLE CATALOGUE BY SNR >= 20. FOR ALL ANALYSES'
-          !call Cut_by_SNR(BFCATT(i), 20.e0_double, 10000.e0_double)
-
-
-          print *, ' '
-          write(*,'(A)') '----Applying Masks to Prior Catalogue (Cut of 2 arcminutes to remove cluster members and strong lensing):'
-          call Mask_Circular_Aperture(BFCatt(i), Clusters_In%Position, (/(2.e0_double,i = 1, size(Clusters_In%Position,1))/)/60.e0_double)
-          print *, ' '
-       end do
-
-       select case (Nominated_Fitting_Type)
+          select case (Nominated_Fitting_Type)
        case(0) !--Individual
           print *, 'Callign Circular Aperture, reproduce_Prior?:', reconstruct_Prior
           call DM_Profile_Variable_Posteriors_CircularAperture(Catt, Clusters_In%Position, Aperture_Radius, Clusters_In%Redshift, returned_Cluster_Posteriors, Distribution_Directory = Dist_Directory, reproduce_Prior = reconstruct_Prior, Blank_Field_Catalogue = BFCatt)

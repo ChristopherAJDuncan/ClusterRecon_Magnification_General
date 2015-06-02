@@ -4,7 +4,7 @@ module Bayesian_Posterior_Evaluation
 
   implicit none
 
-  logical, private:: use_lookup = .false.
+  logical, private:: use_lookup = .true.
 
   !--Function Overload-------------------------------------
   INTERFACE Likelihood_Evaluation_atVirialRadius_perSource
@@ -431,7 +431,11 @@ contains
        if(Known_Redshift) then
           RedshiftPDF = 1.e0_double
        else
-          RedshiftPDF = CH08_Redshift_Distribution_Scalar(Magnitude_0, RedshiftGrid(z))
+          if(use_lookup) then
+             RedshiftPDF = redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
+          else
+             RedshiftPDF = CH08_Redshift_Distribution_Scalar(Magnitude_0, RedshiftGrid(z))
+          end if
           !redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
           !--Use this to evaluate at every level CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if
@@ -479,7 +483,11 @@ contains
                 if(Known_Redshift) then
                    Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)
                 else
-                   Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*redshift_Distribution_byLookup(Pr_MagGrid(m), RedshiftGrid(z))
+                   if(use_lookup) then
+                      Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*redshift_Distribution_byLookup(Pr_MagGrid(m), RedshiftGrid(z))
+                   else
+                      Size_Only_Mag_Prior(m,:) =  Kappa_Renormalised_Prior(m,:)*CH08_Redshift_Distribution_Scalar(Pr_MagGrid(m), RedshiftGrid(z))
+                   end if
                    !--Use to evaulate at every position *CH08_Redshift_Distribution_Scalar(Pr_MagGrid(m), RedshiftGrid(z))
                 end if
              end if
@@ -637,6 +645,7 @@ contains
     real(double),allocatable:: Survey_Renormalised_Prior(:,:), Survey_Renormalised_MagPrior(:)
     real(double),allocatable:: RedshiftGrid(:)
     real(double),allocatable:: Sigma_Crit(:,:), MagnificationGrid(:),Renormalisation_by_Magnification(:), MagOnly_Renormalisation_by_Magnification(:)
+    real(double):: Renorm !Discardable
 
     !--Internal
     real(double),dimension(2):: Renormalisation_Magnitude_Limits, Renormalisation_Size_Limits
@@ -659,11 +668,13 @@ contains
     allocate(Survey_Renormalised_Prior(size(Prior,1),size(Prior,2))); Survey_Renormalised_Prior = 0.e0_double
     allocate(Survey_Renormalised_MagPrior(size(PriorMagGrid))); Survey_Renormalised_MagPrior = 0.e0_double
     !--Renormalise the prior within these size and magnitude limits--!                                                                                                           
-    print *, 'Renormalisation of the intrinsic distribution:', Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
-    Survey_Renormalised_Prior = Prior/Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
-    !--Allow for seperate renormalisation of the magnitude prior. This is required if the magnitude prior is constructed from galaxies which are excluded from the joint size-magnitude analysis, e.g. due to size cuts--!                                                                                                                                                                                                       
-    print *, 'Renormalisation of the intrinsic magnitude distribution:', Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
-    Survey_Renormalised_MagPrior = MagPrior/Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
+    Renorm = Integrate(PriorMagGrid, PriorSizeGrid, Prior, 2, lim1 = Survey_Magnitude_Limits, lim2 = Survey_Size_Limits)
+    print *, 'Renormalisation of the intrinsic distribution:', Renorm
+    Survey_Renormalised_Prior = Prior/Renorm
+    !--Allow for seperate renormalisation of the magnitude prior. This is required if the magnitude prior is constructed from galaxies which are excluded from the joint size-magnitude analysis, e.g. due to size cuts--!                                    
+    Renorm = Integrate(PriorMagGrid, MagPrior, 2, lim = Survey_Magnitude_Limits)
+    print *, 'Renormalisation of the intrinsic magnitude distribution:', Renorm
+    Survey_Renormalised_MagPrior = MagPrior/Renorm
     
 
     !--Set up the redshift grid--!                                                                                                                                                                                
@@ -694,7 +705,7 @@ contains
     allocate(MagOnly_Renormalisation_by_Magnification(size(MagnificationGrid))); MagOnly_Renormalisation_by_Magnification = 0.e0_double
 
     !---Construct the Renormalisation of the prior distribution as a function of magnification. Prior is allowed to be non-zeros outside the survey limits, since these limits should only apply to lensed quantities [not that survey limits here are most often used to detail user-imposed limits, such as magnitude or size cuts]. Only cuts on the prior distribution are necessary
-    MagFactorGridHigher = 1.05e0_double*(10.e0_double**((Survey_Magnitude_Limits(2)-Survey_Magnitude_Limits(1))/2.5e0_double)) !1.05 gives lee-way!
+    MagFactorGridHigher = 1.0e0_double*(10.e0_double**((maxval(PriorMagGrid)-Survey_Magnitude_Limits(1))/2.5e0_double))
     do i = 1, size(MagnificationGrid)
        MagnificationGrid(i) = MagFactorGridLower + (i-1)*((MagFactorGridHigher- MagFactorGridLower)/(size(MagnificationGrid)-1))
        Renormalisation_Size_Limits = delens_Source_Size(MagnificationGrid(i), Survey_Size_Limits, use_lnT)  !!DEPRECATED Survey_Size_Limits/dsqrt(MagnificationGrid(i))
