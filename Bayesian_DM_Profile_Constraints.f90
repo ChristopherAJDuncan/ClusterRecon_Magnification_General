@@ -490,7 +490,7 @@ contains
 
     !----Mock Parameters-------!
     !--Directory formats must be referenced with respect to teh run directory, and these catalogues must be stored with the same level structure wrt to program--!
-    character(500)::Mock_Output = 'Output/', Mock_Input, Mock_Input_Parent = 'Mock_Catalogues/'
+    character(500)::Mock_Output_Parent = 'BLAH/', Mock_Input, Mock_Input_Parent = 'Mock_Catalogues/', Mock_Output
 
     real(double):: Time_Start, Time_End
 
@@ -506,11 +506,11 @@ contains
 
     !--Create Mock Output Directory, which is just used to Temporarily store the mock output--!
     if(ReRun_Mocks) then
-       !--Create Mock Output Directory--!
-       Mock_Output = trim(Directory(1))//'Mock_Catalogues/'
-       write(*,'(2(A))') 'Mock catalogues will be recreated and stored in:', trim(Mock_Output)
-       inquire(directory = Mock_Output, exist = here)
-       if(here == .false.) call system('mkdir '//trim(Mock_Output))
+       !--Create Overall Mock Output Directory--!
+       Mock_Output_Parent = trim(Directory(1))//'Mock_Catalogues/'
+       write(*,'(2(A))') 'Mock catalogues will be recreated and stored in:', trim(Mock_Output_Parent)
+       inquire(directory = Mock_Output_Parent, exist = here)
+       if(here == .false.) call system('mkdir '//trim(Mock_Output_Parent))
     else
        write(*,'(2(A))') 'Mock catalogues read in from:', trim(Mock_Input_Parent)
     end if
@@ -518,6 +518,13 @@ contains
     do nR = 1, nRealisations
        write(*,'(A)') '!##################################################################!'
        write(*,'(A, I3)') '!------------------------------------------------------Run', nR
+
+       !--Store Mock for each run
+       write(Mock_Output, '(I4)') nR
+       Mock_Output = trim(adjustl(Mock_Output_Parent))//trim(adjustl(Mock_Output))//'/'
+       inquire(directory = Mock_Output, exist = here)
+       if(here == .false.) call system('mkdir '//trim(Mock_Output))
+
 
        if(ReRun_Mocks) then
           !- Run Mock Catalogue Production Script -!
@@ -745,15 +752,15 @@ contains
     print *, 'Run Time (s)[Total/SubRun]:', Time_End, Time_End-Time_Start
 
     !--Remove the mock catalogue file
-    print *, 'Deleting Mock Catalogues:'
-    call system('rm -r '//trim(Mock_Output))
+    !print *, 'Deleting Mock Catalogues:'
+    !call system('rm -r '//trim(Mock_Output_Parent))
 
   end subroutine Posterior_Maximum_Likelihood_Bias_Error
 
 
   subroutine Mass_Estimate_Single_Run(run_Output_Dir, returned_Cluster_Posteriors, Clusters_In, Aperture_Radius, Dist_Directory, reconstruct_Prior, Cat_Ident, Blank_Field_Cat_Ident, inCat, inBFCat)
     !--inBFCat or Blank_Field_Cat_Ident should contain/point ot catalogues from which the intrinsic size-magnitude distribution can be obtained. If neither of these are entered, then the code will attempt to read in the distribution from the run_Output_Dir--!
-    use MC_Redshift_Sampling; use Bayesian_Routines; use Mass_Profiles; use Data_Tests
+    use Bayesian_Routines; use Mass_Profiles; use Data_Tests
     real(double),allocatable,intent(out):: returned_Cluster_Posteriors(:,:,:) !-Aperture, Grid/Posterior, Value-!
     type(Foreground):: Clusters_In
     real(double),intent(in):: Aperture_Radius(:)
@@ -925,7 +932,7 @@ contains
     !---Split Field Catalogue into Size-Mag and Mag-Only Catalogues
     print *, 'Blank Field Catalogue Readin:', Catalogue_Constructed(iBFCatt), size(iBFCatt%RA)
     print *, 'Splitting Field Sample'
-    call split_Sample(iBFCatt, BFCatt)
+    call split_Sample(iBFCatt, BFCatt, .true.)
     call Catalogue_Destruct(iBFCatt)
 
 

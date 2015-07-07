@@ -214,14 +214,25 @@ contains
 !!$
 !!$  end subroutine Combine_Posteriors_Vector
 
-  subroutine split_Sample(iCat, oCat)
+  subroutine split_Sample(iCat, oCat, asPrior)
     !---Splits the sample into a magnitude-only catalogue, and a size-magnitude catalogue, according to the entered size limits, and SNR limits - anything outside size and SNR limits is appended to the magnitude-only catalogue
+
+    !---- if asPrior == True, then the retruned catalogue array (oCat) will have as it's first element the case *without* size or magnitude cuts. This is because for the size-magnitude analysis, the size-mag catalogue from which the prior is constructed must not be cut by size or magnitude. The second elemet will stil have cuts applied, as in the SizeMag+Mag case it is defined by these cuts (in size)
+
     type(Catalogue), intent(in):: iCat
     type(Catalogue), intent(out):: oCat(2)
+    logical, intent(in), optional:: asPrior
 
     type(Catalogue):: tCat, inputCat
+    logical:: iasPrior
 
     write(*,'(A)') '_______________________________________________________SPLITTING CATALOGUE________________________________________________'
+
+    if(present(asPrior)) then
+       iasPrior = asPrior
+    else
+       iasPrior = .false.
+    end if
 
     inputCat = iCat
 
@@ -233,6 +244,7 @@ contains
 
     !--Split by Size Limits
     print *, 'Cutting by Pixel Size'
+
     call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
     print *, 'Pixel Size Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W), count(tCat%MF606W <= 5.), count(tCat%MF606W <= 0.1), count(tCat%MF606W <= 0.)
     call Concatonate_Catalogues(oCat(2), tCat)
@@ -256,12 +268,14 @@ contains
     print *, 'oCat(1):', minval(inputCat%MF606W), maxval(inputCat%MF606W)
     print *, 'oCat(2):', minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)
 
-
-    oCat(1) = inputCat
+    if(iasPrior) then
+       oCat(1) = iCat
+    else
+       oCat(1) = inputCat
+    end if
     call Catalogue_Destruct(inputCat)
 
     
-
     !--Assign Galaxy Posterior Methods to each
     if(Posterior_Method == 1) then !-Size-Only
        oCat(1)%Posterior_Method = 1
@@ -2187,11 +2201,11 @@ contains
 
  
     if(iDO_KDE) then
-       Filename = 'MagSize_Distribution_KDE.dat'
-       MagFilename = 'Magnitude_Distribution_KDE.dat'
+       Filename = 'MagSize_Prior_Distribution_KDE.dat'
+       MagFilename = 'Magnitude_Prior_Distribution_KDE.dat'
     else
-       Filename= 'MagSize_Distribution_Histogram.dat'
-       MagFilename = 'Magnitude_Distribution_Histogram.dat'
+       Filename= 'MagSize_Prior_Distribution_Histogram.dat'
+       MagFilename = 'Magnitude_Prior_Distribution_Histogram.dat'
     end if
 
 
@@ -2208,6 +2222,7 @@ contains
 
 
 
+       print *, ' '
        print *, '--Producing Joint Size Magnitude Distribution from Catalogue.....'
 
        print *, 'Check on Field Catalogue:'
@@ -2217,7 +2232,7 @@ contains
        print *, 'Magnitude Catalogue:', Catalogue_Constructed(BFCat(2))
        print *, 'Size Range:', minval(BFCat(2)%Sizes), maxval(BFCat(2)%Sizes)
        print *, 'MF606W Range:', minval(BFCat(2)%MF606W), maxval(BFCat(2)%MF606W)
-
+       print *, ' '
 
        Cut_Catalogue = BFCat
 
@@ -2233,8 +2248,8 @@ contains
 
        !--Produce Joint Size Magnitude Distribution from the first catalogue
        MLimit = (/ minval((/(minval(Cut_Catalogue(i)%MF606W-2.17e0_double*Mag_Limit_Convergence_Buffer), i = 1, size(Cut_Catalogue))/)) , maxval((/(maxval(Cut_Catalogue(i)%MF606W+2.17e0_double*Mag_Limit_Convergence_Buffer), i = 1, size(Cut_Catalogue))/))/)
-       print *, 'Producing Size-Magnitude-Distribution:', size(Cut_Catalogue(1)%RA)
        call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue(1), use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = .false., KDE_Smooth = ido_KDE, MagLimits = MLimit )
+
        !--Output (matches the method of output used above)--!
        Output_Filename = trim(Dir)//trim(Filename)
        open(unit = 45, file = Output_Filename)
@@ -2262,7 +2277,7 @@ contains
           end do
        end if
 
-       !--Output (matches the method of output used above)--!
+       !--Output (matches the method of input used below)--!
        Output_Filename = trim(Dir)//trim(MagFilename)
        open(unit = 46, file = Output_Filename)
        do i= 1, size(magGrid)
@@ -2328,8 +2343,8 @@ contains
 !    print *, 'Testing of Distribution Input:'
     allocate(Size_Only(size(SizeGrid))); Size_Only = 0.e0_double
     allocate(Mag_Only(size(MagGrid))); Mag_Only = 0.e0_double
-    open(unit = 23, file = trim(Dir)//'SizeOnlyDist_Test_DELETE.dat')
-    open(unit =24, file = trim(Dir)//'MagOnlyDist_Test_DELETE.dat')
+    open(unit = 23, file = trim(Dir)//'Integrated_SizeOnlyDist.dat')
+    open(unit =24, file = trim(Dir)//'Integrated_MagOnlyDist.dat')
     do i= 1, size(Size_Only)
        Size_Only(i) = Integrate(MagGrid, Dist(:,i),2, lim = (/minval(MagGrid), maxval(MagGrid)/))
        write(23,*) SizeGrid(i), Size_Only(i)

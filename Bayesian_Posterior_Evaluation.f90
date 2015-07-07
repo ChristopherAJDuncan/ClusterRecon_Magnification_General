@@ -4,7 +4,7 @@ module Bayesian_Posterior_Evaluation
 
   implicit none
 
-  logical, private:: use_lookup = .true.
+  logical, private:: use_lookup = .false.
 
   !--Function Overload-------------------------------------
   INTERFACE Likelihood_Evaluation_atVirialRadius_perSource
@@ -189,10 +189,23 @@ contains
 
     real(double):: Res
 
+    real(double), allocatable:: Posterior_M(:), Posterior_SM(:), Posterior_S(:)
+    real(double), dimension(3):: combined_Posterior_byMethod
+    integer, dimension(3):: methodCount
+    logical:: split_byMethod = .true. !--Can be turned off to speed up run-time, at expense of removing possible output of posterior per source split by method
+
     character(10):: fmt
+    character(5):: output_Type_Label
 
     allocate(Posterior_perSource(size(Theta))); Posterior_perSource = dsqrt(-1.e0_double)
 
+    if(split_byMethod) then
+       allocate(Posterior_S(count(Method == 1))); Posterior_S = 0.e0_double/0.e0_double
+       allocate(Posterior_SM(count(Method == 2))); Posterior_SM = 0.e0_double/0.e0_double
+       allocate(Posterior_M(count(Method == 3))); Posterior_M = 0.e0_double/0.e0_double !--NaNs as default
+    end if
+
+    methodCount = 0
     do c = 1, size(Theta)
        Posterior_perSource(c) = 1.e0_double
 
@@ -207,17 +220,82 @@ contains
 !!$       end if
        
        Posterior_perSource(c) = Likelihood_atVirialRadius_MultipleCluster_perSource(Alpha, Method(c), Profile, Cluster_Position, Lens_Redshift, Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:), Pr_MagGrid, Pr_SizeGrid, SM_Prior, M_Prior, Size_Limits, Magnitude_Limits, MagnificationGrid, M_Pr_Renormalisation, SM_Pr_Renormalisation, RedshiftGrid, Sigma_Crit, use_lnT, Flag(c))
+       
+       if(split_byMethod) then
+          select case(Method(c))
+          case(1)
+             methodCount(1) = methodCount(1) + 1
+             Posterior_S(methodCount(1)) = Posterior_perSource(c)
+          case(2)
+             methodCount(2) = methodCount(2) + 1
+             Posterior_SM(methodCount(2)) = Posterior_perSource(c)
+          case(3)
+             methodCount(3) = methodCount(3) + 1
+             Posterior_M(methodCount(3)) = Posterior_perSource(c)
+          end select
+       end if
     end do
 
+    !--Error Catching
+    if(methodCount(1) /= size(Posterior_S)) STOP 'lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample - Error in split counts for method 1'
+    if(methodCount(2) /= size(Posterior_SM)) STOP 'lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample - Error in split counts for method 2'
+    if(methodCount(3) /= size(Posterior_M)) STOP 'lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample - Error in split counts for method 3'
+
     !--Recombine
-    call Combine_Posteriors_Scalar(Alpha(1), Posterior_perSource(:), .true., Renormalise = .false., Return_lnP = .true., Combined_Posterior = Res)
+    call Combine_Posteriors_Scalar(Alpha(1), Posterior_perSource(:), .true., Renormalise = .false., Return_lnP = .true., Combined_Posterior = Res)    
+
+    combined_Posterior_byMethod = 0.e0_double
+    if(split_byMethod) then
+       if(methodCount(1) /= 0) call Combine_Posteriors_Scalar(Alpha(1), Posterior_S(:), .true., Renormalise = .false., Return_lnP = .true., Combined_Posterior = combined_Posterior_byMethod(1))
+       if(methodCount(2) /= 0) call Combine_Posteriors_Scalar(Alpha(1), Posterior_SM(:), .true., Renormalise = .false., Return_lnP = .true., Combined_Posterior = combined_Posterior_byMethod(2))
+       if(methodCount(3) /= 0) call Combine_Posteriors_Scalar(Alpha(1), Posterior_M(:), .true., Renormalise = .false., Return_lnP = .true., Combined_Posterior = combined_Posterior_byMethod(3))
+    end if
 
     if(present(output_Prefix)) then
+
+       !--Output Posterior per source. Each row corresponds to the single alpha entered here. Therefore, this only works for a single alpha value, and may not necessarily be ordered in alpha 
+
        !--This may be slow as opend and closed for each alpha
+       !--General Combined output
        open(unit = 24, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source.dat', Access = 'append')
        write(fmt, '(I10)') size(Alpha)+size(Posterior_perSource)+1
        write(24, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_perSource
        close(24)
+
+       if(split_byMethod) then
+          if(methodCount(1) /= 0) then
+             output_Type_Label = 'S'
+             open(unit = 26, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+             write(fmt, '(I10)') size(Alpha)+size(Posterior_S)+1
+             write(26, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_S
+             close(26)
+          end if
+          
+          if(methodCount(2) /= 0) then
+             output_Type_Label = 'SM'
+             open(unit = 27, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+             write(fmt, '(I10)') size(Alpha)+size(Posterior_SM)+1
+             write(27, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_SM
+             close(27)
+          end if
+          
+          if(methodCount(3) /= 0) then
+             output_Type_Label = 'M'
+             open(unit = 28, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+             write(fmt, '(I10)') size(Alpha)+size(Posterior_M)+1
+             write(28, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_M
+             close(28)
+          end if
+
+          deallocate(Posterior_M, Posterior_SM, Posterior_S)
+
+          !--Output Combined
+          open(unit = 29, file = trim(adjustl(output_Prefix))//'_CobminedPosterior_byMethod.dat', Access = 'append')
+          write(fmt, '(I10)') size(Alpha)+size(combined_Posterior_byMethod)
+          write(29, '('//trim(fmt)//'(e14.7,x))') Alpha, combined_Posterior_byMethod
+          close(29)
+       end if
+
     end if
 
     lnLikelihood_atVirialRadius_MultipleCluster_perSourceSample = Res
@@ -387,6 +465,24 @@ contains
           return
        end if
     end if
+
+    !---Error Catching: Check for cases where the source lies outside evaluated prior limits - This should not occur as this body should be removed from the sample
+    if( (Magnitude < Pr_MagGrid(1)) .or. (Magnitude > Pr_MagGrid(size(Pr_MagGrid)-1)) .or. isNaN(Magnitude)) then
+       Posterior_Flag = '1.1'
+       Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
+       print *, 'Source Magnitude, Prior Grid Limits:', Magnitude, Pr_MagGrid(1), Pr_MagGrid(size(Pr_MagGrid)-1)
+       STOP 'Magnitude of entered source falls outside prior limits or NaN, this should not happen - Check source selection'
+       return
+    end if
+    if((Galaxy_Posterior_Method == 1) .or. (Galaxy_Posterior_Method == 2)) then
+       if( (Theta < Pr_SizeGrid(1)) .or. (Theta > Pr_SizeGrid(size(Pr_SizeGrid)-1)) .or. isNaN(Theta)) then
+          Posterior_Flag = '1.2'
+          Likelihood_atVirialRadius_MultipleCluster_perSource = 1.e-100_double
+          print *, 'Source Size, Prior Grid Limits:', Theta, Pr_SizeGrid(1), Pr_SizeGrid(size(Pr_SizeGrid)-1)
+          STOP 'Size of entered source falls outside limits or NaN, this should not happen - Check source selection'
+          return
+       end if
+    end if
  
 
     allocate(Posterior_perGalaxy_Redshift(nZ)); Posterior_perGalaxy_Redshift = 0.e0_double
@@ -451,11 +547,13 @@ contains
        if(Known_Redshift) then
           RedshiftPDF = 1.e0_double
        else
+
           if(use_lookup) then
              RedshiftPDF = redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
           else
              RedshiftPDF = CH08_Redshift_Distribution_Scalar(Magnitude_0, RedshiftGrid(z))
           end if
+
           !redshift_Distribution_byLookup(Magnitude_0, RedshiftGrid(z))
           !--Use this to evaluate at every level CH08_Redshift_Distribution_Scalar(Magnitude + 2.5e0_double*dlog10(Effective_Magnification), RedshiftGrid(z))
        end if

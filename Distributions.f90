@@ -323,6 +323,7 @@ contains
 !    if(callcount == 0) PRINT *, 'MAGNITUDE DEPENDANCE OF P(Z|M) TURNED OFF'
     callcount = callcount + 1
 
+
     zmed = 0.29e0_double*(Apparent_Magnitude - 22.e0_double) + 0.31e0_double
 !!$    if(zmed < 0.e0_double) then
 !!$       print *, 'CH08_redshift_distributions - Median Redshift returned is negative, suggesting that galaxies which are too bright have been entered'
@@ -835,11 +836,12 @@ contains
           end if
        else
           if(present(ln_size_Distribution) .and. ln_size_Distribution) then
-             Higher = dlog(maxval(RefCat%Sizes)); Lower = dlog(minval(RefCat%Sizes))
+             Higher = dlog(maxval(1.1e0_double*RefCat%Sizes)); Lower = dlog(minval(RefCat%Sizes/(1.e0_double+ 2.e0_double*Mag_Limit_Convergence_Buffer)))
              print *, 'lnSize Dist: Limits:', Lower, Higher
              TCatSizes = dlog(RefCat%Sizes)
           else
-             Higher = maxval(RefCat%Sizes); Lower = min(0.e0_double, minval(RefCat%Sizes)) !--Allows user to pass in lnT even if ln_size_Distribution == F
+             !--Min 0 Allows user to pass in lnT even if ln_size_Distribution == F
+             Higher = maxval(1.1e0_double*RefCat%Sizes); Lower = min(0.e0_double, minval(RefCat%Sizes)-0.5e0_double*dlog(1.e0_double+ 2.e0_double*Mag_Limit_Convergence_Buffer))
              print *, 'Size Dist: Limits:', Lower, Higher
              TCatSizes = RefCat%Sizes
           end if
