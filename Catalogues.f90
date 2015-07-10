@@ -1307,15 +1307,21 @@ module Catalogues
       !print *, 'Alpplying log-Size?:', (present(get_lnSize) .and. get_lnSize), minval(Cat%Sizes), maxval(Cat%Sizes)
 
       if(present(get_lnSize)) then
+
          if(get_lnSize) then
             print *, ' '
             print *, '****************************'
             print *, '~~~ Catalogue uses log-Sizes'
             print *, '****************************'
             print *, ' '
-            Cat%Sizes = dlog(Cat%Sizes)
+            where (Cat%Sizes <= 0.e0_double)
+               Cat%Sizes = 0.e0_double/0.e0_double
+            elsewhere
+               Cat%Sizes = dlog(Cat%Sizes)
+            end where
             Cat%log_Sizes = .true.
          end if
+
       end if
 
       write(*,'(A)') '_______ Catalogue Read in Successful ___________'

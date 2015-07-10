@@ -924,7 +924,7 @@ contains
 
     !---Split into Size-Mag and Mag-Only Catalogues
     print *, 'Splitting Source Sample'
-    call split_Sample(iCatt, Catt)
+    call split_Sample(iCatt, Catt, S2_Magnitude_Limits = magSample_Magnitude_Limits, S2_Size_Limits = magSample_Size_Limits)
     call Catalogue_Destruct(iCatt)
     !---END source cuts
 
@@ -932,7 +932,7 @@ contains
     !---Split Field Catalogue into Size-Mag and Mag-Only Catalogues
     print *, 'Blank Field Catalogue Readin:', Catalogue_Constructed(iBFCatt), size(iBFCatt%RA)
     print *, 'Splitting Field Sample'
-    call split_Sample(iBFCatt, BFCatt, .true.)
+    call split_Sample(iBFCatt, BFCatt, asPrior = .true.)
     call Catalogue_Destruct(iBFCatt)
 
 

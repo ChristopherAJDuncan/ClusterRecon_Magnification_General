@@ -26,6 +26,7 @@ module  Bayesian_Routines
   logical:: Cuts_Renormalise_Likelihood = .true.
   !--Survey Limits are applied only to the source sample
   real(double),dimension(2):: Survey_Magnitude_Limits = (/23.e0_double, 27.5e0_double/), Survey_Size_Limits = (/0.e0_double, 100.e0_double/), Survey_SNR_Limits = (/0.e0_double, 10000.e0_double/)
+  real(double), dimension(2):: magSample_Magnitude_Limits, magSample_Size_Limits
   !--Global Limits are applied to both the source sample and field sample
   real(double), dimension(2):: global_SNR_Limits(2) = (/10., 100000./)
   !--Prior Limits are applied to field only - Deprecated, not applied, but not deleted to enable use of old input files
@@ -214,7 +215,7 @@ contains
 !!$
 !!$  end subroutine Combine_Posteriors_Vector
 
-  subroutine split_Sample(iCat, oCat, asPrior)
+  subroutine split_Sample(iCat, oCat, asPrior, S2_Magnitude_Limits, S2_Size_Limits)
     !---Splits the sample into a magnitude-only catalogue, and a size-magnitude catalogue, according to the entered size limits, and SNR limits - anything outside size and SNR limits is appended to the magnitude-only catalogue
 
     !---- if asPrior == True, then the retruned catalogue array (oCat) will have as it's first element the case *without* size or magnitude cuts. This is because for the size-magnitude analysis, the size-mag catalogue from which the prior is constructed must not be cut by size or magnitude. The second elemet will stil have cuts applied, as in the SizeMag+Mag case it is defined by these cuts (in size)
@@ -222,9 +223,22 @@ contains
     type(Catalogue), intent(in):: iCat
     type(Catalogue), intent(out):: oCat(2)
     logical, intent(in), optional:: asPrior
+    real(double), intent(out), dimension(2), optional:: S2_Magnitude_Limits, S2_Size_Limits
 
     type(Catalogue):: tCat, inputCat
     logical:: iasPrior
+
+    INTERFACE
+       subroutine split_Sample(iCat, oCat, asPrior, S2_Mag_Limits, S2_Size_Limits)
+         use Catalogues
+         type(Catalogue), intent(in):: iCat
+         type(Catalogue), intent(out):: oCat(2)
+         logical, intent(in), optional:: asPrior
+
+         real(double), intent(in), dimension(2):: S2_Mag_Limits, S2_Size_Limits
+       end subroutine split_Sample
+    END INTERFACE
+
 
     write(*,'(A)') '_______________________________________________________SPLITTING CATALOGUE________________________________________________'
 
@@ -237,33 +251,38 @@ contains
     inputCat = iCat
 
     PRINT *, 'Input Catalogue Check:'
-    print *, 'Sizes:', minval(inputCat%Sizes), maxval(inputCat%Sizes)
+    print *, 'Sizes:', minval(inputCat%Sizes), maxval(inputCat%Sizes), count(isNaN(inputCat%Sizes)), count(inputCat%Sizes <= 0.)
     print *, 'Magnitude:', minval(inputCat%MF606W), maxval(inputCat%MF606W)
+
 
     if((Catalogue_Constructed(inputCat) == .false.) .or. (size(inputCat%RA) == 0)) STOP 'FATAL ERROR - split_Sample - Input Catalogue is not allocated, or zero'
 
     !--Split by Size Limits
     print *, 'Cutting by Pixel Size'
 
-    call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
-    print *, 'Pixel Size Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W), count(tCat%MF606W <= 5.), count(tCat%MF606W <= 0.1), count(tCat%MF606W <= 0.)
-    call Concatonate_Catalogues(oCat(2), tCat)
-    call Catalogue_Destruct(tCat)
-    
+    if(iasPrior) then
+       !--Do not allow cut by size when evaluating prior. This should be taken into account when integrating 2D distribtion to get magnitude distriubtion, but size information is necessary for correct renormalisation even in this case.
+       oCat(2) = inputCat
+    else
+       call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
+       print *, 'Pixel Size Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W), count(tCat%MF606W <= 5.), count(tCat%MF606W <= 0.1), count(tCat%MF606W <= 0.)
+       call Concatonate_Catalogues(oCat(2), tCat)
+       call Catalogue_Destruct(tCat)
+    end if
+
+    print *, ' '
     print *, 'Split By Size:'
-    print *, 'Size Check:', size(inputCat%RA), size(oCat(2)%RA)
     print *, Survey_Size_Limits
     print *, 'oCat(1):', minval(inputCat%Sizes), maxval(inputCat%Sizes)
     print *, 'oCat(2):', minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)
 
     !--Split by SNR Limits
     call Cut_By_SNR(inputCat, Survey_SNR_Limits(1), Survey_SNR_limits(2), tCat)
-    print *, 'SNR Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W)
     call Concatonate_Catalogues(oCat(2), tCat)
     call Catalogue_Destruct(tCat)
 
+    print *, ' ' 
     print *, 'Split By SNR:'
-    print *, 'Size Check:', size(inputCat%RA), size(oCat(2)%RA)
     print *, Survey_SNR_Limits
     print *, 'oCat(1):', minval(inputCat%MF606W), maxval(inputCat%MF606W)
     print *, 'oCat(2):', minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)
@@ -271,6 +290,7 @@ contains
     if(iasPrior) then
        oCat(1) = iCat
     else
+       !--Input Cat is cut
        oCat(1) = inputCat
     end if
     call Catalogue_Destruct(inputCat)
@@ -286,8 +306,8 @@ contains
     elseif(Posterior_Method == 3) then !-Mag-Only
        !--Edit Mag-Only catalogue to contain every catalogue (this whole routine could really be by-passed in this case)
        !--Use the following to produce magnitude-only on the whole catalogue
-       print *, 'Mag-Only uses the full sample...'
-       call Concatonate_Catalogues(oCat(2), oCat(1))
+       print *, 'Sample 2 uses the full catalogue, as considering mag-only analysis'
+       oCat(2) = iCat
 
        oCat(1)%Posterior_Method = 0
        oCat(2)%Posterior_Method  = 3
@@ -308,16 +328,31 @@ contains
     print *, 'nGal:', size(oCat(1)%RA)
     print *, 'Mag:',  minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)
     print *, 'Size:',  minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)
+    print *, 'Invalid Sizes?:', count(isNaN(oCat(2)%Sizes)), count(oCat(2)%Sizes<=0.e0_double)
     print *, 'Posterior Method:', count(oCat(2)%Posterior_Method == 0), count(oCat(2)%Posterior_Method == 1), count(oCat(2)%Posterior_Method == 2), count(oCat(2)%Posterior_Method == 3), count(oCat(2)%Posterior_Method == 4)
 
-    print *, 'Size Limits:', Survey_Size_Limits
-    print *, 'Magnitude Limits:', Survey_Magnitude_Limits
+
+    !--Set Survey Limits - this should only be done on source sample (i.e. when iasPrior == false)
+    if(iasPrior == .false.) then
+       if(present(S2_Magnitude_Limits)) S2_Magnitude_Limits = (/minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)/)
+       if(present(S2_Size_Limits)) S2_Size_Limits = (/minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)/)
+
+       print *, 'Sample 1 has limits set as:'
+       print *, 'Size Limits:', Survey_Size_Limits
+       print *, 'Magnitude Limits:', Survey_Magnitude_Limits
+      
+       print *, 'Sample 2 [oCat(2)] has limits set as:'
+       print *, 'Magnitude: ', S2_Magnitude_Limits
+       print *, 'Size: ', S2_Size_Limits
+    end if
 
     print *, ' '
     write( *,'(A)') '__________________________________ Succesfully Split Catalogue _________________________________________________'
     print *, 'Size-Mag Cat has:', size(oCat(1)%RA), ' of ', size(iCat%RA), ' galaxies'
     print *, 'Mag-Only Cat has:', size(oCat(2)%RA), ' of ', size(iCat%RA), ' galaxies'
     write(*,'(A)') '__________________________________ Succesfully Split Catalogue _________________________________________________'
+    print *, ' '
+
 
 
   end subroutine split_Sample
@@ -617,7 +652,7 @@ contains
     character(3),allocatable:: Posterior_Flag(:)
 
     !--Distribution Declarations
-    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:)
+    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:), TwoD_MagPrior_Distribution(:,:)
     real(double),allocatable::SizeGrid(:), MagGrid(:)
 
     !--Temporary Allocations--!
@@ -702,17 +737,17 @@ contains
     if(reproduce_Prior) then
        if(present(Blank_Field_Catalogue) == .false.) STOP 'DM_Profile_Variable_Posteriors_CircularAperture - Blankf Field Catalogue must be entered to allow for the production of the prior on a grid'
        write(*,'(A)') 'Producing Distribution from Catalogue'
-       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
+       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
     else
        write(*,'(A)') 'Reading in distribution from:', Distribution_Directory
-       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
+       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
        print *, 'Success:', Distribution_Directory
     end if
 
     !--Get Precursors
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, TwoD_MagPrior_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
-    deallocate(Joint_Size_Magnitude_Distribution, Magnitude_Distribution)
+    deallocate(Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution)
 
     !--Set up output grid, on which the marginalised posteriors will be output, as the linear interpolation of the constructed marginalised posterior below
     allocate(Marginalised_Posteriors(size(Ap_Pos,1), 2, nAlpha_Out));
@@ -1298,7 +1333,7 @@ contains
     character(100):: Filename
 
     !--Distribution Declarations
-    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:)
+    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:), TwoD_MagPrior_Distribution(:,:)
     real(double),allocatable::SizeGrid(:), MagGrid(:)
 
     !--Posterior Grid Declarations
@@ -1376,15 +1411,15 @@ contains
     if(reproduce_Prior) then
        if(present(Blank_Field_Catalogue) == .false.) STOP 'DM_Profile_Variable_Posteriors_CircularAperture - Blank Field Catalogue must be entered to allow for the production of the prior on a grid'
        write(*,'(A)') 'Producing Distribution from Catalogue'
-       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
+       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
     else
        write(*,'(A)') 'Reading in distribution from:', Distribution_Directory
-       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
+       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
        print *, 'Success:', Distribution_Directory
     end if
 
     !--Get Precursor
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, TwoD_MagPrior_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
 
     !--Set up output grid, on which the marginalised posteriors will be output, as the linear interpolation of the constructed marginalised posterior below
@@ -1637,7 +1672,7 @@ contains
     real(double),allocatable::SizeGrid(:)
     real(double),allocatable::MagGrid(:)
 
-    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:)
+    real(double),allocatable:: Joint_Size_Magnitude_Distribution(:,:), Magnitude_Distribution(:), TwoD_MagPrior_Distribution(:,:)
 
     real(double),allocatable::SizePrior_byMag(:,:) !-MagBin, GridValue-!
     real(double),allocatable::Aperture_Posterior_byMag(:,:,:) !-MagBin, Grid/Posterior, Value-! 
@@ -1734,10 +1769,10 @@ contains
     if(reproduce_Prior) then
        if(present(Blank_Field_Catalogue) == .false.) STOP 'DM_Profile_Variable_Posteriors_CircularAperture - Blankf Field Catalogue must be entered to allow for the production of the prior on a grid'
        write(*,'(A)') 'Producing Distribution from Catalogue'
-       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
+       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution, Distribution_Directory, .true., Blank_Field_Catalogue)
     else
        write(*,'(A)') 'Reading in distribution from (here):', Distribution_Directory
-       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
+       call return_Prior_Distributions(MagGrid, SizeGrid, Joint_Size_Magnitude_Distribution, Magnitude_Distribution, TwoD_MagPrior_Distribution, Distribution_Directory, .false., Blank_Field_Catalogue)
     end if
 
     if(size(magBins,1) > 1) STOP 'I have had to disable Magnitude Binning for now, youll have to edit the code to get this to work, stopping'
@@ -1767,7 +1802,7 @@ contains
        allocate(Posterior_Single(2,size(Coarse_LikelihoodGrid))); Posterior_Single(1,:) = Coarse_LikelihoodGrid
 
        !--Evaluate posterior on grid
-       call DM_Profile_Variable_Posterior_SingleFit(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift(Ap), Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution)  
+       call DM_Profile_Variable_Posterior_SingleFit(Ap_Cats(Ap), Surface_Mass_Profile, Lens_Redshift(Ap), Ap_Pos(Ap,:), Posterior_Single, Output_File_Prefix, .false., PriorMagGrid = MagGrid, PriorSizeGrid = SizeGrid, Prior = Joint_Size_Magnitude_Distribution, MagPrior = Magnitude_Distribution, TwoD_MagPrior_Distribution = TwoD_MagPrior_Distribution)  
 
        !--Allow the finalised posterior to be determined on a seperate grid to the input posterior, to account for the fact that the posterior routine may have added points as part of the search for the maximum of the posterior
        if(Ap == 1) then
@@ -1911,7 +1946,7 @@ contains
 
   end subroutine find_Maximum_by_Bisection
 
-  subroutine DM_Profile_Variable_Posterior_SingleFit(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
+  subroutine DM_Profile_Variable_Posterior_SingleFit(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorMagGrid, PriorSizeGrid, Prior, MagPrior, TwoD_MagPrior_Distribution)
     use cosmology, only:angular_diameter_distance_fromRedshift; use MC_Redshift_Sampling, only: Monte_Carlo_Redshift_Sampling_SigmaCritical; use Mass_Profiles; use Distributions, only: ch08_redshift_distribution_Array, CH08_Redshift_Distribution_Scalar; use Interpolaters, only: Linear_Interp; use Bayesian_Posterior_Evaluation, only: lnLikelihood_Evaluation_atVirialRadius_perSourceSample, get_Likelihood_Evaluation_Precursors
     use Integration, only:TrapInt, Integrate; use Matrix_methods, only: Determinant, Matrix_Invert; use Smoothing, only: KDE_BiVariate_Gaussian_Scalar, KDE_UniVariate_Gaussian; use Statistics, only:Discrete_Covariance, mean_discrete; use Common_Functions, only: setNaN
     !--Returns the Bayesian posterior for the DM Profile Variables, as defined by Mass_Profile
@@ -1932,7 +1967,8 @@ contains
     real(double),allocatable,intent(InOut)::Posterior(:,:) !-Grid/Posterior, Value-!
     character(*), intent(in)::Output_Prefix
     logical,intent(in)::lnSize_Prior
-    real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), MagPrior(:), Prior(:,:) !-Magnitude, Size-!
+    real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), Prior(:,:), TwoD_MagPrior_Distribution(:,:) !-Magnitude, Size-!
+    real(double), intent(inout), optional, allocatable:: MagPrior(:)
 
     !---INTERNAL DECLARATIONS
     integer::i, c, j, z, m
@@ -1983,7 +2019,7 @@ contains
     integer:: n_Default_Source_Redshift_Used, nGal_Ignored_MagLimits, nGal_Ignored_SizeLimits, nGal_Ignored_NaN
 
     INTERFACE
-       subroutine DM_Profile_Variable_Posterior_SingleFit(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorMagGrid, PriorSizeGrid, Prior, MagPrior)
+       subroutine DM_Profile_Variable_Posterior_SingleFit(Cat, Mass_Profile, Lens_Redshift, Lens_Position, Posterior, Output_Prefix, lnSize_Prior, PriorMagGrid, PriorSizeGrid, Prior, MagPrior, TwoD_MagPrior_Distribution)
          use Param_Types; use Catalogues
          type(Catalogue)::Cat
          integer,intent(in)::Mass_Profile !-1:Flat, 2:SIS, 3:NFW-!
@@ -1993,7 +2029,8 @@ contains
          character(*), intent(in)::Output_Prefix
          logical,intent(in)::lnSize_Prior
 
-         real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), MagPrior(:), Prior(:,:) !-Magnitude, Size-!
+         real(double),intent(in),optional:: PriorSizeGrid(:), PriorMagGrid(:), Prior(:,:), TwoD_MagPrior_Distribution(:,:) !-Magnitude, Size-!
+         real(double), intent(inout), optional,allocatable:: MagPrior(:)
        END subroutine DM_Profile_Variable_Posterior_SingleFit
     END INTERFACE
     
@@ -2029,7 +2066,7 @@ contains
 !!DELETE    nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
 
     !--Set up precursors
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, (/Lens_Redshift/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, TwoD_MagPrior_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, (/Lens_Redshift/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
     Source_Positions(:,1) = Cat%RA; Source_Positions(:,2) = Cat%Dec
 
@@ -2134,24 +2171,25 @@ contains
   end subroutine DM_Profile_Variable_Posterior_SingleFit
   
 
-  subroutine return_Prior_Distributions(MagGrid, SizeGrid, Dist, MagDist, Dir, reEvaluate, BFCat, do_KDE)
+  subroutine return_Prior_Distributions(MagGrid, SizeGrid, Dist, MagDist, TwoD_MagPrior_Dist, Dir, reEvaluate, BFCat, do_KDE)
     use IO, only: readin; use Distributions, only: produce_Joint_Size_Magnitude_Distribution, produce_Magnitude_Distribution; use Integration; use Interpolaters, only: linear_Interp
     !--Returns the joint size magnitude distribution (Dist) using sample with size and magnitude information (assumed to be first catalogue element), and amgnitude-only distribution (MagDist) produced for sample with only magnitude information (assumed to be the second array element)--!
     !-- If BFCat entered, then the Distribution is calculated from the catalogue, otherwise a read in is attempted --!
     !-- BFCat is an array of catalogues. This means that the secondary [magnitude] distribution can be constructed using a seperate sample to the size-magnitude distribution, e.g. in the case where size information is not present. One may alos want to consider the case where the magnitude-only distribution is produced using the full sample (may introduce bias if this includes galaxies not in the source sample)
     !--Dist is Size-Magnitude Distribution. MagDist is magnitude-only distribution, which may differ from the projected Dist due to size cuts on the prior. Magnitude_Distribution is constructed from a catalogue which only cuts between entered prior magnitude limits--!
+    !--The Main outputs for this routine are Dist and TwoD_MagPrior_Dist, which correspond to the Size-Magnitude Distributions for Sample 1 and Sample 2 respectively. Previously, only the 1D magntiude distribution was output for sample 2, however it may be the case that the renormalisation for the magnitude case requires that size shifts are taken into account when sample 2 is constructed using a small size cut, even if only the magnitudes are used. The MagDist is therefore defunct, as it is recalcualted in the evualtion of the precursors on run time, but it has been left in here for now
 
     !!!!--- KNOWN BUG: Produces a SEGMENTATION FAULT if BFCat is not passed in. I have not got to the bottom of why, however as long as a catalogue is passed in, the re-evaluation of the prior can be avoided by settign reEvaluation to false
 
     !!!!--- POSSIBLE BUG: Distribution read in assumes that Mag Grid for the Size-Magnitude and Mag-Only Distributions are the same. This should be the case when this routine is used to get the distributions, however this may not always be the case.
 
-    real(double),intent(out),allocatable:: MagGrid(:), SizeGrid(:), Dist(:,:), MagDist(:)
+    real(double),intent(out),allocatable:: MagGrid(:), SizeGrid(:), Dist(:,:), MagDist(:), TwoD_MagPrior_Dist(:,:)
     character(*),intent(in):: Dir
     logical:: reEvaluate
     type(Catalogue),intent(in),optional, dimension(:):: BFCat(:)
     logical,optional:: do_KDE
 
-    character(500):: Filename, Output_Filename, Input_Filename, MagFilename
+    character(500):: Filename, Output_Filename, Input_Filename, MagFilename, TDMagFilename
     real(double),allocatable:: Input_Array(:,:)
 
     character(5)::fmtstring
@@ -2176,9 +2214,9 @@ contains
     
 
     INTERFACE
-       subroutine return_Prior_Distributions(MagGrid, SizeGrid, Dist, MagDist, Dir, reEvaluate, BFCat, do_KDE)
+       subroutine return_Prior_Distributions(MagGrid, SizeGrid, Dist, MagDist, TwoD_MagPrior_Dist, Dir, reEvaluate, BFCat, do_KDE)
          use Catalogues, only: Catalogue; use Param_Types
-         real(double),intent(out),allocatable:: MagGrid(:), SizeGrid(:), Dist(:,:), MagDist(:)
+         real(double),intent(out),allocatable:: MagGrid(:), SizeGrid(:), Dist(:,:), MagDist(:), TwoD_MagPrior_Dist(:,:)
          character(*),intent(in):: Dir
          logical, intent(in):: reEvaluate
 
@@ -2201,11 +2239,13 @@ contains
 
  
     if(iDO_KDE) then
-       Filename = 'MagSize_Prior_Distribution_KDE.dat'
-       MagFilename = 'Magnitude_Prior_Distribution_KDE.dat'
+       Filename = 'Sample1_MagSize_Prior_Distribution_KDE.dat'
+       MagFilename = 'Sample2_Magnitude_Prior_Distribution_KDE.dat'
+       TDMagFilename = 'Sample2_MagSize_Prior_Distribution_KDE.dat'
     else
-       Filename= 'MagSize_Prior_Distribution_Histogram.dat'
-       MagFilename = 'Magnitude_Prior_Distribution_Histogram.dat'
+       Filename= 'Sample1_MagSize_Prior_Distribution_Histogram.dat'
+       MagFilename = 'Sample2_Magnitude_Prior_Distribution_Histogram.dat'
+       TDMagFilename = 'Sample2_MagSize_Prior_Distribution_Histogram.dat'
     end if
 
 
@@ -2267,6 +2307,15 @@ contains
        write(*,'(A)') 'Beginning Magnitude-Only Distribution Construction:'
        if((size(Cut_Catalogue) >=2) .and. Catalogue_Constructed(Cut_Catalogue(2)) .and. (size(Cut_Catalogue(2)%RA) > 0)) then
           write(*,'(A)') 'Producing magnitude distribution using Mag-Only sub-Catalogue (Note: automatically uses KDE Smoothing'
+          !--Two Dimsensional Case--!
+          inquire(directory = trim(Dir)//'MagPrior/', exist = here)
+          if(here == .false.) call system('mkdir '//trim(Dir)//'MagPrior/')
+
+          !-- ** 2D case, usefult where the mag-only sample comes from size cuts. Disabeld as takes too much time
+          !--call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, TwoD_MagPrior_Dist, Cut_Catalogue(2), use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir)//'MagPrior/', ln_size_Distribution = .false., KDE_Smooth = ido_KDE, MagLimits = MLimit )
+          allocate(TwoD_MagPrior_Dist(size(MagGrid), size(SizeGrid))); TwoD_MagPrior_Dist = 0.e0_double
+
+          !--One-Dimensional Case--!
           !--What if MagGrid of Size-Magnitude Distribution does not cover this range - Should be ok with MagLimits set correctly above-!
           call produce_Magnitude_Distribution(MagGrid, MagDist, Cut_Catalogue(2), KDE_Smooth = .true.) !--Always KDE Smooth this distribution, since it is quick
        else
@@ -2277,7 +2326,19 @@ contains
           end do
        end if
 
-       !--Output (matches the method of input used below)--!
+       !--2D Output (matches the method of output used above)--!
+       Output_Filename = trim(Dir)//trim(TDMagFilename)
+       open(unit = 45, file = Output_Filename)
+       
+       write(fmtstring, '(I5)') size(MagGrid) + 1
+       write(45, '('//trim(fmtstring)//'(e14.7,x))') 0.0e0_double, MagGrid
+       do i= 1, size(SizeGrid)
+          write(45, '('//trim(fmtstring)//'(e14.7,x))') SizeGrid(i), TwoD_MagPrior_Dist(:,i)
+       end do
+       close(45)
+       write(*,'(2(A))') 'Output to: ', trim(Output_Filename)
+
+       !--1D Output (matches the method of input used below)--!
        Output_Filename = trim(Dir)//trim(MagFilename)
        open(unit = 46, file = Output_Filename)
        do i= 1, size(magGrid)
@@ -2292,6 +2353,7 @@ contains
        end do       
 
     else !---Prior Read in from file---!
+       !--Read in 2D sample 1 distribution
        Input_Filename = trim(Dir)//trim(Filename)
 
        write(*,'(2A)') 'Reading In Size-Magnitude Distribution from:', trim(Input_Filename)
@@ -2301,7 +2363,6 @@ contains
 
        call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
        !--Output of ReadIn is (Col, Row)
-
        allocate(MagGrid(size(Input_Array,1)-1)); MagGrid = 0.e0_double
        allocate(SizeGrid(size(Input_Array,2)-1)); SizeGrid = 0.e0_double
        allocate(Dist(size(MagGrid), size(SizeGrid))); Dist = 0.e0_double
@@ -2312,6 +2373,25 @@ contains
 
        deallocate(Input_Array)
 
+       !--Read in 2D sample 2 distribution
+       Input_Filename = trim(Dir)//trim(TDMagFilename)
+
+       write(*,'(2A)') 'Reading In Sample 2 Size-Magnitude Distribution from:', trim(Input_Filename)
+
+       inquire(file = Input_Filename, exist = here)
+       if(here == .false.) STOP 'return_Prior_Distributions - Size-Magnitude Distribution File does not exist, stopping...'
+
+       call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
+       !--Output of ReadIn is (Col, Row)
+
+       !---ASSUMES THAT BOTH SAMPLE 1 AND SAMPLE 2 ARE ON THE SAME GRID
+       allocate(TwoD_MagPrior_Dist(size(MagGrid), size(SizeGrid))); Dist = 0.e0_double
+
+       TwoD_MagPrior_Dist = Input_Array(2:,2:)
+
+       deallocate(Input_Array)
+
+       !---Read in 1D mag distribution for Sample 2
        Input_Filename =  trim(Dir)//trim(MagFilename)
        call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
 
@@ -2355,8 +2435,6 @@ contains
     end do
     close(23)
     close(24)
-!!$    print *, 'Output to ', trim(Dir), 'SizeOnlyDist_Test_DELETE.dat, MagOnlyDist_Test_DELETE.dat'
-!!$    read(*,*)
 
     write(*,'(A)') '_______________________________________________________________ Successfully got Priors _____________________________________________________________________________'
     print *, ' '

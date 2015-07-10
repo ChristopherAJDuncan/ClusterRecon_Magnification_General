@@ -748,7 +748,7 @@ contains
     !~~~To Do: 
     !~~ Normalise across magnitudes
     !~~ Smoothing - Inverse Variance?
-    real(double), intent(out),allocatable,dimension(:)::SizeGrid, MagGrid
+    real(double), intent(inout),allocatable,dimension(:)::SizeGrid, MagGrid
     real(double), intent(out),allocatable::pdf(:,:) !-Magnitude, Size-!
     type(Catalogue),intent(in)::RefCat
     logical,intent(in)::use_Physical_Sizes
@@ -791,7 +791,7 @@ contains
        subroutine produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, KDE_Smooth, SizeLimits, MagLimits)
          use Param_Types         
          use Catalogues
-         real(double), intent(out),allocatable,dimension(:)::SizeGrid, MagGrid
+         real(double), intent(inout),allocatable,dimension(:)::SizeGrid, MagGrid
          real(double), intent(out),allocatable::pdf(:,:) !-Magnitude, Size-!                                                                                                                                            
          type(Catalogue),intent(in)::RefCat
          logical,intent(in)::use_Physical_Sizes
@@ -850,11 +850,14 @@ contains
     if(Higher > 100.e0_double) STOP 'Upper limit on size distribution too large, check catalogue'
     
     !--Produce KDE Smoothed Version--!
-    allocate(Smoothed_Grid_Size(nSmoothed_Sampling)); Smoothed_Grid_Size = 0.e0_double
-    do i =1, nSmoothed_Sampling
-       Smoothed_Grid_Size(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling-1))
-    end do
-    
+    if(allocated(SizeGrid)) then
+       allocate(Smoothed_Grid_Size(size(SizeGrid))); Smoothed_Grid_Size = SizeGrid
+    else
+       allocate(Smoothed_Grid_Size(nSmoothed_Sampling)); Smoothed_Grid_Size = 0.e0_double
+       do i =1, nSmoothed_Sampling
+          Smoothed_Grid_Size(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling-1))
+       end do
+    end if
 
 !    allocate(Histogram_SizeGrid(nSizes)); Sizes = 0.e0_double
     allocate(SizeBins(nSizes,2)); SizeBins = 0.e0_double
@@ -895,23 +898,40 @@ contains
     end if
 
     !--Set up magnitude histogram binning
-    dParam = (( Higher- Lower )/(1.e0_double*(nMags-1)) )
-    allocate(MagBins(nMags,2)); MagBins = 0.e0_double
-    allocate(Histogram_MagGrid(nMags)); Histogram_MagGrid = 0.e0_double
-    do i = 1, nMags
-       !--Use i-2 so that no galaxies fall into the first bin--!
-       !       MagBins(i,1) = Lower + (i-1)*dParam
-       MagBins(i,1) = Lower + (i-2)*dParam
-       MagBins(i,2) = MagBins(i,1) + dParam
-       if(i==nSizes) MagBins(i,2) = MagBins(i,2) + 1.e-3_double*dParam
-       Histogram_MagGrid(i) = 0.5e0_double*(sum(MagBins(i,:)))
-    end do
+    if(allocated(MagGrid)) then
+       !--Is Grid passed in, then set this as priority
+       allocate(Histogram_MagGrid(size(MagGrid))); Histogram_MagGrid = MagGrid
+       !--Convert to mag binning
+       allocate(MagBins(size(Histogram_MagGrid),2)); MagBins = 0.0e0_double
+       MagBins(1,:) = (/Histogram_MagGrid(1) - 0.5e0_double*(Histogram_MagGrid(2)-Histogram_MagGrid(1)), Histogram_MagGrid(2) + 0.5e0_double*(Histogram_MagGrid(2)-Histogram_MagGrid(1))/)
+       do i = 2, size(MagBins,1)-1
+          MagBins(i,:) = (/MagBins(i-1,2),  Histogram_MagGrid(i) + 0.5e0_double*(Histogram_MagGrid(i+1)-Histogram_MagGrid(i))/)
+       end do
+       MagBins(size(MagBins,1),:) = (/MagBins(size(MagBins,1)-1,2), Histogram_MagGrid(size(MagBins,1)) + 0.5e0_double*(Histogram_MagGrid(size(MagBins,1))-Histogram_MagGrid(size(MagBins,1)-1))/)
+    else
+       dParam = (( Higher- Lower )/(1.e0_double*(nMags-1)) )
+       allocate(MagBins(nMags,2)); MagBins = 0.e0_double
+       allocate(Histogram_MagGrid(nMags)); Histogram_MagGrid = 0.e0_double
+       do i = 1, nMags
+          !--Use i-2 so that no galaxies fall into the first bin--!
+          !       MagBins(i,1) = Lower + (i-1)*dParam
+          MagBins(i,1) = Lower + (i-2)*dParam
+          MagBins(i,2) = MagBins(i,1) + dParam
+          if(i==nSizes) MagBins(i,2) = MagBins(i,2) + 1.e-3_double*dParam
+          Histogram_MagGrid(i) = 0.5e0_double*(sum(MagBins(i,:)))
+       end do
+    end if
+    
 
     !--KDE Declarations--!
-    allocate(Smoothed_Grid_Mag(nSmoothed_Sampling_Mag)); Smoothed_Grid_Mag = 0.e0_double
-    do i =1, nSmoothed_Sampling_Mag
-       Smoothed_Grid_Mag(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling_Mag-1))
-    end do
+    if(allocated(MagGrid)) then
+       allocate(Smoothed_Grid_Mag(size(MagGrid))); Smoothed_Grid_Mag = MagGrid
+    else
+       allocate(Smoothed_Grid_Mag(nSmoothed_Sampling_Mag)); Smoothed_Grid_Mag = 0.e0_double
+       do i =1, nSmoothed_Sampling_Mag
+          Smoothed_Grid_Mag(i) = Lower + (i-1)*((Higher-Lower)/(nSmoothed_Sampling_Mag-1))
+       end do
+    end if
 
     print *, 'Magnitude Limits (BinMin, BinMax, SmoothedGrid Min/Max, Catalogue Min/Max):', MagBins(1,1), MagBins(size(MagBIns,1), 2), Smoothed_Grid_Mag(1), maxval(Smoothed_Grid_Mag), minval(RefCat%MF606W), maxval(RefCat%MF606W)
 
@@ -1049,7 +1069,9 @@ contains
     deallocate(SizeBins, MagBins)
     close(37)
 
-    !--Set return values--!
+    if(allocated(SizeGrid)) deallocate(SizeGrid)
+    if(allocated(MagGrid)) deallocate(MagGrid)
+    !--Set return values--!Histogram_SizeGrid
     if(present(KDE_Smooth) .and. KDE_Smooth) then
        !--Set to Smoothed Version--!
        allocate(SizeGrid(size(Smoothed_Grid_Size))); SizeGrid = Smoothed_Grid_Size
@@ -1081,7 +1103,7 @@ contains
     !~~Edits:
     !~~~~~ Takes in a Size Bin and returns a SizeGrid - This is unneccessary - instead the Sizes part should be deleted and *only* a size bins and Mag bins returned.
     use Catalogues; use Statistics, only: variance_discrete
-       real(double), intent(out),allocatable:: Sizes(:)
+       real(double), intent(inout),allocatable:: Sizes(:)
        real(double), intent(out),allocatable::pdf(:,:) !-Mag Bin, GridValue-!
        real(double),dimension(:,:),allocatable,intent(inout)::MagBins
        character(*), intent(in), optional:: Output_Dir
@@ -1128,7 +1150,7 @@ contains
        INTERFACE
           subroutine get_Size_Distribution_MagnitudeBinning_byCatalogue(MagBins, Sizes, PDF, RefCat, use_Physical_sizes, Magnitude_Type, Output_Dir, ln_size_Distribution, SizeBins, Renormalisation, KDE_Smooth)
             use Param_Types; use Catalogues
-            real(double), intent(out),allocatable:: Sizes(:)
+            real(double), intent(inout),allocatable:: Sizes(:)
             real(double), intent(out),allocatable::pdf(:,:) !-Mag Bin, GridValue-!      
             real(double),dimension(:,:),allocatable,intent(inout)::MagBins
             type(Catalogue),intent(in)::RefCat
@@ -1151,7 +1173,18 @@ contains
        print *, 'Reconstructing size-magnitude distribution from the reference catalogue'
        Cat = RefCat
 
-       if(present(SizeBins)) then
+       if(allocated(Sizes)) then
+          nSizes = size(Sizes)
+          !--Construct iSizeBins
+          allocate(iSizeBins(size(Sizes),2)); iSizeBins = 0.0e0_double
+          iSizeBins(1,:) = (/Sizes(1) - 0.5e0_double*(Sizes(2)-Sizes(1)), Sizes(2) + 0.5e0_double*(Sizes(2)-Sizes(1))/)
+          do i = 2, size(iSizeBins,1)-1
+             iSizeBins(i,:) = (/iSizeBins(i-1,2),  Sizes(i) + 0.5e0_double*(Sizes(i+1)-Sizes(i))/)
+          end do
+          iSizeBins(size(iSizeBins,1),:) = (/iSizeBins(size(iSizeBins,1)-1,2), Sizes(size(iSizeBins,1)) + 0.5e0_double*(Sizes(size(iSizeBins,1))-Sizes(size(iSizeBins,1)-1))/)
+          
+          Size_Higher = maxval(iSizeBins); Size_Lower = minval(iSizeBins)
+       elseif(present(SizeBins)) then
           !--Assumed that SizeBins is set up to be the right range etc.. i.e. if using ln sizes then size bins should already be set up deal with this
           !--Testing? i.e shold only be negative if using lnSizes etc?
           nSizes = size(SizeBins,1)
