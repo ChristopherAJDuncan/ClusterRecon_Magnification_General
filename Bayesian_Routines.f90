@@ -260,9 +260,35 @@ contains
     !--Split by Size Limits
     print *, 'Cutting by Pixel Size'
 
+    !-----------------------------GENERAL CUTS - APPLY TO PRIOR ALSO
+    !--Remove NaNs from Size array in SM case (i.e. this should always take badly measured szes into account, even in prior determination)
+    if(use_lnSize) then
+       print *, 'Invalid Size Check:', count(isNaN(inputCat%Sizes)), count(inputCat%Sizes <= -1000.0_double)
+       call Cut_By_PixelSize(inputCat, -10000.e0_double, 10000.e0_double, tCat)
+    else
+       print *, 'Invalid Size Check:', count(inputCat%Sizes <= 0.e0_double)
+       call Cut_By_PixelSize(inputCat, 0.e0_double, 10000.e0_double, tCat)
+    end if
+    !--Place NaNs in oCat(2)
+    call Concatonate_Catalogues(oCat(2), tCat); call Catalogue_Destruct(tCat)
+
+    !--Split by SNR Limits
+    call Cut_By_SNR(inputCat, Survey_SNR_Limits(1), Survey_SNR_limits(2), tCat)
+    call Concatonate_Catalogues(oCat(2), tCat)
+    call Catalogue_Destruct(tCat)
+
+    print *, ' ' 
+    print *, 'Split By SNR (mag limits):'
+    print *, Survey_SNR_Limits
+    print *, 'oCat(1):', minval(inputCat%MF606W), maxval(inputCat%MF606W)
+    print *, 'oCat(2):', minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)
+    !-----------------------------END GENERAL CUTS 
+
+    !--
     if(iasPrior) then
        !--Do not allow cut by size when evaluating prior. This should be taken into account when integrating 2D distribtion to get magnitude distriubtion, but size information is necessary for correct renormalisation even in this case.
-       oCat(2) = inputCat
+       !oCat(2) = inputCat
+
     else
        call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
        print *, 'Pixel Size Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W), count(tCat%MF606W <= 5.), count(tCat%MF606W <= 0.1), count(tCat%MF606W <= 0.)
@@ -276,23 +302,7 @@ contains
     print *, 'oCat(1):', minval(inputCat%Sizes), maxval(inputCat%Sizes)
     print *, 'oCat(2):', minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)
 
-    !--Split by SNR Limits
-    call Cut_By_SNR(inputCat, Survey_SNR_Limits(1), Survey_SNR_limits(2), tCat)
-    call Concatonate_Catalogues(oCat(2), tCat)
-    call Catalogue_Destruct(tCat)
-
-    print *, ' ' 
-    print *, 'Split By SNR:'
-    print *, Survey_SNR_Limits
-    print *, 'oCat(1):', minval(inputCat%MF606W), maxval(inputCat%MF606W)
-    print *, 'oCat(2):', minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)
-
-    if(iasPrior) then
-       oCat(1) = iCat
-    else
-       !--Input Cat is cut
-       oCat(1) = inputCat
-    end if
+    oCat(1) = inputCat
     call Catalogue_Destruct(inputCat)
 
     
@@ -330,7 +340,6 @@ contains
     print *, 'Size:',  minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)
     print *, 'Invalid Sizes?:', count(isNaN(oCat(2)%Sizes)), count(oCat(2)%Sizes<=0.e0_double)
     print *, 'Posterior Method:', count(oCat(2)%Posterior_Method == 0), count(oCat(2)%Posterior_Method == 1), count(oCat(2)%Posterior_Method == 2), count(oCat(2)%Posterior_Method == 3), count(oCat(2)%Posterior_Method == 4)
-
 
     !--Set Survey Limits - this should only be done on source sample (i.e. when iasPrior == false)
     if(iasPrior == .false.) then
@@ -606,6 +615,7 @@ contains
     Select_Source_Sample = Group_Cat
 
     print *, 'Got source sample. Sample contains:', size(Group_Cat%RA), ' sources'
+    print *, 'and has limits (Mag, Size):', minval(Group_Cat%MF606W), maxval(Group_Cat%MF606W), minval(Group_Cat%Sizes), maxval(Group_Cat%Sizes)
     write(*,'(A)') '_____________________________________________________________________________________________________'
 
     call Catalogue_Destruct(Group_Cat); deallocate(iGroup_Index)
@@ -1419,7 +1429,7 @@ contains
     end if
 
     !--Get Precursor
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, Joint_Size_Magnitude_Distribution, TwoD_MagPrior_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid, Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, SizeGrid, MagGrid, Magnitude_Distribution, TwoD_MagPrior_Distribution, Joint_Size_Magnitude_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, Lens_Redshift, Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
 
     !--Set up output grid, on which the marginalised posteriors will be output, as the linear interpolation of the constructed marginalised posterior below
@@ -2066,7 +2076,7 @@ contains
 !!DELETE    nMagPosterior = 0; nSizePosterior = 0; nSizeMagPosterior = 0
 
     !--Set up precursors
-    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, Prior, TwoD_MagPrior_Distribution, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, (/Lens_Redshift/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
+    call get_Likelihood_Evaluation_Precursors(Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, RedshiftGrid, Sigma_Crit, MagnificationGrid,Renormalisation_by_Magnification, MagOnly_Renormalisation_by_Magnification, PriorSizeGrid, PriorMagGrid, MagPrior, TwoD_MagPrior_Distribution, Prior, Survey_Magnitude_Limits, Survey_Size_Limits, magSample_Magnitude_limits, magSample_Size_Limits, (/Lens_Redshift/), Lower_Redshift_Cut, Output_Prefix, use_lnSize)
 
     Source_Positions(:,1) = Cat%RA; Source_Positions(:,2) = Cat%Dec
 
@@ -2288,7 +2298,11 @@ contains
 
        !--Produce Joint Size Magnitude Distribution from the first catalogue
        MLimit = (/ minval((/(minval(Cut_Catalogue(i)%MF606W-2.17e0_double*Mag_Limit_Convergence_Buffer), i = 1, size(Cut_Catalogue))/)) , maxval((/(maxval(Cut_Catalogue(i)%MF606W+2.17e0_double*Mag_Limit_Convergence_Buffer), i = 1, size(Cut_Catalogue))/))/)
-       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue(1), use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir), ln_size_Distribution = .false., KDE_Smooth = ido_KDE, MagLimits = MLimit )
+       !--Create Directory for intermediate storage--!
+       inquire(directory = trim(Dir)//'Sample1_Prior/', exist = here)
+       if(here == .false.) call system('mkdir '//trim(Dir)//'Sample1_Prior/')
+       !---------------------------------------------!
+       call produce_Joint_Size_Magnitude_Distribution(SizeGrid, MagGrid, Dist, Cut_Catalogue(1), use_Physical_Sizes = Analyse_with_Physical_Sizes, Magnitude_Type = 2, Output_Dir = trim(Dir)//'Sample1_Prior/', ln_size_Distribution = .false., KDE_Smooth = ido_KDE, MagLimits = MLimit )
 
        !--Output (matches the method of output used above)--!
        Output_Filename = trim(Dir)//trim(Filename)
@@ -2362,6 +2376,7 @@ contains
        if(here == .false.) STOP 'return_Prior_Distributions - Size-Magnitude Distribution File does not exist, stopping...'
 
        call ReadIn(Input_Array, filename  = trim(adjustl(Input_Filename)), tabbed = .false., header_label = '#')
+
        !--Output of ReadIn is (Col, Row)
        allocate(MagGrid(size(Input_Array,1)-1)); MagGrid = 0.e0_double
        allocate(SizeGrid(size(Input_Array,2)-1)); SizeGrid = 0.e0_double
@@ -2385,7 +2400,7 @@ contains
        !--Output of ReadIn is (Col, Row)
 
        !---ASSUMES THAT BOTH SAMPLE 1 AND SAMPLE 2 ARE ON THE SAME GRID
-       allocate(TwoD_MagPrior_Dist(size(MagGrid), size(SizeGrid))); Dist = 0.e0_double
+       allocate(TwoD_MagPrior_Dist(size(MagGrid), size(SizeGrid))); TwoD_MagPrior_Dist = 0.e0_double
 
        TwoD_MagPrior_Dist = Input_Array(2:,2:)
 

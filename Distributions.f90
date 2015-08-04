@@ -939,6 +939,10 @@ contains
     if(present(KDE_Smooth)) then
        if(KDE_Smooth) then
           allocate(Data_Vectors(2,size(TCatMags))); Data_Vectors(1,:) = TCatMags; Data_Vectors(2,:) = TCatSizes
+
+          if(any(isNaN(TCatMags))) STOP 'NaNs found in Magnitude'
+          if(any(isNaN(TCatSizes))) STOP 'NaNs found in Sizes'
+
           call Discrete_Covariance(Data_Vectors, KDE_Gaussian_Covariance)
           KDE_Gaussian_Covariance = KDE_Gaussian_Covariance_Reduction*KDE_Gaussian_Covariance
           deallocate(Data_Vectors)

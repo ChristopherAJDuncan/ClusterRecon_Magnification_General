@@ -34,13 +34,14 @@ program Bayesian_DM_Profile_Constraints
    real(double):: Parameter_Tolerance_Alpha = 0.1e0_double
 
     !----Mock Parameters-------!
-    integer:: nSources = 70000
-    real(double)::frac_z = 0.1e0_double
-    integer:: nRealisations = 10
-    !-These should be passed in-!
-    logical:: Mock_Do_SL = .true., Mock_Do_Cluster_Contamination = .false.
-    integer:: Mock_Contaminant_Cluster_Single = 2
-    character(500):: Mock_Contaminant_File = 'THISFILE'
+   logical:: delete_Mocks = .true.
+   integer:: nSources = 70000
+   real(double)::frac_z = 0.1e0_double
+   integer:: nRealisations = 10
+   !-These should be passed in-!
+   logical:: Mock_Do_SL = .true., Mock_Do_Cluster_Contamination = .false.
+   integer:: Mock_Contaminant_Cluster_Single = 2
+   character(500):: Mock_Contaminant_File = 'THISFILE'
 
    !--Command Line Argument Entry--!                
    integer::narg, i
@@ -633,6 +634,12 @@ contains
           
           deallocate(Single_Run_Posterior)
        end do
+
+       !--Remove the mock catalogue file
+       if(delete_Mocks) then
+          print *, 'Deleting Mock Catalogues:'
+          call system('rm -r '//trim(Mock_Output_Parent)//'/*')
+       end if
     end do
 
     !--Combine Posteriors and Get ML Point for Combined_Posteriors--!
@@ -750,10 +757,6 @@ contains
 
     call cpu_time(Time_End)
     print *, 'Run Time (s)[Total/SubRun]:', Time_End, Time_End-Time_Start
-
-    !--Remove the mock catalogue file
-    !print *, 'Deleting Mock Catalogues:'
-    !call system('rm -r '//trim(Mock_Output_Parent))
 
   end subroutine Posterior_Maximum_Likelihood_Bias_Error
 

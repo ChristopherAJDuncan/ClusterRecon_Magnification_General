@@ -1324,6 +1324,11 @@ module Catalogues
 
       end if
 
+      if(count(isNaN(Cat%MF606W)) > 0) then
+         print *, 'Error - Catalogue_ReadIn - ', count(isNaN(Cat%MF606W)), ' NaNs found in magnitude'
+         STOP
+      END if
+
       write(*,'(A)') '_______ Catalogue Read in Successful ___________'
       print *, ' '
 
