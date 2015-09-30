@@ -1,0 +1,68 @@
+import numpy as np
+import pylab as pl
+import os
+import math
+
+#To Do - 2 cols to cover size measures #
+
+Size_Col = [9,10] #-9:FWHM; 10:FR#
+
+x_Cols = [14,15] #These should be entered starting from zero for column 1#
+
+#0,1,2,3,4,5,6,7,8,9...19
+xLabels = ["ntile", "ra", 'dec', 'xpos', 'ypos', 'mag', 'mag/magerr', 'flux', 'flux/fluxerr', 'FWHM', 'FR', 'rg', 'e1', 'e2', 'ec1', 'ec2', 'Pg11', 'Pg22', 'g1', 'g2'] 
+
+def equalBin(mini, maxi, nBin):
+    res = np.zeros(nBin+1)
+    for i in range(0,res.shape[0]):
+        res[i] = mini + i*((maxi-mini)/(nBin))
+    return res
+
+Cat = np.genfromtxt("../Catalogues/STAGES_PSF_Corrected_byPixelSize.cat")
+
+nBins  = 100
+f = pl.figure()
+f.subplots_adjust(hspace = 0.3)
+
+for x_plot in range(0, len(x_Cols)):
+    for sCol in range(0,len(Size_Col)):
+        #print 'Plot index:', x_plot*len(Size_Col)+sCol+1, 'when plotting (rows,cols):', x_Cols[x_plot], Size_Col[sCol]
+        ax = f.add_subplot(len(x_Cols),len(Size_Col),x_plot*len(Size_Col)+sCol+1) #sCol*len(x_Cols)+x_plot+1
+        ax.set_xlabel(xLabels[x_Cols[x_plot]])
+        if(x_plot == 0):
+            if(Size_Col[sCol] == 9):
+                ax.set_title('FWHM')
+            elif(Size_Col[sCol] == 10):
+                ax.set_title('FR')
+                
+        x_full = np.zeros(Cat.shape[0])
+        if(x_Cols[x_plot]==8 or x_Cols[x_plot]==6): #flux/fluxerr, mag/magerr
+            x_full = np.divide(Cat[:,x_Cols[x_plot]],Cat[:,x_Cols[x_plot]+1])
+        else:
+            x_full = Cat[:,x_Cols[x_plot]]
+        
+        x = equalBin(np.amin(x_full), np.amax(x_full), nBins)
+        n_in_Bin = np.zeros(x.shape[0])#, dtype = np.int8)
+        Size = np.zeros(x.shape[0])
+        for i in range(0, Cat.shape[0]):
+            for j in range(0, x.shape[0]-1):
+                if((x_full[i] >= x[j]) and (x_full[i]< x[j+1])):
+                    Size[j] += Cat[i,Size_Col[sCol]]
+                    n_in_Bin[j] += 1.
+                    if(n_in_Bin[j] < 0):
+                        print 'n_in_Bn negative,', i,j, n_in_Bin[j]
+                        exit()
+                        break
+                    
+        if(sum(n_in_Bin) != Cat.shape[0]):
+            print 'Warning, for x_col:', x_Cols[x_plot],' there is an error in assigning averaes sizes to bins', sum(n_in_Bin), Cat.shape[0]
+        Err = np.zeros(Size.shape[0])
+        for j in range(0, x.shape[0]-1):
+            if(n_in_Bin[j] != 0):
+                Size[j] = Size[j]/n_in_Bin[j]
+                Err[j] = 1./math.sqrt(n_in_Bin[j]) #Poisson Errors for now
+
+        ax.errorbar(x, Size, yerr = Err, marker = 'x')
+    
+f.text(0.02, 0.5, 'Average Size in Bins', va = 'center', rotation = 90)
+pl.show()

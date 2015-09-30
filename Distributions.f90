@@ -165,11 +165,14 @@ contains
     real(double), intent(in),optional::Renorm_Limits(2)
     real(double)::PDF(size(Grid))
 
+    logical:: doInterpolate = .false.
+
     !--Internal Declarations
-    integer:: nM, nZ, Z
+    integer:: nM, nZ, Z, zz
+    real(double):: dz
 
     !--Lookup Declarations
-    integer:: Index
+    integer:: Index, zIndex
     real(double):: Width
 
     !--Temporary Declarations
@@ -218,9 +221,24 @@ contains
        LT_PDF = LT_PDF/Integrate(LT_RedshiftDistribution%yGrid, LT_PDF, 2, lim = Renorm_Limits)
     end if
 
-    !--Interpolate on redshift grid
-    !--Linear Interpolate on 1D array, over redshift
-    PDF = Linear_Interp(Grid, LT_RedshiftDistribution%yGrid, LT_PDF, ExValue = 0.e0_double)
+    if(doInterpolate) then
+       !--This could be reduced down if size of grid == 1 to reduce searching needed to interpolate
+       PDF = Linear_Interp(Grid, LT_RedshiftDistribution%yGrid, LT_PDF, ExValue = 0.e0_double)
+    else
+       !--zGrid constructed as: (/ (zLimits(1) + (M-1)*zLimits(3), M = 1, size(LT_RedshiftDistribution%yGrid)) /)
+       dz = (LT_RedshiftDistribution%yGrid(size(LT_RedshiftDistribution%yGrid))-LT_RedshiftDistribution%yGrid(1))/(size(LT_RedshiftDistribution%yGrid)-1)
+
+       do zz = 1, size(Grid)
+          zIndex = nint(1.e0_double+((Grid(zz)-LT_RedshiftDistribution%yGrid(1))/dz))
+
+          if(zIndex > size(LT_PDF)) then
+             print *, 'zGrid check (exceeding):', zindex, LT_RedshiftDistribution%yGrid(size(LT_RedshiftDistribution%yGrid)), grid(zz), dz
+          end if
+
+          !--Evaluate on coarse grid
+          PDF(zz) = LT_PDF(zIndex)
+       end do
+    end if
 
     !--2D interpolation - More accurate (but different only < 1% when dm = 0.01 over index approach), but marginally slower
 !!$    do z = 1, size(Grid)
@@ -258,8 +276,8 @@ contains
     if(allocated(LT_RedshiftDistribution%yGrid)) deallocate(LT_RedshiftDistribution%yGrid)
     if(allocated(LT_RedshiftDistribution%LT)) deallocate(LT_RedshiftDistribution%LT)
 
-    nM = (MagLimits(2)-MagLimits(1))/MagLimits(3)
-    nZ = (zLimits(2)-zLimits(1))/zLimits(3)
+    nM = 1 + nint((MagLimits(2)-MagLimits(1))/MagLimits(3))
+    nZ = 1 + nint((zLimits(2)-zLimits(1))/zLimits(3))
     
     allocate(LT_RedshiftDistribution%xGrid(nM)); LT_RedshiftDistribution%xGrid = 0.
     allocate(LT_RedshiftDistribution%yGrid(nZ)); LT_RedshiftDistribution%yGrid = 0.
@@ -297,6 +315,7 @@ contains
        close(31)
        write(*,'(A)') '--- Output Redshift Distribution Lookup to:', trim(Filename)
     end if
+
 
     print *, ' '
     print *, 'Redshift Distribution Look-Up Table Constructed'

@@ -1,0 +1,83 @@
+import numpy as np
+from scipy import stats
+import pylab as pl
+import math
+import sys
+import os
+
+##User Defined Variable Values:
+Bias_Directory_Head = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleCluster_Bias/STAGES+COMBO/Cluster_Contamination/'
+Run_Directory = ['Bias_Error_Run_CatID45/', 'Bias_Error_Run_CatID45/', 'Bias_Error_Run_CatID45/', 'Bias_Error_Run_CatID45/'] #One for each Experiment
+Bias_File = 'Mass_Estimates.dat'
+
+CC_Experiment_Directory = ['A901a/', 'A901b/', 'A902/', 'SW/']
+
+Control_Experiment_Directory = ['A901b_Control/', 'A901b_Control/', 'A902_Control/', 'SW_Control/']
+
+Experiment_Labels = ['A901a', 'A901b', 'A902', 'SW']
+
+Mass_Directory = ['r200_1.2/','r200_1.2/','r200_0.8/','r200_0.8/']
+
+Average_nRun = 10
+
+'''
+##Masses
+Input_Mass_Col = 6
+Mass_Error_Cols = [7,8]
+'''
+
+
+##r200
+Input_Mass_Col = 2
+Mass_Error_Cols = [3,4]
+
+
+###Signal-To-Noise Function
+def Average_StN(Dir_head, Bias_File, nRun, Mass_Col, Mass_Err_Col):
+    #Signal-To-Noise defined as the ratio of the *Input Mass* divided by half the width of the error bars
+    StN = np.zeros(nRun); ErrorWidth = np.zeros(nRun)
+    for i in range(1, nRun+1):
+        Input = np.genfromtxt(Dir_head+str(i)+'/'+Bias_File)
+        ErrorWidth[i-1] = (0.5*(Input[Mass_Error_Cols[0]]+Input[Mass_Error_Cols[1]]))
+        StN[i-1] = Input[Mass_Col]/ErrorWidth[i-1]
+
+
+    print 'StN:', StN
+    ##Account for the fact that when the StN is a NaN, the posterior has returned a value consistent with zero such that the prior dominates.
+    ##This can be switched off at will
+    print 'Signal-to-Noise accounts for unconstrained data, removing',  np.sum(np.isnan(StN)), ' NaNs...'
+    StN[np.isnan(StN)] = 0.0
+
+    print 'NaNs in array:', np.sum(np.isnan(StN))
+    print 'StN:', stats.nanmean(StN), '+-',  stats.nanstd(StN)/np.sum(~np.isnan(StN))
+    print 'Average Error width:', stats.nanmean(ErrorWidth)
+    print ' '
+    return stats.nanmean(StN), stats.nanstd(StN)/np.sum(~np.isnan(StN))
+
+
+f = pl.figure()
+ax = f.add_subplot(111)
+
+StN = np.zeros(len(Control_Experiment_Directory)); StN_Err = np.zeros(StN.shape[0])
+Control_StN = np.zeros(len(Control_Experiment_Directory)); Control_StN_Err = np.zeros(StN.shape[0])
+for Clus in range(0, len(Control_Experiment_Directory)):
+
+    ##Plot Control:
+    Control_StN[Clus], Control_StN_Err[Clus] = Average_StN(Bias_Directory_Head+Control_Experiment_Directory[Clus]+Mass_Directory[Clus]+Run_Directory[Clus], Bias_File, Average_nRun, Input_Mass_Col, Mass_Error_Cols)
+
+    ##Plot Cluster_Contamination:
+    StN[Clus], StN_Err[Clus] = Average_StN(Bias_Directory_Head+CC_Experiment_Directory[Clus]+Mass_Directory[Clus]+Run_Directory[Clus], Bias_File, Average_nRun,Input_Mass_Col,Mass_Error_Cols)
+
+xPos = range(1, len(Control_Experiment_Directory)+1)
+ax.errorbar(xPos, Control_StN, yerr = Control_StN_Err, color = 'k', linewidth = 1.5, marker = 'x', label = 'Control')
+ax.errorbar(xPos, StN, yerr = StN_Err, color = 'r', linewidth = 1.5, marker = 'o', label = 'With Contamination')
+
+
+ax.legend()
+ax.set_xticks(range(1, len(Control_Experiment_Directory)+1))
+ax.margins(0.1)
+ax.set_xticklabels(Experiment_Labels, rotation = 45.)#
+ax.set_ylabel('Signal-to-Noise')
+
+pl.show()
+              

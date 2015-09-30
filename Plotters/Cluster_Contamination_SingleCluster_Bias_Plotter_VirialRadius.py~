@@ -1,0 +1,65 @@
+#Produces ML-point-estimate plots of posteriors of a Combined run, with the aim of showing no bias for a given experiment
+
+import numpy as np
+import pylab as pl
+import math
+import sys
+
+Experiment_Colour = ['b','g', 'r', 'c']
+Experiment_Marker = ['o','x','v', 's']
+FontSize = 14
+#STAGES_Cluster_Label = ['A901a', 'A901b', 'A902', 'SW']
+
+######READ in PARAMETER FILE#######
+Bias_Directory_Head = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Mag-Only/SingleCluster_Bias/STAGES+COMBO/Cluster_Contamination/No_Core_Masking/'
+#'/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/SizeMag/SingleCluster_Bias/STAGES+COMBO/Cluster_Contamination/'
+Experiment_Directory = ['A901a/', 'A901b/', 'A902/', 'SW/']
+#Experiment_Directory = ['A901b_Control/', 'A901b_Control/', 'A902_Control/', 'SW_Control/']
+Mass_Directories = ['r200_0.4/', 'r200_0.8/','r200_1.2/', 'r200_1.6/']
+#Mass_Directories = ['r200_0.7/','r200_1.1/','r200_1.5/', 'r200_1.9/']
+Bias_File = 'BiasesAndErrorVariance.dat'
+
+Experiment_Label = ['A901a', 'A901b', 'A902', 'SW']
+
+
+#Virial Radius
+Recovered_Mass_Col = 1
+Mass_Bias_Col = 2
+#Antisymmetric error
+Mass_Error_Cols = [3,4]
+
+'''
+#Masses
+Recovered_Mass_Col = 5
+Mass_Bias_Col = 6
+#Antisymmetric error
+Mass_Error_Cols = [7,8]
+'''
+
+Offset = 0.015
+
+f = pl.figure()
+ax = f.add_subplot(111)
+
+for Ex in range(0, len(Experiment_Label)):
+    Offset_Index = Ex - int(len(Experiment_Label)/2)
+    for c in range(0, len(Mass_Directories)):
+        Bias_Input = np.genfromtxt(Bias_Directory_Head+Experiment_Directory[Ex]+Mass_Directories[c]+Bias_File)
+        Input_Mass = Bias_Input[Recovered_Mass_Col]-Bias_Input[Mass_Bias_Col]
+        
+        if(c==1):
+            ax.errorbar(Input_Mass+Offset_Index*Offset, Bias_Input[Mass_Bias_Col]/(Input_Mass), yerr = [[Bias_Input[Mass_Error_Cols[1]]/(Input_Mass)],[Bias_Input[Mass_Error_Cols[0]]/(Input_Mass)]], color = Experiment_Colour[Ex], linewidth = 3., marker = Experiment_Marker[Ex], label = Experiment_Label[Ex])
+        else:
+            ax.errorbar(Input_Mass+Offset_Index*Offset, Bias_Input[Mass_Bias_Col]/(Input_Mass), yerr = [[Bias_Input[Mass_Error_Cols[1]]/(Input_Mass)],[Bias_Input[Mass_Error_Cols[0]]/(Input_Mass)]], color = Experiment_Colour[Ex], linewidth = 3., marker = Experiment_Marker[Ex])
+            
+#Plot zero line
+#ax.set_xlim(0.3, 1.7)
+#ax.set_ylim(-0.2, 0.2)
+ax.plot(ax.get_xlim(), (0.,0.), linestyle = '--')
+
+ax.legend(loc = 4)
+ax.set_xlabel(r'Input Virial Radius $\left(r_{200}\; \left[\frac{\rm Mpc}{h}\right]\right)$', fontsize = FontSize); ax.set_ylabel(r'Fractional Bias in Recovered Virial Radius', fontsize = FontSize)
+
+pl.show()
+        
+#Standard output is "Input, Output, Variance, Input_Ap_Mass, Output_Ap_Mass, Variance" with a space between Clusters.#

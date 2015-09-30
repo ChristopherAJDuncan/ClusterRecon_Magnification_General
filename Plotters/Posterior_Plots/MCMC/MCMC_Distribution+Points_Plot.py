@@ -1,0 +1,221 @@
+#!/usr/bin/python
+
+##Produces a plot of points showing the degeneracy between parameters of digaonal, and distributions of the parameter on-diagonal
+##---- Plots on diagonal show 1-D fully marginalised distribution. Off diagonal shows 2D margianlised distribution, with a subset of the chain links plotted
+## Point_Skip sets the number of chain links that are skipped in setting up the 2D histogram - This minimises spurious covaraince between points, but it set by the user and is largely arbitrary.
+## nPoints sets the number of chainLins that are plotted on the off-diagonal. Points are chosen by regulalry slicing through the chain
+## Parameter_Col sets the parameters to plot: all other parameters are marginalised over. Permutations over all parameters are considered, so n(n+1)/2 plots are produced.
+## Parameter label sets the labels of the plots corresponding to parameters in parameter col
+## Comparison should be of lenght of Parameter_Col, and plots vertical lines on 1D distributions in order [Mean, -Sigma, +Sigma]. Comparison can be switched off by setting Plot_Comparison == False
+## Output to MCMC_Distributions.pdf if getPDF == True, else out to screen
+### --- Author: Christopher Duncan (cajd@roe.ac.uk).
+#---- Some spurious and excess code specific to my own needs is likely, particularly is setting up the output. This can be ignored.
+
+import numpy as np
+import pylab as pl
+from matplotlib.ticker import FormatStrFormatter
+import math
+
+getPDF = True
+
+Chain_Input = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/MagCutsTesting_Data/MCMC/4Cluster/RRG+STAGES/SM+M/A901b_MSampleCut/M_less_27p5/Group1_MCMC_CombinedChain.dat'
+#Mag-Only Result '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/SimultaneousFitting/MCMC/r200+Centroid/Group1_MCMC_CombinedChain.dat'
+nBurnin = 0
+Point_Skip = 0
+nPoints = 2000
+
+##DELETE Likelihood_Col = 17
+Confidence_Limits = [0.68, 0.9, 0.99]
+Confidence_Colours = ['r', 'b', 'k']
+
+Plot_Comparison = True
+##Comparison should be of length Parameter_Col, and each element should have [ML, -CL, +CL]. use float('nan') for first elemetn if not to be plotted
+### 6 Cluster - 2 on each plot
+
+## A901a/ A901b
+
+Parameter_Col = [1,3,4,5,7,8]
+Parameter_Label = ['r200 (A901a)', 'RA (A901a)', 'Dec (A901a)', 'r200 (A901b)','RA (A901b)', 'Dec (A901b)']
+Comparison = [[1.194,0.101,0.086],[149.1099,0,0],[-9.9561,0,0],[1.180,0.104,0.088],[148.9899,0,0],[-9.9841,0,0]]
+
+
+## A902/ CB1
+'''
+Parameter_Col = [9,11,12,13,15,16]
+Parameter_Label = ['r200 (A902)', 'RA (A902)', 'Dec (A902)', 'r200 (CB1)','RA (CB1)', 'Dec (CB1)']
+Comparison = [[0.766,0.140,0.137],[149.1424,0,0],[-10.1666,0,0],[0.608,0.138,0.127],[149.1650,0,0],[-10.1728,0,0]]
+'''
+
+## SWa/ SWb
+'''
+Parameter_Col = [17,19,20,21,23,24]
+Parameter_Label = ['r200 (SWa)', 'RA (SWa)', 'Dec (SWa)', 'r200 (SWb)','RA (SWb)', 'Dec (SWb)']
+Comparison = [[0.689,0.192,0.141],[148.9240,0,0],[-10.1616,0,0],[0.742,0.153,0.123],[148.9070,0,0],[-10.1637,0,0]]
+'''
+
+### 4 Cluster, r200, RA, Dec
+'''
+Parameter_Col = [1,3,4,5,7,8]
+#Parameter_Col = [9,11,12,13,15,16]
+Parameter_Label = ['r200 (A901a)', 'RA (A901a)', 'Dec (A901a)', 'r200 (A901b)','RA (A901b)', 'Dec (A901b)']
+#Parameter_Label = ['r200 (A902)', 'RA (A902)', 'Dec (A902)', 'r200 (SW)','RA (SW)', 'Dec (SW)']
+Comparison = [[1.194,0.101,0.086],[149.1099,0,0],[-9.9561,0,0],[1.180,0.104,0.088],[148.9899,0,0],[-9.9841,0,0]]
+#Comparison = [[0.799,0.125,0.112],[149.1424,0,0],[-10.1666,0,0],[0.894,0.117,0.106],[148.9101,0,0],[-10.1719,0,0]]
+'''
+
+def get_Marginalised_Confidence_Levels(Limits, Chain, Params):
+    ###Returns the levels corresponding to the confidence limits entered. Used for drawing contours on a 2D histogram. Does this by sorting the histogram, and noting that the number of points in an area defined by the histogram box is proportional to the likelihhod at that point
+    #Params labels the columns of the chain on which the hisotgram is constructed
+    # This returns the countours corresponding to the N-dimensional (un-marginalised) distribution
+    #Levels returned can only be applied to a NORMED distribution!!!
+
+
+    #Construct the hisotgram on an abritrarily fine grid
+    Hist, xedges, yedges= np.histogram2d(Parameter_Chain[:,Params[0]][::Point_Skip],Parameter_Chain[:,Params[1]][::Point_Skip], bins = (200,200), normed = True)
+
+    ##Sort Histogram, flatten to 1D
+    Sorted = np.sort(Hist, axis = None)
+
+    Total = np.sum(Sorted)
+
+    ##Set up Likelihood space that will be investigated
+    LSpace = np.linspace(0,np.amax(Hist), 1000)
+
+    LHood = np.zeros(len(Limits));
+    #Search for each limit
+    for l in range(0, len(Limits)):
+        Percent = np.zeros(LSpace.shape[0])
+        for i in range(0, LSpace.shape[0]):
+            ##Get fraction of grid boxes with likelihood greater than the LSpace value considered
+            msk = (Sorted>=LSpace[i])
+            Percent[i] = np.sum(Sorted[msk])
+
+            #Chose stored value to be the first point where the percentage above that likelihood is less than the CL entered
+            if(i>0 and Percent[i] <= (Limits[l]*Total) and Percent[i-1] > (Limits[l]*Total)):
+                LHood[l] = LSpace[i]
+                continue
+
+    return LHood
+
+def get_Confidence_Levels(Limits, ChainLikelihood, Renorm):
+    ###Returns the levels corresponding to the confidence limits entered. Used for drawing contours on a 2D histogram. Renorm is the maximum value of the histogram
+    # This returns the countours corresponding to the N-dimensional (un-marginalised) distribution
+
+    #Order the chain by Likelihood
+    Sorted = np.sort(ChainLikelihood)
+
+    ##Renormalise chain likelihood so that the maximum is equivalent to P(theta) = 1
+    Sorted = np.subtract(Sorted, np.amax(Sorted))
+
+    print Sorted[0], Sorted[-1]
+
+    LHood = np.zeros(len(Limits))
+    for i in range(0, len(Limits)):
+        Index = Sorted.shape[0]*(1.-Limits[i])
+        LHood[i] = Sorted[Index]
+
+    ##Renormalise to the level entered
+    #LHood = np.add(LHood, np.log(Renorm)-np.amax(ChainLikelihood))
+
+    print '----'
+
+    print 'lnLHood:', LHood
+    print np.exp(np.amax(Sorted)), np.amax(Sorted)
+
+    LHood = np.exp(LHood)
+    LHood *= Renorm/np.exp(np.amax(Sorted))
+
+    print LHood, Renorm
+
+    print '----'
+
+    return LHood
+
+#    return np.exp(LHood)
+
+Chain = np.genfromtxt(Chain_Input)
+
+print 'Chain shape:', Chain.shape
+
+if(Plot_Comparison and len(Comparison) != len(Parameter_Col)):
+    print 'FATAL ERROR - COmpariosn to plot is not of correct length'
+
+f = pl.figure(0, (len(Parameter_Col)*3.1,len(Parameter_Col)*3.))
+
+Parameter_Chain =  np.copy(Chain[nBurnin:,:])
+
+print 'Parameter chain contains ', Parameter_Chain.shape[0], 'links'
+
+if(Point_Skip == 0):
+    Point_Skip += 1
+
+#Get limits for the plot from the Parameter Chain
+Axes_Limit = []
+for i in range(0, len(Parameter_Col)):
+    Axes_Limit.append((np.amin(Parameter_Chain[:,Parameter_Col[i]]),np.amax(Parameter_Chain[:,Parameter_Col[i]])))
+
+AxesT = []
+for i in range(0, len(Parameter_Col)):
+    for j in range(i, len(Parameter_Col)):
+
+        nPlot = (i+1) + j*(len(Parameter_Col))
+        ax = f.add_subplot(len(Parameter_Col),len(Parameter_Col), nPlot)
+
+        AxesT.append(ax)
+        
+        if(i==j): #Distribution Plot
+            ax.hist(Parameter_Chain[:,Parameter_Col[j]], 30)
+
+            if(Plot_Comparison and math.isnan(Comparison[i][0])==False):
+                ax.axvline(x = Comparison[i][0]-Comparison[i][1], color = 'r', linestyle = '--', linewidth = 2)
+                ax.axvline(x = Comparison[i][0]+Comparison[i][2], color = 'r', linestyle = '--', linewidth = 2)
+                ax.axvline(x = Comparison[i][0], color = 'r', linestyle = '-', linewidth = 2)
+
+            ax.set_xlim(Axes_Limit[i])
+            
+            pl.setp(ax.get_yticklabels(), visible = False)
+        else: #Scatter Plot
+            Hist, xedges, yedges= np.histogram2d(Parameter_Chain[:,Parameter_Col[i]][::Point_Skip],Parameter_Chain[:,Parameter_Col[j]][::Point_Skip], bins = (30,30), normed = True)
+
+#            Lev = get_Confidence_Levels(Confidence_Limits, Parameter_Chain[:,Likelihood_Col], np.amax(Hist))
+            Lev = get_Marginalised_Confidence_Levels(Confidence_Limits, Parameter_Chain, (Parameter_Col[i], Parameter_Col[j]))
+            
+            ax.contour(xedges[:-1]+0.5*np.diff(xedges), yedges[:-1]+0.5*np.diff(yedges), np.transpose(Hist), levels = Lev, colors = Confidence_Colours)
+            
+            #ax.hexbin(Parameter_Chain[:,Parameter_Col[i]][::Point_Skip],Parameter_Chain[:,Parameter_Col[j]][::Point_Skip])
+            if(nPoints > 0):
+                nSkip = Parameter_Chain.shape[0]/nPoints
+
+                if nSkip == 0:
+                    nSkip = 1
+                ax.scatter(Parameter_Chain[:,Parameter_Col[i]][::nSkip],Parameter_Chain[:,Parameter_Col[j]][::nSkip], alpha = 0.5, marker  = 'x', s = 1., c = 'k') 
+
+            ax.set_xlim(Axes_Limit[i])
+            ax.set_ylim(Axes_Limit[j])
+
+
+        #Labelling
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%9.3f'))
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%9.3f'))
+        if(i == 0 and j >= 1):
+            ax.set_ylabel(Parameter_Label[j])
+        else:
+            pl.setp(ax.get_yticklabels(), visible = False)
+
+            
+        if(j == len(Parameter_Col)-1):
+            ax.set_xlabel(Parameter_Label[i])
+            labels = ax.get_xticklabels()
+            for label in labels:
+                label.set_rotation(45)
+        else:
+            pl.setp(ax.get_xticklabels(), visible = False)
+
+
+if(getPDF):
+    output_name = 'MCMC_Distributions.pdf'
+    pl.savefig(output_name,format = 'pdf',bbox_inches = 'tight')
+    print 'Produced plot output to '+output_name
+    #os.system('evince '+output_name+' &')
+else:
+    pl.show()

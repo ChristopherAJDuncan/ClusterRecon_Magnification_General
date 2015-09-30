@@ -1,0 +1,100 @@
+#Produces a series of plots, one for each aperture, which compares posteriors
+
+import numpy as np
+import pylab as pl
+
+Dir_Head = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Data/SizeMag+Mag/SingleClusterFit/GALFIT/MAGTEST/SNRCut/'
+Directories = [Dir_Head+'RRG_AND_STAGES_GALFIT_RRGSExMag_zCut/', Dir_Head+'RRG_AND_STAGES_GALFIT_STAGESSExMag_zCut/']
+Experiment_Label = ["RRG SEx","STAGES SEx"]
+'''
+Directories = ['/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Data/SizeMag+Mag/SingleClusterFit/GALFIT/MAGTEST/M_GALFIT/','/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Data/SizeMag+Mag/SingleClusterFit/GALFIT/MAGTEST/M_SEx/']
+Experiment_Label = ["GALFIT magnitudes", "SEx magnitudes"]
+'''
+#Directories = ['/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Data/SizeMag+Mag/SingleClusterFit/RRG+GALFIT/M/','/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Data/SizeMag+Mag/SingleClusterFit/RRG+GALFIT/SM/', '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/Data/SizeMag+Mag/SingleClusterFit/RRG+GALFIT/SM+M/']
+#Experiment_Label = ['Magnitude-Only', 'Size-Mag, SNR 30+', 'Size-Mag+Mag, SNR 30+']
+Aperture_Label = [' ','A901a', 'A901b', 'A902', 'CB1', 'SWa', 'SWb'] #Always leave first empty, or discardable
+Colours = ['k', 'b', 'r', 'c']
+Marker = ['o','x','v', 's']
+
+#For Plot_Type == 1
+Posterior_File = 'Posterior_per_Aperture.dat'
+#For Plot_Type == 2
+Estimator_File = 'Mass_Estimates.dat'
+Alpha_Col = 2
+Alpha_Err_Col = [3,4]
+
+
+Plot_Type = 2
+
+## Read in Posterior File
+Posteriors = []
+for i in range(len(Directories)):
+    Posteriors.append(np.genfromtxt(Directories[i]+Posterior_File))
+
+
+
+
+if(Plot_Type == 1):
+    f =pl.figure()
+    for i in range(1,Posteriors[0].shape[1]):
+        ax = f.add_subplot(2,3,i) ##Manually Change
+        
+        ax.set_title(Aperture_Label[i-1])
+        if(i==1 or i==4):
+            ax.set_ylabel(r'$p(r_{200})$', fontsize = 14)
+        if(i==4 or i==5 or i==6):
+            ax.set_xlabel(r'$r_{200}$', fontsize = 14)
+            
+        ax.set_xlim((0.,2.0))
+    
+        for ex in range(len(Posteriors)):
+            ax.plot(Posteriors[ex][:,0], Posteriors[ex][:,i], label = Experiment_Label[ex])
+            
+        if(i==2):
+            ax.legend(prop = {'size':11})
+
+if(Plot_Type == 2):
+    f =pl.figure()
+    ax = f.add_subplot(111)
+
+    Offset = 0.2/float(len(Directories))
+
+    for i in range(len(Directories)):
+        Input = np.genfromtxt(Directories[i]+Estimator_File)
+
+        Alpha = Input[:,Alpha_Col]
+        Err = np.zeros((Alpha.shape[0], 2))
+
+        Offset_Index = i - int(len(Directories)/2.)
+        
+        if(len(Alpha_Err_Col) == 1):
+            Err[:,0] = Input[:,Alpha_Err_Col]; Err[:,1] = Input[:,Alpha_Err_Col]
+        elif(len(Alpha_Err_Col) ==2):
+            Err[:,1] = Input[:,Alpha_Err_Col[0]]; Err[:,0] = Input[:,Alpha_Err_Col[1]]
+        else:
+            print 'PROBLEM'
+        #Err = Err.T
+
+        if i==0:
+            nCl = Input.shape[0]
+            
+            xPos = np.arange(1,nCl+1)
+
+        ##Plot
+        for c in range(nCl):
+            if(c==0):
+                Label = Experiment_Label[i]
+            else:
+                Label = None
+            ax.errorbar(xPos[c]+Offset*Offset_Index, Input[c,Alpha_Col], yerr = Err[c,:].reshape(2,1), color = Colours[i], label = Label, marker = Marker[i])
+
+
+    ax.set_xlim((0.5,nCl+0.5))
+    ax.set_ylim((ax.get_ylim()[0], 1.2*ax.get_ylim()[1]))
+
+    ax.set_xticklabels(Aperture_Label, rotation = 45.)
+    ax.set_ylabel(r'Virial Radius ($r_{200}$) [Mpc/h]')
+    
+    ax.legend()
+
+pl.show()

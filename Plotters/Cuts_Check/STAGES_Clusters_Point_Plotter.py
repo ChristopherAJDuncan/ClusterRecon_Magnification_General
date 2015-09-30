@@ -1,0 +1,71 @@
+#Produces ML-point-estimate plots of posteriors of a Combined run, with the aim of showing the bias coming from Overlap and lensed prior
+
+import numpy as np
+import pylab as pl
+import math
+import sys
+import os
+
+getPDF = True
+Experiment_Colour = ['r','b','g', 'c']
+Plot_Type = 1 #0:Bias, 1:Fractional Bias
+Ordinate_Type = 0 #0:r200, 1:M200
+linewid  = 1.
+STAGES_Cluster_Label = ['A901a', 'A901b', 'A902', 'SW']
+
+######READ in PARAMETER FILE#######
+
+Overlap_Bias_Directory_Head = '/disk1/cajd/Size_Magnification/Bayesian_DM_Profile_Constraints_Output/SizeMag/STAGES_Clusters_Bias/STAGES+COMBO/WLWL/P3.3_D6.5/'
+Overlap_Bias_File = 'BiasesAndErrorVariance.dat'
+if(Ordinate_Type == 0):
+    Recovered_Mass_Col = 1
+    Mass_Bias_Col = 2
+    Mass_Error_Cols = [3,4]
+else:
+    Recovered_Mass_Col = 5
+    Mass_Bias_Col = 6
+    Mass_Error_Cols = [7,8]
+
+f = pl.figure()
+ax = f.add_subplot(111)
+
+Overlap_Bias_Input = np.genfromtxt(Overlap_Bias_Directory_Head+Overlap_Bias_File)
+for c in range(0, Overlap_Bias_Input.shape[0]):
+
+    Overlap_Input_Mass = Overlap_Bias_Input[c, Recovered_Mass_Col]-Overlap_Bias_Input[c, Mass_Bias_Col]
+
+    ##Points to Plot#
+    if(Plot_Type == 0):
+        Overlap_Bias_Point =  Overlap_Bias_Input[c,Mass_Bias_Col]; Overlap_Bias_Error = [[Overlap_Bias_Input[c,Mass_Error_Cols[1]]],[Overlap_Bias_Input[c,Mass_Error_Cols[0]]]]  
+    elif(Plot_Type ==1):
+        Overlap_Bias_Point =  Overlap_Bias_Input[c,Mass_Bias_Col]/Overlap_Input_Mass; Overlap_Bias_Error = [[Overlap_Bias_Input[c,Mass_Error_Cols[1]]/Overlap_Input_Mass],[Overlap_Bias_Input[c,Mass_Error_Cols[0]]/Overlap_Input_Mass]]  
+    else:
+        print 'Error Setting Plot Type'
+        exit()
+
+
+    ax.errorbar(Overlap_Input_Mass, Overlap_Bias_Point, yerr = Overlap_Bias_Error, color = Experiment_Colour[c], linewidth = linewid, marker = 'x', label = STAGES_Cluster_Label[c])
+
+
+        
+#Plot zero line
+ax.plot(ax.get_xlim(), (0.,0.), linestyle = '--')
+
+ax.legend(loc = 4)
+ax.set_xlabel(r'Input Virial Mass ($M_{200}\; \left[\frac{\rm M_\odot}{h}\right]$)');
+if(Plot_Type ==0):
+    ax.set_ylabel(r'Bias in Recovered Mass ($M_{200}\; \left[\frac{\rm M_\odot}{h}\right]$)')
+elif(Plot_Type == 1):
+    ax.set_ylabel(r'Fractional Bias in Recovered Mass')
+
+
+if(getPDF):
+    output_name = 'STAGESClusters_OverlapBias_PointPlot.pdf'
+    pl.savefig(output_name,format = 'pdf',bbox_inches = 'tight')
+    print 'Produced plot output to '+output_name
+    os.system('evince '+output_name+' &')
+else:
+    pl.show()
+
+        
+#Standard output is "Input, Output, Variance, Input_Ap_Mass, Output_Ap_Mass, Variance" with a space between Clusters.#

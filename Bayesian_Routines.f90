@@ -215,6 +215,55 @@ contains
 !!$
 !!$  end subroutine Combine_Posteriors_Vector
 
+  subroutine cut_Sample_aroundCluster(Cat, sampleFlag, Cluster_Pos, Ap_Rad)
+    !-- Removes a full sample (Method = 1,2,3) around a particualr cluster
+    !-- Designed to cut the faint sources without sizes around A901b
+    type(Catalogue), intent(inout):: Cat
+    integer:: sampleFlag
+    real(double), intent(in):: Cluster_Pos(2)
+    real(double), intent(in):: Ap_Rad
+
+    type(Catalogue):: tCat
+
+    real(double), allocatable:: sep(:)
+    integer:: c, counter, nCut
+
+    print *, '\n Sources with Posterior Method == ', sampleFlag
+    print *, '  with ', Ap_Rad ,' of ', cluster_pos, ' will be cut from sample'
+
+    allocate(sep(size(Cat%RA))); sep = dsqrt( (Cat%RA-Cluster_Pos(1))**2.e0_double +(Cat%Dec-Cluster_Pos(2))**2.e0_double )
+
+
+    print *, Cat%Posterior_Method
+    print *, count((sep <= Ap_Rad)), count(Cat%Posterior_Method == sampleFlag), count((sep <= Ap_Rad) .and. (Cat%Posterior_Method == sampleFlag))
+    nCut = count((sep <= Ap_Rad) .and. (Cat%Posterior_Method == sampleFlag))
+
+    tCat = Cat
+   
+    call Catalogue_Destruct(Cat)
+    call Catalogue_Construct(Cat, size(tCat%RA)-nCut)
+
+    counter = 0
+    do c = 1, size(sep)
+      if(((sep(c) <= Ap_Rad) .and. (tCat%Posterior_Method(c) == sampleFlag)) == .false.) then
+         counter = counter + 1
+         call Catalogue_Assign_byGalaxy_byCatalogue(Cat, counter, tCat, c)
+      end if
+   end do
+
+   if(counter /= size(Cat%RA)) then
+      print *, 'Fatal Error - cut_Sample_aroundCluster - Error setting Catalogue size:', counter, size(Cat%RA)
+      STOP
+   END if
+
+   call Catalogue_Destruct(tCat)
+
+   print *, '\n Finished'
+
+  end subroutine cut_Sample_aroundCluster
+    
+
+
   subroutine split_Sample(iCat, oCat, asPrior, S2_Magnitude_Limits, S2_Size_Limits)
     !---Splits the sample into a magnitude-only catalogue, and a size-magnitude catalogue, according to the entered size limits, and SNR limits - anything outside size and SNR limits is appended to the magnitude-only catalogue
 
@@ -257,10 +306,18 @@ contains
 
     if((Catalogue_Constructed(inputCat) == .false.) .or. (size(inputCat%RA) == 0)) STOP 'FATAL ERROR - split_Sample - Input Catalogue is not allocated, or zero'
 
+    !-----------------------------GENERAL CUTS - APPLY TO PRIOR ALSO
+
+    !---Cut negative magnitudes on MF606W -- This as completely removed, and do not enther either sample (could reasonably be a size-only sample but can't be bothered. They are automatically removed anyway due to bright cut!!
+    print *, '--- \n General cuts - Applied to both Source and Field sample ---'
+
+    print *, 'Cutting by magnitude (removing invalid magnitudes for all samples):'
+    call Cut_By_Magnitude(inputCat, 0.e0_double, 100000.e0_double)
+
+
     !--Split by Size Limits
     print *, 'Cutting by Pixel Size'
 
-    !-----------------------------GENERAL CUTS - APPLY TO PRIOR ALSO
     !--Remove NaNs from Size array in SM case (i.e. this should always take badly measured szes into account, even in prior determination)
     if(use_lnSize) then
        print *, 'Invalid Size Check:', count(isNaN(inputCat%Sizes)), count(inputCat%Sizes <= -1000.0_double)
@@ -277,6 +334,10 @@ contains
     call Concatonate_Catalogues(oCat(2), tCat)
     call Catalogue_Destruct(tCat)
 
+    print *, '--- \n End of General cuts - Applied to both Source and Field sample ---'
+    
+    !----------------------------END OF GENERAL CUTS----------------------------------------------------------!
+
     print *, ' ' 
     print *, 'Split By SNR (mag limits):'
     print *, Survey_SNR_Limits
@@ -284,16 +345,29 @@ contains
     print *, 'oCat(2):', minval(oCat(2)%MF606W), maxval(oCat(2)%MF606W)
     !-----------------------------END GENERAL CUTS 
 
-    !--
-    if(iasPrior) then
-       !--Do not allow cut by size when evaluating prior. This should be taken into account when integrating 2D distribtion to get magnitude distriubtion, but size information is necessary for correct renormalisation even in this case.
-       !oCat(2) = inputCat
+    !--At this stage, inputCat contains all sizes, but is cut by SNR
+    !-- oCat(2) contains those invalid sizes as well as those failing SNR cut
 
+    !--
+
+    if(iasPrior) then
+       !--Do not allow cut by size when evaluating prior. This should be taken into account when integrating 2D distribtion to get magnitude distriubtion, but size information is necessary for correct renormalisation even in this case. - This si true for the case where a size cut is used, and therefore the magnitde distribution for sample 2 can be obtained my integrating over the full sample between size limits. Where sample 2 also contains invalid sizes, the prior sample must be chosen as the full sample will be.
+       !-oCat(2) = inputCat !-- oCat(2) contains size and SNR cuts
+
+       !--In this case, set oCat(1) before the cut, so that no size cuts are applied to the Size sample
+       !--oCat(2) will have sources which fail the size cut applied, to ensure that when sample 2 is contructed from both sources failing size cut and invalid sizes, that the prior is constructed from a representative sample of both
+       oCat(1) = inputCat       
+       call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
+       call Concatonate_Catalogues(oCat(2), tCat)
+       call Catalogue_Destruct(tCat)
     else
+       !-- In this case, set oCat(1) after the cut (i.e. size cut applied)
        call Cut_By_PixelSize(inputCat, Survey_Size_Limits(1), Survey_Size_Limits(2), tCat)
        print *, 'Pixel Size Cut, Mag Check:', minval(tCat%MF606W), maxval(tCat%MF606W), count(tCat%MF606W <= 5.), count(tCat%MF606W <= 0.1), count(tCat%MF606W <= 0.)
        call Concatonate_Catalogues(oCat(2), tCat)
        call Catalogue_Destruct(tCat)
+
+       oCat(1) = inputCat
     end if
 
     print *, ' '
@@ -302,7 +376,7 @@ contains
     print *, 'oCat(1):', minval(inputCat%Sizes), maxval(inputCat%Sizes)
     print *, 'oCat(2):', minval(oCat(2)%Sizes), maxval(oCat(2)%Sizes)
 
-    oCat(1) = inputCat
+
     call Catalogue_Destruct(inputCat)
 
     
@@ -917,10 +991,10 @@ contains
        allocate(ifree_Parameter(size(Group_Index)*nParameter_per_Cluster)); ifree_Parameter = .true.
        do C = 1, size(Group_Index)
 
-          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+1,:) = (/0.05e0_double, 2.5e0_double/) !-r200
+          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+1,:) = (/0.8e0_double, 1.5e0_double/) !-r200
           Parameter_Start_Limits((C-1)*nParameter_per_Cluster+2,:) = (/0.0e0_double, 0.0e0_double/) !-Concentration
-          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/maxval((/Ap_Pos(Group_Index(C),1)-centroid_Prior_Width, 148.7707e0_double/)), minval((/Ap_Pos(Group_Index(C),1)+centroid_Prior_Width, 149.3524e0_double/))/) !-RA
-          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/maxval((/Ap_Pos(Group_Index(C),2)-centroid_Prior_Width, -10.291e0_double/)), minval((/Ap_Pos(Group_Index(C),2)+centroid_Prior_Width, -9.748e0_double/))/) !-Dec
+          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+3,:) = (/maxval((/Ap_Pos(Group_Index(C),1)-centroid_Prior_Width(Group_Index(C)), 148.7707e0_double/)), minval((/Ap_Pos(Group_Index(C),1)+centroid_Prior_Width(Group_Index(C)), 149.3524e0_double/))/) !-RA
+          Parameter_Start_Limits((C-1)*nParameter_per_Cluster+4,:) = (/maxval((/Ap_Pos(Group_Index(C),2)-centroid_Prior_Width(Group_Index(C)), -10.291e0_double/)), minval((/Ap_Pos(Group_Index(C),2)+centroid_Prior_Width(Group_Index(C)), -9.748e0_double/))/) !-Dec
 
           !-0.1 works well for 6 Cluster (r200 only).
           ChainWidths((C-1)*nParameter_per_Cluster+1) = MCMC_Proposal_Width(1) !-r200
@@ -2086,6 +2160,7 @@ contains
 
     i = 0; Alpha_Loop = 0
     Continue_To_Evaluate = .true.
+
     do while (Continue_To_Evaluate)
        Posterior_perGalaxy = setNaN()
        !--Alpha_Loop counts the number of times the Alpha value has been looped over

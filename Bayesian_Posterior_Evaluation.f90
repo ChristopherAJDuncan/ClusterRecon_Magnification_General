@@ -4,7 +4,9 @@ module Bayesian_Posterior_Evaluation
 
   implicit none
 
-  logical, private:: use_lookup = .false.
+  !-- use lookup renorm does not work, but useful to test run-time dependence of posterior evaluation
+  logical, private:: use_lookup = .false., use_lookup_Renorm = .false.
+  
 
   logical, private:: debug = .false.
   character(500), private:: debug_Dir = 'debug/'
@@ -29,6 +31,13 @@ module Bayesian_Posterior_Evaluation
   interface delens_Source_Magnitude
      module procedure delens_Source_Magnitude_Scalar, delens_Source_Magnitude_Array
   end interface delens_Source_Magnitude
+
+  type RenormLookup
+     real(double),allocatable:: muGrid(:), S1_LT(:), S2_LT(:)
+  end type RenormLookup
+  type(RenormLookup), private:: LT_Renormalisation
+
+
 
 
 contains  
@@ -192,7 +201,7 @@ contains
 
     real(double):: Res
 
-    real(double), allocatable:: Posterior_M(:), Posterior_SM(:), Posterior_S(:)
+    real(double), allocatable:: Posterior_M(:), Posterior_SM(:), Posterior_S(:), data_S(:,:), data_SM(:,:), data_M(:,:)
     real(double), dimension(3):: combined_Posterior_byMethod
     integer, dimension(3):: methodCount
     logical:: split_byMethod = .true. !--Can be turned off to speed up run-time, at expense of removing possible output of posterior per source split by method
@@ -207,6 +216,11 @@ contains
        allocate(Posterior_S(count(Method == 1))); Posterior_S = 0.e0_double/0.e0_double
        allocate(Posterior_SM(count(Method == 2))); Posterior_SM = 0.e0_double/0.e0_double
        allocate(Posterior_M(count(Method == 3))); Posterior_M = 0.e0_double/0.e0_double !--NaNs as default
+
+       !--Store information on sample as split, used on output
+       allocate(data_S(5,size(Posterior_S))); data_S = 0.e0_double
+       allocate(data_SM(5,size(Posterior_SM))); data_SM = 0.e0_double
+       allocate(data_M(5,size(Posterior_M))); data_M = 0.e0_double
     end if
 
     !---Set up debugging output
@@ -224,8 +238,6 @@ contains
           call system('mkdir '//trim(adjustl(debug_Dir)))
        end if
     end if
-
-    print *, 'Calculating Likelihood based on a sample of:', size(Theta), 'sources'
 
     methodCount = 0
     do c = 1, size(Theta)
@@ -247,12 +259,15 @@ contains
           select case(Method(c))
           case(1)
              methodCount(1) = methodCount(1) + 1
+             data_S(:,methodCount(1)) = (/Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:)/)
              Posterior_S(methodCount(1)) = Posterior_perSource(c)
           case(2)
              methodCount(2) = methodCount(2) + 1
+             data_SM(:,methodCount(2)) = (/Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:)/)
              Posterior_SM(methodCount(2)) = Posterior_perSource(c)
           case(3)
              methodCount(3) = methodCount(3) + 1
+             data_M(:,methodCount(3)) = (/Theta(c), Magnitude(c), Source_Redshift(c), Position(c,:)/)
              Posterior_M(methodCount(3)) = Posterior_perSource(c)
           end select
        end if
@@ -279,6 +294,16 @@ contains
 
        !--This may be slow as opend and closed for each alpha
        !--General Combined output
+       inquire(file = trim(adjustl(output_Prefix))//'_Posterior_per_Source.dat', exist = here)
+       if(here == .false.) then
+          !Write header consisting of all sources in sample
+          write(fmt, '(I10)') size(Theta)+2
+          open(unit = 24, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source.dat', status = 'new')
+          write(24, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Sizes:', 0., 0., Theta
+          write(24, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Mags:', 0., 0., Magnitude
+          close(24)
+       end if
+
        open(unit = 24, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source.dat', Access = 'append')
        write(fmt, '(I10)') size(Alpha)+size(Posterior_perSource)+1
        write(24, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_perSource
@@ -286,8 +311,22 @@ contains
 
        if(split_byMethod) then
           if(methodCount(1) /= 0) then
+
              output_Type_Label = 'S'
-             open(unit = 26, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+             inquire(file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', exist = here)
+             if(here == .false.) then
+                !Write header consisting of all sources in sample
+                write(fmt, '(I10)') size(Alpha)+size(data_S,2)+1
+                open(unit = 26, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+                write(26, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Sizes:', 0., 0., data_S(1,:)
+                write(26, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Mags:', 0., 0., data_S(2,:)
+                write(26, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Z:', 0., 0., data_S(3,:)
+                write(26, '(A,x,'//trim(fmt)//'(e14.7,x))') '#RA:', 0., 0., data_S(4,:)
+                write(26, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Dec:', 0., 0., data_S(5,:)
+                close(26)
+             end if
+
+
              write(fmt, '(I10)') size(Alpha)+size(Posterior_S)+1
              write(26, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_S
              close(26)
@@ -295,6 +334,19 @@ contains
           
           if(methodCount(2) /= 0) then
              output_Type_Label = 'SM'
+             inquire(file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', exist = here)
+             if(here == .false.) then
+                !Write header consisting of all sources in sample
+                write(fmt, '(I10)') size(Alpha)+size(data_SM,2)+1
+                open(unit = 27, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+                write(27, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Sizes:', 0., 0., data_SM(1,:)
+                write(27, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Mags:', 0., 0., data_SM(2,:)
+                write(27, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Z:', 0., 0., data_SM(3,:)
+                write(27, '(A,x,'//trim(fmt)//'(e14.7,x))') '#RA:', 0., 0., data_SM(4,:)
+                write(27, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Dec:', 0., 0., data_SM(5,:)
+                close(27)
+             end if
+
              open(unit = 27, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
              write(fmt, '(I10)') size(Alpha)+size(Posterior_SM)+1
              write(27, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_SM
@@ -303,13 +355,26 @@ contains
           
           if(methodCount(3) /= 0) then
              output_Type_Label = 'M'
+             inquire(file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', exist = here)
+             if(here == .false.) then
+                !Write header consisting of all sources in sample
+                write(fmt, '(I10)') size(Alpha)+size(data_M,2)+1
+                open(unit = 28, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
+                write(28, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Sizes:', 0., 0., data_M(1,:)
+                write(28, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Mags:', 0., 0., data_M(2,:)
+                write(28, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Z:', 0., 0., data_M(3,:)
+                write(28, '(A,x,'//trim(fmt)//'(e14.7,x))') '#RA:', 0., 0., data_M(4,:)
+                write(28, '(A,x,'//trim(fmt)//'(e14.7,x))') '#Dec:', 0., 0., data_M(5,:)
+                close(28)
+             end if
+
              open(unit = 28, file = trim(adjustl(output_Prefix))//'_Posterior_per_Source_'//trim(adjustl(output_Type_Label))//'.dat', Access = 'append')
              write(fmt, '(I10)') size(Alpha)+size(Posterior_M)+1
              write(28, '('//trim(fmt)//'(e14.7,x))') Alpha, Res, Posterior_M
              close(28)
           end if
 
-          deallocate(Posterior_M, Posterior_SM, Posterior_S)
+          deallocate(Posterior_M, Posterior_SM, Posterior_S, data_S, data_M, data_SM)
 
           !--Output Combined
           open(unit = 29, file = trim(adjustl(output_Prefix))//'_CobminedPosterior_byMethod.dat', Access = 'append')
@@ -387,6 +452,7 @@ contains
     real(double), dimension(size(Alpha)):: Distance_From_Mass_Center
     real(double):: D_l
     real(double):: Theta_0, Magnitude_0 !--Delensed Versions
+    integer:: m0Index, T0Index
 
     real(double), dimension(2):: Renormalisation_Size_Limits, Renormalisation_Magnitude_Limits
     real(double), dimension(2):: iSize_Limits, iMag_Limits
@@ -404,6 +470,10 @@ contains
 
     !--Internal Decalrations that could eventually be set/passed in
     logical:: Enforce_Weak_Lensing = .false., Cuts_Renormalise_Likelihood = .true.
+
+    !---Testing Declarations
+    real(double):: Time00, Time01, Time0, Time1, Time2, Time3, Time4, Time5, Time6, Time7
+    integer:: tt, ttu = 1
 
     Posterior_Flag = '0'
 
@@ -516,6 +586,8 @@ contains
     
     do z = 1, nZ !-Vary source redshift
        !--Set Sigma Critical for that galaxy, across all lenses
+
+
        if(Known_Redshift) then
           Do l = 1, size(Sigma_Crit,1) !--Get Sigma_Critical for all lenses by interpolation
              Galaxy_Sigma_Critical(l) = Linear_Interp(Source_Redshift, RedshiftGrid, Sigma_Crit(l,:))
@@ -584,6 +656,7 @@ contains
        Magnitude_0 = delens_Source_Magnitude(Effective_Magnification, Magnitude)
           
        !---Set RedshiftPDF, to unity if redshift known, and to a point in a particular distribution if it is not
+
        if(Known_Redshift) then
           RedshiftPDF = 1.e0_double
        else
@@ -602,19 +675,29 @@ contains
        Renormalisation_Size_Limits =  delens_Source_Size(Effective_Magnification, iSize_Limits, use_lnT)!!DEPRECATED iSize_Limits/dsqrt(Effective_Magnification)
        Renormalisation_Magnitude_Limits = delens_Source_Magnitude(Effective_Magnification, iMag_Limits) !!DEPRECATED iMag_Limits + 2.5e0_double*dlog10(Effective_Magnification)
        
-       if(Cuts_Renormalise_Likelihood) then
+
+       
+       if(Cuts_Renormalise_Likelihood) then             
+
 !          if(z ==1) print *, 'KAPPA RENORMALISATION TURNED ON'
           if(Galaxy_Posterior_Method == 1 .or. Galaxy_Posterior_Method == 2) then
-             Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, SM_Pr_Renormalisation)
+             if(use_lookup_Renorm) then
+                Renorm = Renormalisation_Lookup(Effective_Magnification, 1)
+             else
+                Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, SM_Pr_Renormalisation)
+             end if
              if(Renorm == 0) then
                 Kappa_Renormalised_Prior = 0.e0_double
              else
                 Kappa_Renormalised_Prior = SM_Prior/Renorm
              end if
              Renorm = 0.e0_double
-          end if
-          if(Galaxy_Posterior_Method == 3) then
-             Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, M_Pr_Renormalisation) ! DO NOT ALLOW TO EXTRAPOLATE
+          elseif(Galaxy_Posterior_Method == 3) then
+             if(use_lookup_Renorm) then
+                Renorm = Renormalisation_Lookup(Effective_Magnification, 1)
+             else
+                Renorm = Linear_Interp(Effective_Magnification, MagnificationGrid, M_Pr_Renormalisation) ! DO NOT ALLOW TO EXTRAPOLATE
+             end if
              if(Renorm == 0) then
                 Kappa_Renormalised_MagPrior = 0.e0_double
              else
@@ -623,7 +706,7 @@ contains
              Renorm = 0.e0_double
           end if
 
-          if(Effective_Magnification < minval(MagnificationGrid) .or. (Effective_Magnification > maxval(MagnificationGrid))) then
+          if((use_lookup_Renorm == .false.) .and. (Effective_Magnification < minval(MagnificationGrid) .or. (Effective_Magnification > maxval(MagnificationGrid)))) then
              print *, 'Magnification outwith limits detected for galaxy:', Theta, Magnitude
              print *, 'And for lensing parameters:'
              print *, Position, Cluster_Position, Alpha, Lens_Redshift, Sigma_Crit*1.e18_double
@@ -636,7 +719,12 @@ contains
           Kappa_Renormalised_Prior =  SM_Prior
           Kappa_Renormalised_MagPrior = M_Prior
        end if
-       
+
+       !--Find where m_0 and T_0 lie on the prior grid - speed-up for interpolation
+       m0Index = 1 + int((Magnitude_0-Pr_MagGrid(1))/(Pr_MagGrid(2)-Pr_MagGrid(1))) !--Originally nint
+       T0Index = 1 + int((Theta_0-Pr_SizeGrid(1))/(Pr_SizeGrid(2)-Pr_SizeGrid(1)))
+
+
        select case(Galaxy_Posterior_Method)
        case(1) !--Size-Only--!
           !--Evaluate p_{theta_0, m_0}*p_{z|m_0} for the whole magnitude grid                                                                                                                                
@@ -694,8 +782,18 @@ contains
              print *, Magnitude_0
           end if
           
+
+          
           !--EVALUATE SIZE-MAGNITUDE LIKELIHOOD
-          if(use_lnT) then
+!!$          if(use_lnT) then
+!!$             Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Theta_0, Pr_MagGrid(m0Index-1:m0Index+1), PR_SizeGrid(T0Index-1:T0Index+1), Kappa_Renormalised_Prior(m0Index-1:m0Index+1,T0Index-1:T0Index+1))*RedshiftPDF
+!!$          else
+!!$             Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Theta_0, Pr_MagGrid(m0Index-1:m0Index+1), PR_SizeGrid(T0Index-1:T0Index+1), Kappa_Renormalised_Prior(m0Index-1:m0Index+1,T0Index-1:T0Index+1))*(1.e0_double/dsqrt(Effective_Magnification))*RedshiftPDF
+!!$          end if
+
+!!$          DEPREACTED FOR ISOALTION ROUTINE
+          !--EVALUATE SIZE-MAGNITUDE LIKELIHOOD
+           if(use_lnT) then
              Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Theta_0, Pr_MagGrid, PR_SizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*RedshiftPDF
           else
              Posterior_perGalaxy_Redshift(z) = Linear_Interp(Magnitude_0, Theta_0, Pr_MagGrid, PR_SizeGrid, Kappa_Renormalised_Prior, ExValue = 1.e-100_double)*(1.e0_double/dsqrt(Effective_Magnification))*RedshiftPDF
@@ -770,6 +868,7 @@ contains
           STOP 'DM_Profile_Variable_Posterior - Error in choosing method of finding posterior'
        END select
        
+ 
     END do !--End of Redshift Loop
     
     !-Integrate over nuisance parameters (redshift)
@@ -891,33 +990,39 @@ contains
 
     !---Construct the Renormalisation of the prior distribution as a function of magnification. Prior is allowed to be non-zeros outside the survey limits, since these limits should only apply to lensed quantities [not that survey limits here are most often used to detail user-imposed limits, such as magnitude or size cuts]. Only cuts on the prior distribution are necessary
     MagFactorGridHigher = min(1.0e0_double*(10.e0_double**((maxval(PriorMagGrid)-Survey_Magnitude_Limits(1))/2.5e0_double)), 1000.) !Allow maximum to be 100 only
-    call logscale_min(MagFactorGridLower, MagFactorGridHigher, size(MagnificationGrid), MagnificationGrid)
-    print *, 'Getting Renormalisation'
-    do i = 1, size(MagnificationGrid)
-       !MagnificationGrid(i) = MagFactorGridLower + (i-1)*((MagFactorGridHigher- MagFactorGridLower)/(size(MagnificationGrid)-1))
-       Renormalisation_Size_Limits = delens_Source_Size(MagnificationGrid(i), Survey_Size_Limits, use_lnT)
-       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(MagnificationGrid(i),Survey_Magnitude_Limits)
 
-!----TESTING----!
+    if(use_lookup_Renorm) then
+       call create_Renormalisation_Lookup((/MagFactorGridLower, MagFactorGridHigher, 1.e0_double*size(MagnificationGrid)/), Survey_Size_Limits, Survey_Magnitude_Limits, MagSample_Magnitude_Limits,  PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, use_lnT)
+    else
+       
+       call logscale_min(MagFactorGridLower, MagFactorGridHigher, size(MagnificationGrid), MagnificationGrid)
+       print *, 'Getting Renormalisation'
+       do i = 1, size(MagnificationGrid)
+          !MagnificationGrid(i) = MagFactorGridLower + (i-1)*((MagFactorGridHigher- MagFactorGridLower)/(size(MagnificationGrid)-1))
+          Renormalisation_Size_Limits = delens_Source_Size(MagnificationGrid(i), Survey_Size_Limits, use_lnT)
+          Renormalisation_Magnitude_Limits = delens_Source_Magnitude(MagnificationGrid(i),Survey_Magnitude_Limits)
+          
+          !----TESTING----!
 !!$       print *, 'Survey Size Limits:', Survey_Size_Limits, ' Mu:', MagnificationGrid(i), Renormalisation_Size_Limits
 !!$       print *, 'Survey Magnitude Limits:', Survey_Magnitude_Limits, ' Mu:', MagnificationGrid(i), Renormalisation_Magnitude_Limits
 !!$       print *, 'Grids:', minval(PriorMagGrid), maxval(PriorMagGrid), minval(PriorSizeGrid), maxval(PriorSizeGrid), sum(Survey_Renormalised_Prior)
-!---------------!
-       Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
-
-
-       !--Get Magnitufaction -dependent renomralisation for mag-prior, usually constructed from sample for which size-information is not presnt
-       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(MagnificationGrid(i), MagSample_Magnitude_Limits)
-       MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
-
-       !---- ** Get magnitude-only signal renormalisation where the sample has been chosen from the main sample using size cuts - In this case, the effect fo size limits needs to be taken into account to produce unbiased results ** ----!
+          !---------------!
+          Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
+          
+          
+          !--Get Magnitufaction -dependent renomralisation for mag-prior, usually constructed from sample for which size-information is not presnt
+          Renormalisation_Magnitude_Limits = delens_Source_Magnitude(MagnificationGrid(i), MagSample_Magnitude_Limits)
+          MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
+          
+          !---- ** Get magnitude-only signal renormalisation where the sample has been chosen from the main sample using size cuts - In this case, the effect fo size limits needs to be taken into account to produce unbiased results ** ----!
 !!$       Renormalisation_Size_Limits = delens_Source_Size(MagnificationGrid(i), MagSample_Size_Limits, use_lnT)
 !!$       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(MagnificationGrid(i), MagSample_Magnitude_Limits)
 !!$
 !!$       MagOnly_Renormalisation_by_Magnification(i) = Integrate(PriorMagGrid,  PriorSizeGrid, Survey_Renormalised_2DMagPrior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
-       !----**------------------------------------------------------------------------------------------------------------------------------------------------------------------------------**--------------!
-    end do
-    print *, 'Got Renormalisation'
+          !----**------------------------------------------------------------------------------------------------------------------------------------------------------------------------------**--------------!
+       end do
+       print *, 'Got Renormalisation'
+    end if
 
     open(unit = 53, file = trim(adjustl(Output_Prefix))//'Renormalisation_by_Magnification.dat')
     do i = 1, size(Renormalisation_by_Magnification)
@@ -944,14 +1049,106 @@ contains
 !!$    print *, 'Got Renormalised MagPrior'
     !----**------------------------------------------------------------------------------------------------------------------------------------------------------------------------------**--------------!
 
-    !---- Set up Lookup Table to p(z|m) is used
-    if(use_lookup) call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/0.e0_double, maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
+    !---- Set up Lookup Table to p(z|m) is used - on the same grid as that used to evaluate posterior
+    if(use_lookup) call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/minval(RedshiftGrid), maxval(RedshiftGrid), (RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
 
+!!$    !---- Set up Lookup Table to p(z|m) is used - on a finer same grid as that used to evaluate posterior (could be useful for interpolation, but probably uneccessary)
+!!$    if(use_lookup) call create_redshiftDistribution_LookupTable((/minval(PriorMagGrid), 1.2*maxval(PriorMagGrid), 0.01e0_double/), (/minval(RedshiftGrid), maxval(RedshiftGrid), 0.5e0_double*(RedshiftGrid(2)-RedshiftGrid(1))/), OutputDirectory = trim(adjustl(Output_Prefix)))
 
     write(*,'(A)') '________ Successfully got Precusors_______________'
     print *, ' '
 
   end subroutine get_Likelihood_Evaluation_Precursors
+
+  subroutine create_Renormalisation_Lookup(GridLimits, Survey_T_Limits, Survey_M_Limits, S2_M_Limits,  PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, Survey_Renormalised_MagPrior, use_lnSize)
+    use integration, only: integrate
+
+    real(double), intent(in):: GridLimits(3) !--Lower, Upper, nGrid
+    real(double), intent(in):: Survey_T_Limits(2), Survey_M_Limits(2), S2_M_Limits(2) 
+    real(double), intent(in):: PriorMagGrid(:), PriorSizeGrid(:), Survey_Renormalised_Prior(:,:), Survey_Renormalised_magPrior(:)
+    logical, intent(in):: use_lnSize
+
+    !--Internal
+    integer:: nM, i
+    real(double):: dM
+
+    real(double):: Renormalisation_Size_Limits(2), Renormalisation_Magnitude_Limits(2)
+
+    if(allocated(LT_Renormalisation%muGrid)) deallocate(LT_Renormalisation%muGrid)
+    if(allocated(LT_Renormalisation%S1_LT)) deallocate(LT_Renormalisation%S1_LT)
+    if(allocated(LT_Renormalisation%S2_LT)) deallocate(LT_Renormalisation%S2_LT)
+
+    nM = nint(GridLimits(3))
+
+    allocate(LT_Renormalisation%muGrid(nM)); LT_Renormalisation%muGrid = 0.e0_double
+    allocate(LT_Renormalisation%S1_LT(nM)); LT_Renormalisation%S1_LT = 0.e0_double
+    allocate(LT_Renormalisation%S2_LT(nM)); LT_Renormalisation%S2_LT = 0.e0_double
+
+    !-- Set up muGrid - This needs to be replicated in the lookup part
+    dM = log(GridLimits(2)/GridLimits(1))/(nM-1)
+    do i =0, nM-1
+       LT_Renormalisation%muGrid(i+1) = GridLimits(1)*dexp(i*dM)
+    end do
+
+    !--Construct Renormalisation Part
+    print *, 'Getting Renormalisation'
+    do i = 1, size(LT_Renormalisation%muGrid)
+       Renormalisation_Size_Limits = delens_Source_Size(LT_Renormalisation%muGrid(i), Survey_T_Limits, use_lnSize)
+       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(LT_Renormalisation%muGrid(i),Survey_M_Limits)
+
+       LT_Renormalisation%S1_LT(i) = Integrate(PriorMagGrid, PriorSizeGrid, Survey_Renormalised_Prior, 2, lim1 = Renormalisation_Magnitude_Limits, lim2 = Renormalisation_Size_Limits)
+
+       !--Get Magnification -dependent renomralisation for mag-prior, usually constructed from sample for which size-information is not presnt
+       Renormalisation_Magnitude_Limits = delens_Source_Magnitude(LT_Renormalisation%muGrid(i), S2_M_Limits)
+       LT_Renormalisation%S2_LT(i) = Integrate(PriorMagGrid, Survey_Renormalised_MagPrior, 2, lim = Renormalisation_Magnitude_Limits)
+
+    end do
+    print *, 'Got Renormalisation'
+
+
+  end subroutine create_Renormalisation_Lookup
+
+
+  function Renormalisation_Lookup(mu, sample)
+    use Interpolaters, only: Linear_Interp
+    real(double), intent(in):: mu
+    integer, intent(in):: sample
+
+    real(double):: Renormalisation_Lookup
+
+    !--Internal
+    real(double):: dM
+    integer:: nM, index
+    real(double), dimension(size(LT_Renormalisation%muGrid)):: Renorm
+
+    logical:: doInterpolate = .false.
+
+    nM = size(LT_Renormalisation%muGrid)
+    dM = log(LT_Renormalisation%muGrid(nM)/LT_Renormalisation%muGrid(1))/(nM-1)
+
+    index = 1 + int(dlog(mu/LT_Renormalisation%muGrid(1))/dM)
+
+    if(sample == 1) then
+       Renorm = LT_Renormalisation%S1_LT
+    elseif(sample == 2) then
+       Renorm =LT_Renormalisation%S2_LT
+    else
+       STOP 'Renormalisation_Lookup - Invalid Sample entered'
+    end if
+       
+    if((index > size(Renorm)) .or. (index == 0)) then
+       !-- This could be dealt with by setting to a large number
+       print *, 'Extrapolation error with lookup:', mu, minval(LT_Renormalisation%muGrid), maxval(LT_Renormalisation%muGrid)
+       STOP
+    END if
+
+    if(doInterpolate) then
+       Renormalisation_Lookup = Linear_Interp(mu, LT_Renormalisation%muGrid(index-1:index+1), Renorm(index-1:index+1))
+    else
+       Renormalisation_Lookup = Renorm(index)
+    end if
+
+  end function Renormalisation_Lookup
 
  subroutine Combine_Posteriors_Scalar(GridValue, Posteriors,  Combine_by_ln, Renormalise, Return_lnP, Combined_Posterior)
     !--Combines the posterior on a single grid value (free parameter alpha), using a call to the "normal" (vector) combined posterior subroutine                                                                  

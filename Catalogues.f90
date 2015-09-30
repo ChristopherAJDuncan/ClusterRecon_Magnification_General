@@ -109,7 +109,7 @@ module Catalogues
          Directory = 'Catalogues/'
          Filename = 'RRG+STAGES_HSTExtended.cat'
          Columns = (/-1,-1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 47, 28, 29, 35/) !--THis uses RRG Sex run for Magnitudes and Fluxs, and GALFIT RE from master where available
-         !^^-- Mags:: 5: RRG SEx
+         !^^-- Mags:: 5: RRG SEx, 41: Master Mag
 
 !!$         Filename = 'STAGES_KSBf90_RRG+COMBO.cat.WCalib.SSNRCalib.+SB'
 !!$         Columns = (/-1,1, 12, 13, 10, 11, -1, 5, -1, 3, 4, 31, 28, 29, 35/) !-Size: 31/32 RRG(TrQ/DetQ), 33/34 KSB(TrQ/DetQ), 21 SExtractor FR-!

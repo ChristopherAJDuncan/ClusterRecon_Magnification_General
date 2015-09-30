@@ -914,21 +914,18 @@ contains
     write(*,'(A)') '____Done Editing Survey Limits to reflect source catalogue____'
     print *, ' '
 
-!!$    print *, '*** Applying faint cut to Field Catalogue to enforce correcto normalisation: THIS NEEDS FIXED ***'
-!!$    !---Apply cut to prior (should thi be done??)
-!!$    print *, ' '
-!!$    print *, '_______________Applying Cuts on Prior:________________________________________'
-!!$    print *, 'This may not be necessary'
-!!$    call Cut_by_Magnitude(iBFCatt, -2000.e0_double, Survey_Magnitude_Limits(2))
-!!$    write(*,'(A)') '_______________________Applied Cuts on Prior:________________________________________'
-!!$    print *, ' '
-
     write(*,'(A)') '___________________________________Applied cuts on Source Catalogue:___________________________________'
 
     !---Split into Size-Mag and Mag-Only Catalogues
     print *, 'Splitting Source Sample'
     call split_Sample(iCatt, Catt, S2_Magnitude_Limits = magSample_Magnitude_Limits, S2_Size_Limits = magSample_Size_Limits)
     call Catalogue_Destruct(iCatt)
+!!$    !--Remove faint M-Only around A901b
+!!$    print *, 'Removing the M-Only sources around A901b:'
+!!$    print *, 'Check that aperture radius is valid::'
+!!$    call cut_Sample_aroundCluster(Catt(2), 3, 1.e0_double*(/148.9889,-9.9841/), Aperture_Radius(1))
+!!$    print *, 'Are you sure you want to do this? Press <Enter> to continue:'
+!!$    read(*,*)
     !---END source cuts
 
 

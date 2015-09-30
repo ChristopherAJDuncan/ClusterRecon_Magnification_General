@@ -1,0 +1,69 @@
+import pylab as pl
+import numpy as np
+import os
+
+Catalogue_Dir = '../Catalogues/'
+Catalogue_Flnm = 'STAGES_PSF_Corrected_byPixelSize.cat'
+Output_Dir = 'Output/PSFDeconfused/Method1/'
+getPDF = True
+
+Size_Col = 10 #9-FWHM; 10-FR; 11-KSB#
+Position_Type = 'XY' #RD - RA and Dec; XY = x and y positions
+labelStructures = True #If true, labels structures taken from Heymans 2008
+
+A901a = [149.1099,-9.9561]
+A901b = [148.9889,-9.9841]
+A902 = [149.1424,-10.1666]
+SW = [148.9101,-10.1719]
+
+Cat = np.genfromtxt(Catalogue_Dir+Catalogue_Flnm)
+
+#Set marker size according to Galaxy Size#
+Marker_Size = np.zeros(Cat.shape[0])
+Marker_Size_Max = 1.5
+for i in range(0,Marker_Size.shape[0]):
+    Marker_Size[i] = (Cat[i,Size_Col]/np.amax(Cat[:,Size_Col]))*Marker_Size_Max
+
+
+f = pl.figure()
+ax = f.add_subplot(1,1,1)
+
+if(Position_Type == 'RD'):
+    ax.set_xlabel('RA')
+    xCol = 1
+    ax.set_ylabel('Dec')
+    yCol = 2
+elif(Position_Type == 'XY'):
+    ax.set_xlabel('x')
+    xCol = 3
+    ax.set_ylabel('y')
+    yCol = 4
+
+for i in range(0,Marker_Size.shape[0]):
+    ax.plot(Cat[i,xCol], Cat[i,yCol], marker='o', markerfacecolor='black', markersize=Marker_Size[i])
+
+if(labelStructures):
+    ax.plot(A901a[0], A901a[1], marker='o', markerfacecolor='none', markersize=5.)
+    ax.plot(A901b[0], A901b[1], marker='o', markerfacecolor='none', markersize=5.)
+    ax.plot(A902[0], A902[1], marker='o', markerfacecolor='none', markersize=5.)
+    ax.plot(SW[0], SW[1], marker='o', markerfacecolor='none', markersize=5.)
+
+ax.invert_xaxis()
+ax.xaxis.set_major_formatter(pl.FormatStrFormatter('%4.1f'))
+
+if(getPDF):
+    if(Size_Col == 9):
+        output_name = 'Catalogue_Galaxy_Position_Size_FWHM.pdf'
+    elif (Size_Col == 10):
+        output_name = 'Catalogue_Galaxy_Position_Size_FR.pdf'
+    elif (Size_Col == 11):
+        output_name = 'Catalogue_Galaxy_Position_Size_KSB.pdf'
+    else:
+        print 'Error on output - Cannot Assign output name'
+        pl.show()
+
+    pl.savefig(Output_Dir+output_name,format = 'pdf',bbox_inches = 'tight')
+    print 'Produced plot output to '+Output_Dir+output_name
+    os.system('evince '+Output_Dir+output_name+' &')
+else:
+    pl.show()
